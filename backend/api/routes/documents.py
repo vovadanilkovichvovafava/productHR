@@ -149,10 +149,15 @@ def _render_template(content: str, employee: Employee, user: User) -> str:
     replacements["full_name"] = fio
     if not replacements["name"].strip():
         replacements["name"] = fio
-    result = content
-    for key, value in replacements.items():
-        result = result.replace("{{" + key + "}}", str(value))
-    return result
+    # Подстановка в ОДИН проход: значения вписывает сам сотрудник, и «{{signature}}»
+    # или «{{passport_number}}» в его адресе раньше разворачивались следующей
+    # итерацией или фронтом — сотрудник ставил место подписи куда угодно.
+    def _value(m: "re.Match") -> str:
+        key = m.group(1)
+        if key not in replacements:
+            return m.group(0)  # не наша переменная (например, {{signature}}) — как есть
+        return str(replacements[key]).replace("{{", "{ {").replace("}}", "} }")
+    return re.sub(r"\{\{([a-z_]+)\}\}", _value, content)
 
 
 # ─── Template CRUD (admin only) ─────────────────────────────
@@ -460,10 +465,14 @@ async def sign_document(
             select(DocumentTemplate).where(DocumentTemplate.id == doc.template_id)
         )
         tmpl = tmpl_result.scalar_one_or_none()
-        if tmpl and "nda" in tmpl.name.lower():
+        # По СЛОВУ в названии, а не по подстроке: «Agenda», «Calendar policy»,
+        # «Standard terms» содержат «nda» и ставили сотруднику ложный «NDA
+        # подписан» (до 27.10.2026); «Контракт» флага договора не ставил.
+        name = (tmpl.name if tmpl else "").lower()
+        if tmpl and re.search(r"(?<![a-zа-яё])nda(?![a-zа-яё])", name):
             doc.employee.nda_signed = True
             doc.employee.nda_signed_at = datetime.utcnow()
-        if tmpl and ("договор" in tmpl.name.lower() or "contract" in tmpl.name.lower()):
+        if tmpl and re.search(r"(?<![a-zа-яё])(договор|контракт|contract)", name):
             doc.employee.contract_signed = True
             doc.employee.contract_signed_at = datetime.utcnow()
 

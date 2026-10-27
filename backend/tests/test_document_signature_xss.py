@@ -55,3 +55,44 @@ async def test_png_signature_accepted_once(client, db_session, organization, org
     assert ok.status_code == 200, ok.text
     assert ok.json()["status"] == "signed"
     assert again.status_code == 400
+
+
+def test_render_does_not_expand_markers_from_employee_data():
+    from types import SimpleNamespace
+    from api.routes.documents import _render_template
+
+    emp = SimpleNamespace(position="Dev", department=None, phone="", telegram_username="",
+                          extra_data={"address": "ул. {{signature}} {{passport_number}}", "passport_number": "AB1"})
+    user = SimpleNamespace(name="Иван", email="i@x")
+
+    out = _render_template("Адрес: {{address}}. Паспорт: {{passport_number}}. Подпись: {{signature}}", emp, user)
+
+    assert out.count("{{signature}}") == 1  # только из шаблона
+    assert "AB1" in out and "Адрес: ул. { {signature} } { {passport_number} }" in out
+
+
+@pytest.mark.parametrize("title,nda,contract", [
+    ("NDA", True, False),
+    ("Соглашение NDA для разработчиков", True, False),
+    ("Agenda", False, False),
+    ("Standard terms", False, False),
+    ("Трудовой договор", False, True),
+    ("Контракт", False, True),
+])
+async def test_signing_flags_by_word(client, db_session, organization, org_member, second_user, title, nda, contract):
+    from api.models.database import DocumentTemplate
+
+    tmpl = DocumentTemplate(org_id=organization.id, name=title, content="x")
+    db_session.add(tmpl)
+    await db_session.flush()
+    doc = await _doc(db_session, organization, second_user)
+    doc.template_id = tmpl.id
+    await db_session.commit()
+
+    resp = await client.post(f"/api/documents/{doc.id}/sign", json={"signature_data": PNG}, headers=_h(second_user))
+
+    assert resp.status_code == 200, resp.text
+    emp = await db_session.get(Employee, doc.employee_id)
+    await db_session.refresh(emp)
+    assert bool(emp.nda_signed) is nda
+    assert bool(emp.contract_signed) is contract
