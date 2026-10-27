@@ -135,3 +135,35 @@ async def test_passport_read_is_audited(
     )).scalars().all()
     assert events and events[-1].user_id == admin_user.id
     assert events[-1].action == "Открыл скан паспорта сотрудника"
+
+
+async def test_other_org_employee_card_is_404(
+    client, db_session, organization, second_organization, org_owner, admin_user, regular_user,
+):
+    db_session.add(OrgMember(org_id=second_organization.id, user_id=regular_user.id, role=OrgRole.member))
+    emp = Employee(user_id=regular_user.id, org_id=second_organization.id, is_active=True)
+    db_session.add(emp)
+    await db_session.commit()
+
+    card = await client.get(f"/api/employees/{emp.id}", headers=_h(admin_user))
+    reset = await client.post(f"/api/employees/{emp.id}/reset-password", headers=_h(admin_user))
+
+    assert card.status_code == 404
+    assert reset.status_code == 404
+
+
+async def test_observer_admin_sees_employees_without_pii(
+    client, db_session, organization, staff, regular_user, second_user,
+):
+    await _as_role(db_session, organization, regular_user, OrgRole.admin, readonly=True)
+    staff.extra_data = {"first_name": "Иван", "payment_details": "2200…", "passport_number": "AB1"}
+    await db_session.commit()
+
+    listing = await client.get("/api/employees", headers=_h(regular_user))
+    card = await client.get(f"/api/employees/{staff.id}", headers=_h(regular_user))
+
+    assert listing.status_code == 200
+    row = next(r for r in listing.json() if r["id"] == staff.id)
+    assert row["extra_data"] == {"first_name": "Иван"}
+    assert card.status_code == 200
+    assert card.json()["extra_data"] == {"first_name": "Иван"}

@@ -607,14 +607,16 @@ async def list_employees(
     if not await _is_admin_or_owner(current_user, org.id, db):
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    try:
-        await sync_org_employees(org.id, db)
-        await sync_org_departments(org.id, db)
-    except Exception:
+    # Наблюдатель (сторонний отдел с флагом поверх прав админа) видит список
+    # без паспорта, адреса и реквизитов и своим просмотром ничего не пишет.
+    observer = await _is_observer(current_user, org.id, db)
+    if not observer:
         try:
-            await db.rollback()
+            await sync_org_employees(org.id, db)
+            await sync_org_departments(org.id, db)
         except Exception:
-            pass
+            logger.exception("EMPLOYEE_SYNC failed for org=%s", org.id)
+            await db.rollback()
 
     query = (
         select(Employee)
@@ -632,7 +634,8 @@ async def list_employees(
     responses = []
     for emp in employees:
         emp.vacation_days_total = _calculate_vacation_days(emp.department_start_date)
-        responses.append(_employee_to_response(emp))
+        resp = _employee_to_response(emp)
+        responses.append(_without_pii(resp, emp) if observer else resp)
     return responses
 
 
@@ -791,15 +794,7 @@ async def list_my_reports(
         .options(selectinload(Employee.user), selectinload(Employee.department))
         .where(Employee.manager_id == me.id, Employee.org_id == me.org_id, Employee.is_active == True)  # noqa: E712
     )).scalars().all()
-    out = []
-    for emp in reports:
-        resp = _employee_to_response(emp)
-        resp.extra_data = {
-            k: v for k, v in (emp.extra_data or {}).items()
-            if not any(h in k.lower() for h in _REPORT_HIDDEN_EXTRA)
-        }
-        out.append(resp)
-    return out
+    return [_without_pii(_employee_to_response(emp), emp) for emp in reports]
 
 
 @router.put("/me", response_model=EmployeeResponse)
@@ -955,24 +950,25 @@ async def get_employee(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get employee detail."""
+    """Карточка сотрудника: полная — ему самому и админу его организации; без
+    паспорта/адреса/реквизитов — руководителю и наблюдателю-админу. Остальным и
+    чужой организации — 404 (было 403: по перебору id видно, кто существует)."""
     result = await db.execute(
         select(Employee)
         .options(selectinload(Employee.user), selectinload(Employee.department))
         .where(Employee.id == employee_id)
     )
     emp = result.scalar_one_or_none()
-    if not emp:
+    access = await _employee_access(current_user, emp, db) if emp else None
+    if access is None and emp is not None and await _is_observer(current_user, emp.org_id, db) \
+            and await _is_admin_or_owner(current_user, emp.org_id, db):
+        access = "observer"
+    if access is None:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    # Access check: admin or self
-    org = await get_user_org(current_user, db)
-    if emp.user_id != current_user.id:
-        if not org or not await _is_admin_or_owner(current_user, emp.org_id, db):
-            raise HTTPException(status_code=403, detail="Access denied")
-
     emp.vacation_days_total = _calculate_vacation_days(emp.department_start_date)
-    return _employee_to_response(emp)
+    resp = _employee_to_response(emp)
+    return _without_pii(resp, emp) if access in ("manager", "observer") else resp
 
 
 class ResetPasswordResponse(BaseModel):
@@ -1030,16 +1026,10 @@ async def reset_employee_password(
     сохранил → сгенерируй заново» больше не требует повторного ввода данных.
     Пароль виден ТОЛЬКО в этом ответе (в БД лежит лишь хэш)."""
     import secrets
-    result = await db.execute(
+    await _employee_for(employee_id, current_user, db, ("admin",))  # чужой — 404
+    emp = (await db.execute(
         select(Employee).options(selectinload(Employee.user)).where(Employee.id == employee_id)
-    )
-    emp = result.scalar_one_or_none()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
-    org = await get_user_org(current_user, db)
-    if not org or not await _is_admin_or_owner(current_user, emp.org_id, db):
-        raise HTTPException(status_code=403, detail="Только администратор может выдавать пароль")
+    )).scalar_one()
     if not emp.user_id or not emp.user:
         raise HTTPException(status_code=400, detail="У сотрудника нет учётной записи")
     await _ensure_may_reset_password(current_user, emp.user, emp.org_id, db)
@@ -1569,6 +1559,24 @@ async def _employee_for(
     if access not in allowed:
         raise HTTPException(status_code=404, detail="Employee not found")
     return emp, access
+
+
+async def _is_observer(user: User, org_id: int, db: AsyncSession) -> bool:
+    """Наблюдатель (OrgMember.is_readonly) в этой организации; суперадмин — нет."""
+    if user.role == UserRole.superadmin:
+        return False
+    return bool((await db.execute(
+        select(OrgMember.is_readonly).where(OrgMember.user_id == user.id, OrgMember.org_id == org_id)
+    )).scalar_one_or_none())
+
+
+def _without_pii(resp: "EmployeeResponse", emp: Employee) -> "EmployeeResponse":
+    """Карточка без паспорта, адреса и реквизитов — для руководителя и наблюдателя."""
+    resp.extra_data = {
+        k: v for k, v in (emp.extra_data or {}).items()
+        if not any(h in k.lower() for h in _REPORT_HIDDEN_EXTRA)
+    }
+    return resp
 
 
 @router.post("/me/passport")
