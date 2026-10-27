@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { User } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import ProfileTemplate from '@/factorial/templates/ProfileTemplate';
-import { getLeaveBalance, listLeaveRequests } from '@/factorial/api/employees';
+import { getLeaveBalance, listEmployeeLeaveRequests } from '@/factorial/api/employees';
 import { buildProfileTabs } from '@/factorial/lib/routes';
 import { useProfileEmployee } from '@/factorial/lib/useProfileEmployee';
 import { formatDateRu } from '@/factorial/lib/formatDate';
@@ -53,9 +53,11 @@ export default function ProfilePlanningPage() {
     queryFn: () => getLeaveBalance(me!.id),
     enabled: !!me,
   });
+  // Заявки ЭТОГО сотрудника, все статусы. Раньше — общий список «на
+  // рассмотрении» только для админов: сотрудник своих заявок не видел вовсе.
   const { data: allReq = [] } = useQuery({
-    queryKey: ['fx', 'leave-requests'],
-    queryFn: () => listLeaveRequests(),
+    queryKey: ['fx', 'leave-requests', me?.id],
+    queryFn: () => listEmployeeLeaveRequests(me!.id),
     enabled: !!me,
   });
   const [requestOpen, setRequestOpen] = useState(false);

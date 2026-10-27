@@ -2,6 +2,8 @@ import { useState, FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createLeaveRequest } from '../api/employees';
 import DatePickerFactorial from './DatePickerFactorial';
+import { backdropClose } from '@/utils/backdropClose';
+import { getErrorDetail } from '@/utils';
 
 export default function RequestLeaveModal({ employeeId, onClose }: { employeeId: number; onClose: () => void }) {
   const qc = useQueryClient();
@@ -28,7 +30,8 @@ export default function RequestLeaveModal({ employeeId, onClose }: { employeeId:
       qc.invalidateQueries({ queryKey: ['fx'] });
       onClose();
     },
-    onError: () => setErr('Не удалось отправить запрос. Попробуйте ещё раз.'),
+    // Сервер говорит, что не так (даты, уволен, лимит) — показываем его текст.
+    onError: (error) => setErr(getErrorDetail(error, 'Не удалось отправить запрос. Попробуйте ещё раз.')),
   });
 
   const submit = (e: FormEvent) => {
@@ -42,7 +45,7 @@ export default function RequestLeaveModal({ employeeId, onClose }: { employeeId:
   };
 
   return (
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <form className="fx-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>Запросить отпуск</h3>
         <div className="fx-field">
@@ -57,11 +60,12 @@ export default function RequestLeaveModal({ employeeId, onClose }: { employeeId:
         <div className="fx-field" style={{ display: 'flex', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <label>С</label>
-            <DatePickerFactorial value={start} onChange={setStart} disablePast />
+            {/* Больничный оформляют и задним числом — прошедшие даты для него открыты. */}
+            <DatePickerFactorial value={start} onChange={setStart} disablePast={type !== 'sick'} />
           </div>
           <div style={{ flex: 1 }}>
             <label>По</label>
-            <DatePickerFactorial value={end} onChange={setEnd} disablePast />
+            <DatePickerFactorial value={end} onChange={setEnd} disablePast={type !== 'sick'} />
           </div>
         </div>
         <div className="fx-field">

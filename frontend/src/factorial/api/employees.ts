@@ -38,6 +38,14 @@ export const createLeaveRequest = (
   body: { type: string; start_date: string; end_date: string; days: number; reason?: string },
 ) => api.post<LeaveRequest>(`/employees/${id}/leave-request`, body).then((r) => r.data);
 
+// Все заявки одного сотрудника (любой статус): сам, админ его организации, руководитель.
+export const listEmployeeLeaveRequests = (id: number) =>
+  api.get<LeaveRequest[]>(`/employees/${id}/leave-requests`).then((r) => r.data);
+
+// Подчинённые текущего сотрудника («Моя команда»), без паспорта и реквизитов.
+export const listMyReports = () =>
+  api.get<Employee[]>('/employees/my-reports').then((r) => r.data);
+
 export const listLeaveRequests = (status?: string) =>
   api
     .get<LeaveRequest[]>(`/employees/leave-requests${status ? `?status_filter=${status}` : ''}`)

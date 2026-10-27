@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import CalendarTemplate, { type CalendarEvent } from '@/factorial/templates/CalendarTemplate';
 import RequestLeaveModal from '@/factorial/components/RequestLeaveModal';
 import VacationCounters from '@/factorial/components/cabinet/VacationCounters';
-import { getMyProfile, listLeaveRequests, getLeaveBalance } from '@/factorial/api/employees';
+import { getMyProfile, listEmployeeLeaveRequests, getLeaveBalance } from '@/factorial/api/employees';
 import { getAllTimeOff, type UnifiedTimeOff } from '@/factorial/api/timeoff';
 
 const TYPE_COLOR: Record<string, string> = {
@@ -44,10 +44,11 @@ export default function TimeOffPage() {
   const rows: UnifiedTimeOff[] = isAdmin ? (allQ.data as UnifiedTimeOff[]) : [];
 
   // Персональные заявки (System B) — для не-админа.
+  // Свои заявки, все статусы (раньше — админская ручка, 403 глотался в пустоту).
   const { data: myReqs = [] } = useQuery({
-    queryKey: ['fx', 'leaves', 'mine'],
-    queryFn: () => listLeaveRequests().catch(() => []),
-    enabled: !isAdmin,
+    queryKey: ['fx', 'leave-requests', me?.id],
+    queryFn: () => listEmployeeLeaveRequests(me!.id),
+    enabled: !isAdmin && !!me,
   });
 
   // Баланс текущего сотрудника для счётчиков «Доступно / Накоплено».

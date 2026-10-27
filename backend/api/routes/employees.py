@@ -768,6 +768,40 @@ async def get_my_profile(
     return _employee_to_response(emp)
 
 
+# Что руководитель видит в карточке подчинённого: без паспорта, адреса и
+# реквизитов — это персональные данные для HR-админов (см. _employee_access).
+_REPORT_HIDDEN_EXTRA = ("passport", "address", "payment", "birth", "inn", "snils")
+
+
+@router.get("/my-reports", response_model=List[EmployeeResponse])
+async def list_my_reports(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Подчинённые текущего сотрудника («Моя команда»).
+
+    Страница брала их из GET /employees — ручки только для админов, поэтому у
+    настоящего руководителя-сотрудника всегда было «Нет подчинённых».
+    """
+    me = (await db.execute(select(Employee).where(Employee.user_id == current_user.id))).scalar_one_or_none()
+    if not me:
+        return []
+    reports = (await db.execute(
+        select(Employee)
+        .options(selectinload(Employee.user), selectinload(Employee.department))
+        .where(Employee.manager_id == me.id, Employee.org_id == me.org_id, Employee.is_active == True)  # noqa: E712
+    )).scalars().all()
+    out = []
+    for emp in reports:
+        resp = _employee_to_response(emp)
+        resp.extra_data = {
+            k: v for k, v in (emp.extra_data or {}).items()
+            if not any(h in k.lower() for h in _REPORT_HIDDEN_EXTRA)
+        }
+        out.append(resp)
+    return out
+
+
 @router.put("/me", response_model=EmployeeResponse)
 async def update_my_profile(
     data: EmployeeUpdate,
@@ -1236,6 +1270,34 @@ async def get_leave_balance(
         cycle_start=cstart,
         cycle_end=cend,
     )
+
+
+@router.get("/{employee_id}/leave-requests", response_model=List[LeaveRequestResponse])
+async def list_employee_leave_requests(
+    employee_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Все заявки сотрудника (любой статус) — для его кабинета и карточки у HR.
+
+    Кабинет брал их из GET /leave-requests (только админам и только pending):
+    сотрудник видел «Запланированных отпусков нет» сразу после подачи заявки, а
+    у админа в карточке не было прошедших отпусков.
+    """
+    emp, _ = await _employee_for(employee_id, current_user, db, ("self", "admin", "manager"))
+    rows = (await db.execute(
+        select(LeaveRequest).where(LeaveRequest.employee_id == emp.id).order_by(LeaveRequest.start_date.desc())
+    )).scalars().all()
+    name = (await db.execute(select(User.name).where(User.id == emp.user_id))).scalar_one_or_none()
+    return [
+        LeaveRequestResponse(
+            id=lr.id, employee_id=lr.employee_id, type=lr.type, start_date=lr.start_date,
+            end_date=lr.end_date, days=lr.days, reason=lr.reason, status=lr.status,
+            approved_by=lr.approved_by, approved_at=lr.approved_at, created_at=lr.created_at,
+            employee_name=name,
+        )
+        for lr in rows
+    ]
 
 
 @router.post("/{employee_id}/leave-request", response_model=LeaveRequestResponse)
