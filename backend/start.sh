@@ -3,9 +3,47 @@ set -e
 
 echo "=== Starting HR-Bot Backend ==="
 
-# Run migrations
-echo "Running database migrations..."
-python -m alembic upgrade head || echo "Migrations completed or skipped"
+# Пустая база (нет таблицы users) — первый запуск нового окружения.
+# Цепочку alembic с нуля не прогоняем: первая миграция создаёт users, entities
+# и др. в СТАРОМ виде, на add_custom_roles цепочка падает, а create_all потом
+# не добавляет колонки в уже созданные таблицы. Так 27.10.2026 поднялась база
+# productHR в Saturn: SCHEMA_DRIFT по 5 таблицам, вход падал на
+# users.telegram_bind_token. Поэтому на пустой базе схему строит init_database
+# (create_all по текущим моделям), а миграции только отмечаются выполненными.
+# Живая база (users есть) идёт прежним путём — alembic upgrade head.
+FRESH_DB=$(python -c "
+import os, asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+async def is_fresh():
+    db_url = os.environ.get('DATABASE_URL', '')
+    if not db_url:
+        return False
+    if db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql+asyncpg://', 1)
+    elif db_url.startswith('postgresql://'):
+        db_url = db_url.replace('postgresql://', 'postgresql+asyncpg://', 1)
+    engine = create_async_engine(db_url)
+    try:
+        async with engine.connect() as conn:
+            res = await conn.execute(text(\"SELECT to_regclass('public.users')\"))
+            return res.scalar() is None
+    finally:
+        await engine.dispose()
+
+print('1' if asyncio.run(is_fresh()) else '0')
+" 2>/dev/null || echo 0)
+
+if [ "$FRESH_DB" = "1" ]; then
+    echo "Fresh database: building schema from models (init_database), then alembic stamp heads"
+    python -c "import asyncio; from api.db.init import init_database; asyncio.run(init_database())" \
+        || echo "init_database failed — main.py повторит его при старте"
+    python -m alembic stamp heads || echo "alembic stamp skipped"
+else
+    echo "Running database migrations..."
+    python -m alembic upgrade head || echo "Migrations completed or skipped"
+fi
 
 # Доска «Статусы»: новые значения enum-ов (Уволен/Уволился, тип файла «оффер»).
 # Отдельным блоком — намеренно: большой ensure-скрипт ниже длинный, и если он
