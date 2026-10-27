@@ -21,7 +21,7 @@ from sqlalchemy.orm import selectinload
 
 from api.database import get_db
 from api.models.database import (
-    Employee, LeaveRequest, User, Organization, Department,
+    Employee, Entity, LeaveRequest, User, Organization, Department,
     DepartmentMember, OrgUnit, OrgMember, OrgRole, Notification, EmployeeDocument, UserRole,
 )
 from api.services.auth import get_current_user, get_user_org, hash_password, revoke_all_user_tokens
@@ -926,6 +926,21 @@ async def reset_employee_password(
     return ResetPasswordResponse(temporary_password=temp_password)
 
 
+async def _ensure_org_refs(
+    org_id: int, db: AsyncSession, *,
+    department_id: Optional[int] = None, entity_id: Optional[int] = None,
+) -> None:
+    """Отдел и карточка кандидата у сотрудника — только своей организации."""
+    if department_id is not None and (await db.execute(
+        select(Department.id).where(Department.id == department_id, Department.org_id == org_id)
+    )).scalar_one_or_none() is None:
+        raise HTTPException(status_code=400, detail="Отдел не найден")
+    if entity_id is not None and (await db.execute(
+        select(Entity.id).where(Entity.id == entity_id, Entity.org_id == org_id)
+    )).scalar_one_or_none() is None:
+        raise HTTPException(status_code=400, detail="Кандидат не найден")
+
+
 @router.post("", response_model=EmployeeResponse)
 async def create_employee(
     data: EmployeeCreate,
@@ -939,11 +954,18 @@ async def create_employee(
     if not await _is_admin_or_owner(current_user, org.id, db):
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    # Check user exists
-    user_result = await db.execute(select(User).where(User.id == data.user_id))
-    target_user = user_result.scalar_one_or_none()
+    # Сотрудником делается только участник ЭТОЙ организации. Раньше хватало
+    # существования user_id: владелец любой организации заводил «сотрудника» из
+    # чужого аккаунта (хоть суперадмина), а дальше reset-password отдавал пароль
+    # от него, а увольнение гасило этот аккаунт на всей платформе (до 27.10.2026).
+    # Чужой и несуществующий отвечают одинаково — 404.
+    target_user = (await db.execute(
+        select(User).join(OrgMember, OrgMember.user_id == User.id)
+        .where(User.id == data.user_id, OrgMember.org_id == org.id)
+    )).scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
+    await _ensure_org_refs(org.id, db, department_id=data.department_id, entity_id=data.entity_id)
 
     # Check duplicate
     existing = await db.execute(select(Employee).where(Employee.user_id == data.user_id))
@@ -999,6 +1021,7 @@ async def update_employee(
         raise HTTPException(status_code=403, detail="Admin access required")
 
     update_data = data.model_dump(exclude_unset=True)
+    await _ensure_org_refs(org.id, db, department_id=update_data.get("department_id"))
     for field, value in update_data.items():
         if field == "extra_data":
             # Мёржим, чтобы частичный extra_data не затирал passport/documents и пр.
