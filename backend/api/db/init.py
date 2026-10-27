@@ -162,6 +162,10 @@ async def init_database():
         logger.error(f"Error creating tables: {e}")
         return
 
+    # Step 3.-1: недостающие колонки — по моделям, сразу после create_all,
+    # чтобы разовые шаги ниже уже работали с полными таблицами.
+    await add_missing_model_columns(engine)
+
     # Step 3.0: КОЛОНКИ, БЕЗ КОТОРЫХ ПАДАЕТ ВЕСЬ HR-РАЗДЕЛ.
     # create_all выше заводит только недостающие ТАБЛИЦЫ, колонки в уже
     # существующих он не добавляет. 28.09.2026 из-за этого лёг прод: код с
@@ -627,6 +631,75 @@ async def init_database():
     await check_schema_drift(engine)
 
     logger.info("=== DATABASE INITIALIZATION COMPLETE ===")
+
+
+async def add_missing_model_columns(engine) -> list[str]:
+    """Добавить в существующие таблицы колонки моделей, которых нет в базе.
+
+    27.10.2026: база productHR в Saturn поднялась старой цепочкой alembic —
+    users, entities и др. создались в старом виде, а create_all колонки в уже
+    созданные таблицы не добавляет. SCHEMA_DRIFT насчитал 5 таблиц, вход падал
+    на users.telegram_bind_token. Теперь недостающее дописывается само.
+
+    Только ADD COLUMN IF NOT EXISTS: ничего не удаляем, не переименовываем и не
+    меняем тип существующих колонок. Каждая колонка — своей транзакцией
+    (run_migration), упавшая не мешает соседям. NOT NULL без значения по
+    умолчанию на непустой таблице не встанет — тогда колонка добавляется без
+    NOT NULL (модель всё равно пишет значение сама). Маркер SCHEMA_HEAL.
+    """
+    from sqlalchemy.schema import CreateColumn
+    from api.models.database import Base
+
+    added: list[str] = []
+    try:
+        async with engine.begin() as conn:
+            rows = await conn.execute(text(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public'"
+            ))
+            actual: dict[str, set[str]] = {}
+            for table_name, column_name in rows:
+                actual.setdefault(table_name, set()).add(column_name)
+    except Exception as e:
+        logger.warning(f"SCHEMA_HEAL: не удалось прочитать колонки базы: {e}")
+        return added
+
+    for table in Base.metadata.sorted_tables:
+        have = actual.get(table.name)
+        if not have:
+            continue
+        for column in table.columns:
+            if column.name in have:
+                continue
+            column_sql = str(CreateColumn(column).compile(dialect=engine.dialect))
+            references = ""
+            for fk in column.foreign_keys:
+                target = fk.column
+                references = f' REFERENCES "{target.table.name}" ("{target.name}")'
+                if fk.ondelete:
+                    references += f" ON DELETE {fk.ondelete}"
+            base_sql = f'ALTER TABLE "{table.name}" ADD COLUMN IF NOT EXISTS {column_sql}{references}'
+            description = f"SCHEMA_HEAL {table.name}.{column.name}"
+            ok = await run_migration(engine, base_sql, description)
+            if not ok and " NOT NULL" in column_sql:
+                ok = await run_migration(
+                    engine, base_sql.replace(" NOT NULL", "", 1),
+                    f"{description} (без NOT NULL)",
+                )
+            if not ok:
+                continue
+            added.append(f"{table.name}.{column.name}")
+            if column.index:
+                await run_migration(
+                    engine,
+                    f'CREATE INDEX IF NOT EXISTS "ix_{table.name}_{column.name}" '
+                    f'ON "{table.name}" ("{column.name}")',
+                    f"{description} index",
+                )
+
+    if added:
+        logger.warning("SCHEMA_HEAL: добавлены колонки — %s", ", ".join(added))
+    return added
 
 
 async def check_schema_drift(engine) -> list[str]:
