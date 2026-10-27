@@ -3,13 +3,8 @@ import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { bulkImportEmployees, downloadEmployeeTemplate } from '@/factorial/api/employees';
 import type { BulkImportResult } from '@/factorial/api/types';
-
-const COLS: Record<string, string> = {
-  'Email': 'email', 'Фамилия': 'last_name', 'Имя': 'first_name', 'Отчество': 'middle_name',
-  'Должность': 'position', 'Телефон': 'phone', 'Telegram': 'telegram_username',
-  'Дата начала (ДД.ММ.ГГГГ)': 'department_start_date', 'Адрес': 'address',
-  'Паспорт №': 'passport_number', 'Способ выплаты': 'payment_method', 'Реквизиты': 'payment_details',
-};
+import { normalizeImportRows } from '@/factorial/lib/employeeImport';
+import { getErrorDetail } from '@/utils';
 
 export default function EmployeesImportPage() {
   const navigate = useNavigate();
@@ -17,22 +12,37 @@ export default function EmployeesImportPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  const downloadTemplate = () => { void downloadEmployeeTemplate(); };
+  const downloadTemplate = async () => {
+    setErr('');
+    try {
+      await downloadEmployeeTemplate();
+    } catch (e) {
+      setErr(getErrorDetail(e, 'Не удалось скачать шаблон.'));
+    }
+  };
 
   const onFile = async (file: File) => {
     setBusy(true); setResult(null); setErr('');
+    let rows: Record<string, string>[];
     try {
       const wb = XLSX.read(await file.arrayBuffer());
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
-      const rows = raw.map((r) => {
-        const o: Record<string, unknown> = {};
-        for (const [col, key] of Object.entries(COLS)) if (r[col] !== undefined && r[col] !== '') o[key] = r[col];
-        return o;
-      }).filter((o) => o.email);
-      setResult(await bulkImportEmployees(rows));
+      rows = normalizeImportRows(raw);
     } catch {
-      setErr('Не удалось импортировать файл. Проверьте формат (xlsx) и колонки.');
+      setErr('Не удалось прочитать файл. Нужен xlsx из шаблона.');
+      setBusy(false);
+      return;
+    }
+    if (!rows.length) {
+      setErr('В файле нет строк с Email. Проверьте, что заголовки совпадают с шаблоном.');
+      setBusy(false);
+      return;
+    }
+    try {
+      setResult(await bulkImportEmployees(rows));
+    } catch (e) {
+      setErr(getErrorDetail(e, 'Сервер не принял файл. Проверьте колонки и попробуйте ещё раз.'));
     } finally {
       setBusy(false);
     }
