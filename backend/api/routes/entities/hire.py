@@ -25,10 +25,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from ...database import get_db
 from ...models.database import (
     Department, Entity, EntityStatus, Employee, User, UserRole, OrgMember, OrgRole,
-    VacancyApplication, STATUS_SYNC_MAP,
 )
 from ...services.auth import get_current_user, get_user_org, hash_password
-from ...services.stage_transitions import record_transition
+from ...services.stage_change import log_moves
 
 router = APIRouter()
 
@@ -200,33 +199,19 @@ async def hire_entity(
     if data.position:
         ent.position = data.position
 
-    # Синхронизируем воронку с новым статусом. Раньше «Взять в штат» меняло только
-    # entity.status → transferred, но НЕ трогало заявку — из-за этого «Все кандидаты»
-    # показывали «Перешёл в отдел», а канбан воронки держал человека на прежнем этапе
-    # (напр. «Практика»): рассинхрон entity.status ↔ vacancy_application.stage.
-    # Двигаем все заявки кандидата на transferred и пишем в историю — как обычная
-    # смена этапа (applications.py).
-    target_stage = STATUS_SYNC_MAP.get(EntityStatus.transferred)
-    if target_stage is not None:
-        apps = (await db.execute(
-            select(VacancyApplication).where(VacancyApplication.entity_id == ent.id)
-        )).scalars().all()
-        for app in apps:
-            if app.stage != target_stage:
-                old_stage = app.stage
-                app.stage = target_stage
-                app.last_stage_change_at = datetime.utcnow()
-                await record_transition(
-                    db=db,
-                    application_id=app.id,
-                    entity_id=ent.id,
-                    from_stage=old_stage.value if old_stage else None,
-                    to_stage=target_stage.value,
-                    changed_by_id=current_user.id,
-                    comment="Оформлен в штат — «Перешёл в отдел»",
-                )
+    # Воронка: «актуальная» открытая заявка переводится в «Перешёл в отдел» через
+    # общий move_application — то же правило, что у доски «Штат». До 27.10.2026
+    # здесь был свой цикл: двигались ВСЕ заявки кандидата, включая «Отказ» в
+    # других воронках и заявки удалённых воронок, мимо stage_change (без
+    # STAGE_CHANGE и порядка в колонке).
+    from ..staff_board import _move_board_application
+    moves = await _move_board_application(
+        db, ent, EntityStatus.transferred, current_user,
+        comment="Оформлен в штат — «Перешёл в отдел»",
+    )
 
     await db.commit()
+    log_moves(moves, current_user, via="hire")
     await db.refresh(emp)
 
     return HireResponse(employee_id=emp.id, user_existed=user_existed)

@@ -111,3 +111,28 @@ async def test_existing_org_member_is_hired(
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["user_existed"] is True
+
+
+async def test_hire_moves_only_primary_open_application(
+    client, db_session, organization, org_owner, admin_user,
+):
+    """«Взять в штат» двигает актуальную заявку, а отказ в другой воронке не трогает."""
+    from api.models.database import ApplicationStage, Vacancy, VacancyApplication
+
+    ent = Entity(org_id=organization.id, type=EntityType.candidate, name="Кандидат", status=EntityStatus.probation)
+    v1 = Vacancy(org_id=organization.id, title="Трафик", created_by=admin_user.id)
+    v2 = Vacancy(org_id=organization.id, title="SEO", created_by=admin_user.id)
+    db_session.add_all([ent, v1, v2])
+    await db_session.flush()
+    live = VacancyApplication(vacancy_id=v1.id, entity_id=ent.id, stage=ApplicationStage.probation)
+    rejected = VacancyApplication(vacancy_id=v2.id, entity_id=ent.id, stage=ApplicationStage.rejected)
+    db_session.add_all([live, rejected])
+    await db_session.commit()
+
+    resp = await client.post(f"/api/entities/{ent.id}/hire", json={"email": "staff.new@x.com"}, headers=_h(admin_user))
+
+    assert resp.status_code == 200, resp.text
+    await db_session.refresh(live)
+    await db_session.refresh(rejected)
+    assert live.stage == ApplicationStage.transferred
+    assert rejected.stage == ApplicationStage.rejected

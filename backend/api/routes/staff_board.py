@@ -359,6 +359,7 @@ class BoardAssignee(BaseModel):
 
 async def _move_board_application(
     db: AsyncSession, entity: Entity, new_status: EntityStatus, user: User,
+    comment: Optional[str] = None,
 ) -> list:
     """Довести заявки человека до статуса доски. Возвращает переводы (StageMove).
 
@@ -409,7 +410,7 @@ async def _move_board_application(
     else:
         primary = pick_primary_application(list(open_apps))
         targets = [primary] if primary is not None else []
-        comment = "Перевод с доски «Штат»"
+        comment = comment or "Перевод с доски «Штат»"
 
     moves = []
     for app in targets:
