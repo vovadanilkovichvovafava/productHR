@@ -12,6 +12,7 @@ import {
 import { ArrowUpDown } from 'lucide-react';
 import { cn } from '@/factorial/lib/cn';
 import PaginationBar from './PaginationBar';
+import { matchesSearch } from '@/factorial/lib/tableSelection';
 
 interface DataTableProps<T> {
   columns: ColumnDef<T, any>[];
@@ -46,11 +47,7 @@ export default function DataTable<T>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    globalFilterFn: (row, _columnId, filterValue) => {
-      if (!filterValue || !searchKey) return true;
-      const val = (row.original as any)[searchKey];
-      return String(val ?? '').toLowerCase().includes(String(filterValue).toLowerCase());
-    },
+    globalFilterFn: (row, _columnId, filterValue) => matchesSearch(row.original, searchKey, filterValue as string),
   });
 
   const total = table.getFilteredRowModel().rows.length;

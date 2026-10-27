@@ -21,10 +21,19 @@ interface TableTemplateProps<T> {
   data: T[];
   pageSize?: number;
   emptyState?: Parameters<typeof EmptyState>[0];
+  /** Управляемый поиск: страница сама держит строку, чтобы знать, какие строки
+   *  видны (например, для «Выбрать всех»). Без них поиск живёт внутри. */
+  search?: string;
+  onSearchChange?: (v: string) => void;
+  /** Данные не загрузились — показываем причину вместо «Ничего не найдено». */
+  error?: ReactNode;
+  loading?: boolean;
 }
 
 export default function TableTemplate<T>(props: TableTemplateProps<T>) {
-  const [search, setSearch] = useState('');
+  const [innerSearch, setInnerSearch] = useState('');
+  const search = props.search ?? innerSearch;
+  const setSearch = props.onSearchChange ?? setInnerSearch;
   const {
     breadcrumb,
     titleIcon,
@@ -37,6 +46,8 @@ export default function TableTemplate<T>(props: TableTemplateProps<T>) {
     data,
     pageSize = 8,
     emptyState,
+    error,
+    loading,
   } = props;
 
   return (
@@ -68,7 +79,15 @@ export default function TableTemplate<T>(props: TableTemplateProps<T>) {
             onSearchChange={toolbar.searchKey ? setSearch : undefined}
           />
         )}
-        {data.length === 0 && emptyState ? (
+        {error ? (
+          <div className="bg-white rounded-card shadow-card border border-border px-4 py-10 text-center text-fx-sm" style={{ color: '#B91C1C' }}>
+            {error}
+          </div>
+        ) : loading ? (
+          <div className="bg-white rounded-card shadow-card border border-border px-4 py-10 text-center text-fx-sm text-text-muted">
+            Загрузка…
+          </div>
+        ) : data.length === 0 && emptyState ? (
           <EmptyState {...emptyState} />
         ) : (
           <DataTable
