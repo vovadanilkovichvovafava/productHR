@@ -609,7 +609,14 @@ async def import_template(
     org = await get_user_org(current_user, db)
     if not org:
         raise HTTPException(status_code=403, detail="No organization")
-    is_hr = await _is_admin_or_owner(current_user, org.id, db)
+    # Заполненная выгрузка — паспорта и реквизиты всех сотрудников: наблюдателю
+    # (сторонний отдел, флаг поверх прав админа) она не положена.
+    is_hr = await _is_admin_or_owner(current_user, org.id, db) and not (
+        current_user.role != UserRole.superadmin
+        and (await db.execute(
+            select(OrgMember.is_readonly).where(OrgMember.user_id == current_user.id, OrgMember.org_id == org.id)
+        )).scalar_one_or_none()
+    )
 
     rows = []
     with_example = False
@@ -639,6 +646,8 @@ async def import_template(
         select(Employee.position).where(Employee.org_id == org.id, Employee.position.isnot(None))
     )).all()]
     data = _build_template_xlsx(rows=rows, positions=positions, with_example=with_example)
+    if rows:
+        logger.info("PII_ACCESS export: %s строк(и) by user=%s org=%s", len(rows), current_user.id, org.id)
     fname = "employees.xlsx" if (filled or id) else "template_employees.xlsx"
     return Response(
         content=data,
@@ -1340,25 +1349,44 @@ def _employee_docs_dir():
     return d
 
 
-async def _can_view_employee(current_user: User, emp: Employee, db: AsyncSession) -> bool:
-    """True если current_user может смотреть карточку emp: сам сотрудник, admin/owner, HR, или его руководитель.
-    ВАЖНО: сверь набор с существующим passport-эндпоинтом get_employee_passport и приведи к тому же."""
+async def _employee_access(current_user: User, emp: Employee, db: AsyncSession) -> Optional[str]:
+    """Кем ``current_user`` приходится сотруднику ``emp`` для персональных данных.
+
+    ``self`` — это он сам; ``admin`` — owner/admin ЕГО организации (или
+    суперадмин); ``manager`` — непосредственный руководитель в той же
+    организации; ``None`` — доступа нет. Рекрутёр (hr) и наблюдатель сюда не
+    входят: до 27.10.2026 любой hr — в том числе со скоупом «вижу только
+    Трафик» — скачивал паспорта и документы всех сотрудников и удалял их.
+    """
     if emp.user_id == current_user.id:
-        return True
-    if await _is_admin_or_owner(current_user, emp.org_id, db):
-        return True
-    org = await get_user_org(current_user, db)
-    if org:
-        member = (await db.execute(
-            select(OrgMember).where(OrgMember.user_id == current_user.id, OrgMember.org_id == emp.org_id)
-        )).scalar_one_or_none()
-        if member and member.role == OrgRole.hr:
-            return True
+        return "self"
+    if current_user.role == UserRole.superadmin:
+        return "admin"
+    member = (await db.execute(
+        select(OrgMember).where(OrgMember.user_id == current_user.id, OrgMember.org_id == emp.org_id)
+    )).scalar_one_or_none()
+    if member is None or member.is_readonly:
+        return None
+    if member.role in (OrgRole.owner, OrgRole.admin):
+        return "admin"
     if emp.manager_id:
-        mgr = (await db.execute(select(Employee).where(Employee.id == emp.manager_id))).scalar_one_or_none()
+        mgr = (await db.execute(
+            select(Employee).where(Employee.id == emp.manager_id, Employee.org_id == emp.org_id)
+        )).scalar_one_or_none()
         if mgr and mgr.user_id == current_user.id:
-            return True
-    return False
+            return "manager"
+    return None
+
+
+async def _employee_for(
+    employee_id: int, current_user: User, db: AsyncSession, allowed: tuple,
+) -> tuple:
+    """Сотрудник + роль смотрящего; нет такого или нет доступа — одинаково 404."""
+    emp = (await db.execute(select(Employee).where(Employee.id == employee_id))).scalar_one_or_none()
+    access = await _employee_access(current_user, emp, db) if emp else None
+    if access not in allowed:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return emp, access
 
 
 @router.post("/me/passport")
@@ -1427,29 +1455,10 @@ async def get_employee_passport(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Скан паспорта сотрудника. Доступ: сам сотрудник, HR (owner/admin/hr) или его руководитель."""
+    """Скан паспорта сотрудника: сам сотрудник или owner/admin его организации."""
     import base64 as _b64
-    emp = (await db.execute(select(Employee).where(Employee.id == employee_id))).scalar_one_or_none()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
-    allowed = emp.user_id == current_user.id  # сам сотрудник
-    if not allowed and await _is_admin_or_owner(current_user, emp.org_id, db):
-        allowed = True  # superadmin / owner / admin (HR-админ)
-    if not allowed:
-        om = (await db.execute(
-            select(OrgMember).where(OrgMember.user_id == current_user.id, OrgMember.org_id == emp.org_id)
-        )).scalar_one_or_none()
-        if om and om.role == OrgRole.hr:
-            allowed = True  # HR-рекрутер
-    if not allowed and emp.manager_id:
-        mgr = (await db.execute(
-            select(Employee).where(Employee.id == emp.manager_id, Employee.org_id == emp.org_id)
-        )).scalar_one_or_none()
-        if mgr and mgr.user_id == current_user.id:
-            allowed = True  # непосредственный руководитель
-    if not allowed:
-        raise HTTPException(status_code=403, detail="Нет доступа к паспорту этого сотрудника")
+    emp, access = await _employee_for(employee_id, current_user, db, ("self", "admin"))
+    logger.info("PII_ACCESS passport: employee=%s by user=%s (%s)", emp.id, current_user.id, access)
 
     meta = (emp.extra_data or {}).get("passport")
     # Сначала зашифрованные байты из БД (переживают редеплой), затем диск (legacy).
@@ -1469,30 +1478,18 @@ async def get_employee_passport(
 
 @router.get("/{employee_id}/documents")
 async def list_employee_documents(employee_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    emp = (await db.execute(select(Employee).where(Employee.id == employee_id))).scalar_one_or_none()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    if not await _can_view_employee(current_user, emp, db):
-        raise HTTPException(status_code=403, detail="Access denied")
+    emp, _ = await _employee_for(employee_id, current_user, db, ("self", "admin", "manager"))
     docs = (await db.execute(
         select(EmployeeDocument).where(EmployeeDocument.employee_id == employee_id).order_by(EmployeeDocument.uploaded_at.desc())
     )).scalars().all()
-    return [{"id": d.id, "filename": d.filename, "content_type": d.content_type, "size": d.size, "uploaded_at": d.uploaded_at} for d in docs]
+    return [{"id": d.id, "filename": d.filename, "content_type": d.content_type, "size": d.size,
+             "uploaded_at": d.uploaded_at, "uploaded_by": d.uploaded_by} for d in docs]
 
 
 @router.post("/{employee_id}/documents")
 async def upload_employee_document(employee_id: int, request: Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    emp = (await db.execute(select(Employee).where(Employee.id == employee_id))).scalar_one_or_none()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    # загрузка: сам сотрудник или HR/admin/owner
-    allowed = emp.user_id == current_user.id or await _is_admin_or_owner(current_user, emp.org_id, db)
-    if not allowed:
-        org = await get_user_org(current_user, db)
-        member = (await db.execute(select(OrgMember).where(OrgMember.user_id == current_user.id, OrgMember.org_id == emp.org_id))).scalar_one_or_none() if org else None
-        allowed = bool(member and member.role == OrgRole.hr)
-    if not allowed:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # загрузка: сам сотрудник или owner/admin его организации
+    emp, _ = await _employee_for(employee_id, current_user, db, ("self", "admin"))
     clen = request.headers.get("content-length")
     if clen and clen.isdigit() and int(clen) > 12 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Файл больше 10 МБ")
@@ -1513,11 +1510,7 @@ async def upload_employee_document(employee_id: int, request: Request, file: Upl
 
 @router.get("/{employee_id}/documents/{doc_id}")
 async def download_employee_document(employee_id: int, doc_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    emp = (await db.execute(select(Employee).where(Employee.id == employee_id))).scalar_one_or_none()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    if not await _can_view_employee(current_user, emp, db):
-        raise HTTPException(status_code=403, detail="Access denied")
+    emp, access = await _employee_for(employee_id, current_user, db, ("self", "admin", "manager"))
     doc = (await db.execute(select(EmployeeDocument).where(EmployeeDocument.id == doc_id, EmployeeDocument.employee_id == employee_id))).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1531,24 +1524,20 @@ async def download_employee_document(employee_id: int, doc_id: int, db: AsyncSes
     if enc is None:
         raise HTTPException(status_code=410, detail="Файл недоступен (потерян при обновлении сервера)")
     data = _passport_fernet().decrypt(enc)
+    logger.info("PII_ACCESS document: employee=%s doc=%s by user=%s (%s)", emp.id, doc.id, current_user.id, access)
     return {"filename": doc.filename, "content_type": doc.content_type, "data_base64": base64.b64encode(data).decode()}
 
 
 @router.delete("/{employee_id}/documents/{doc_id}")
 async def delete_employee_document(employee_id: int, doc_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    emp = (await db.execute(select(Employee).where(Employee.id == employee_id))).scalar_one_or_none()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
+    emp, access = await _employee_for(employee_id, current_user, db, ("self", "admin", "manager"))
     doc = (await db.execute(select(EmployeeDocument).where(EmployeeDocument.id == doc_id, EmployeeDocument.employee_id == employee_id))).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    allowed = doc.uploaded_by == current_user.id or await _is_admin_or_owner(current_user, emp.org_id, db)
-    if not allowed:
-        org = await get_user_org(current_user, db)
-        member = (await db.execute(select(OrgMember).where(OrgMember.user_id == current_user.id, OrgMember.org_id == emp.org_id))).scalar_one_or_none() if org else None
-        allowed = bool(member and member.role == OrgRole.hr)
-    if not allowed:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Удаляет админ или сам сотрудник — только то, что загрузил сам (договор,
+    # положенный админом, сотрудник не стирает; руководитель не удаляет ничего).
+    if not (access == "admin" or (access == "self" and doc.uploaded_by == current_user.id)):
+        raise HTTPException(status_code=403, detail="Удалить этот документ может только администратор")
     from pathlib import Path
     Path(doc.path).unlink(missing_ok=True)
     await db.delete(doc)

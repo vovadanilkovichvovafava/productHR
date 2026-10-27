@@ -90,6 +90,10 @@ ACTIONS: Tuple[Tuple[str, str, str], ...] = (
     ("PATCH", rf"/api/staff-board/rows/{_N}", "Доска «Штат»: изменил строку"),
     (".*", r"/api/staff-board/placements.*", "Доска «Штат»: отдел человека"),
     (".*", r"/api/staff-board/.*", "Доска «Штат»"),
+    # Персональные данные сотрудников («Управление»)
+    ("GET", rf"/api/employees/({_N}|me)/passport", "Открыл скан паспорта сотрудника"),
+    ("GET", rf"/api/employees/{_N}/documents/{_N}", "Скачал документ сотрудника"),
+    ("GET", r"/api/employees/import-template", "Выгрузил данные сотрудников в Excel"),
     # Вход
     ("POST", r"/api/auth/login", "Вход"),
     ("POST", r"/api/auth/logout", "Выход"),
@@ -111,7 +115,19 @@ _ID_PATTERNS = {
 }
 
 
+# Чтения персональных данных сотрудников (скан паспорта, файлы документов,
+# выгрузка с паспортами) пишем в журнал, хоть это и GET: «кто открыл паспорт»
+# должно быть видно (до 27.10.2026 эти просмотры не оставляли следа).
+PII_READ_PATHS = (
+    re.compile(r"^/api/employees/(\d+|me)/passport$"),
+    re.compile(r"^/api/employees/\d+/documents/\d+$"),
+    re.compile(r"^/api/employees/import-template$"),
+)
+
+
 def should_audit(method: str, path: str) -> bool:
+    if method == "GET" and any(p.match(path) for p in PII_READ_PATHS):
+        return True
     if method in ("GET", "HEAD", "OPTIONS") or not path.startswith("/api/"):
         return False
     return not any(p.match(path) for p in SKIP_PATHS)
