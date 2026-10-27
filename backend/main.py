@@ -18,9 +18,9 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
 
 from api.limiter import limiter
-from api.routes import auth, users, chats, messages, criteria, ai, stats, entities, calls, entity_ai, organizations, sharing, departments, invitations, realtime, admin, external_links, vacancies, parser, search, scoring, currency, parse_jobs, interns
+from api.routes import auth, users, criteria, entities, entity_ai, organizations, sharing, departments, invitations, realtime, admin, vacancies, parser, search, scoring, currency, parse_jobs
 from api.routes import email_templates, analytics, exports, projects, saturn, notifications, project_statuses, forms, employees, documents, org_units, magic_button, pen
-from api.routes import candidate_search, extension_download, prometheus_invite, csv_import
+from api.routes import candidate_search, extension_download, csv_import
 from api.routes import candidate_database, recruiter_workspaces
 from api.routes import timeoff, blockers, tags, integrations, staff_board, access_hub, audit, ai_usage
 from api.config import settings
@@ -47,44 +47,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Каталога может не быть (локальный запуск, старый образ) — тогда просто не
 # монтируем, веб-версия от этого не зависит.
 MINIAPP_DIR = Path(__file__).parent / "static-miniapp"
-
-
-async def cleanup_deleted_chats_task():
-    """Periodically clean up chats deleted more than 30 days ago."""
-    from api.database import AsyncSessionLocal
-    from api.routes.chats import cleanup_old_deleted_chats
-
-    # Wait for database to initialize
-    await asyncio.sleep(60)
-
-    while True:
-        try:
-            async with AsyncSessionLocal() as db:
-                count = await cleanup_old_deleted_chats(db)
-                if count > 0:
-                    logger.info(f"Cleaned up {count} old deleted chats")
-        except Exception as e:
-            logger.error(f"Error cleaning up deleted chats: {e}")
-
-        # Run every 24 hours
-        await asyncio.sleep(86400)
-
-
-async def prometheus_auto_export_task():
-    """Periodically auto-export 'Принят' interns to contacts (every 5 min)."""
-    from api.routes.interns import run_prometheus_auto_export
-
-    # Wait for database and services to initialize
-    await asyncio.sleep(120)
-
-    while True:
-        try:
-            await run_prometheus_auto_export()
-        except Exception as e:
-            logger.error(f"Prometheus auto-export task error: {e}")
-
-        # Run every 5 minutes
-        await asyncio.sleep(300)
 
 
 async def saturn_auto_sync_task():
@@ -509,12 +471,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Start cleanup task for old deleted chats
-    cleanup_task = asyncio.create_task(cleanup_deleted_chats_task())
-
-    # Start Prometheus auto-export task (every 5 min)
-    auto_export_task = asyncio.create_task(prometheus_auto_export_task())
-
     # Start Saturn auto-sync task (every 5 min)
     saturn_sync_task = None
     if os.environ.get("SATURN_API_TOKEN"):
@@ -561,10 +517,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if bot_task:
         bot_task.cancel()
-    if cleanup_task:
-        cleanup_task.cancel()
-    if auto_export_task:
-        auto_export_task.cancel()
     if saturn_sync_task:
         saturn_sync_task.cancel()
     if employee_reminders_bg_task:
@@ -637,13 +589,8 @@ app.add_middleware(CorrelationMiddleware)
 # Routes
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
-app.include_router(chats.router, prefix="/api/chats", tags=["chats"])
-app.include_router(messages.router, prefix="/api/chats", tags=["messages"])
 app.include_router(criteria.router, prefix="/api/criteria", tags=["criteria"])
-app.include_router(ai.router, prefix="/api/chats", tags=["ai"])
-app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(entities.router, prefix="/api/entities", tags=["entities"])
-app.include_router(calls.router, prefix="/api/calls", tags=["calls"])
 app.include_router(entity_ai.router, prefix="/api", tags=["entity-ai"])
 app.include_router(organizations.router, prefix="/api/organizations", tags=["organizations"])
 app.include_router(sharing.router, prefix="/api/sharing", tags=["sharing"])
@@ -657,7 +604,6 @@ app.include_router(access_hub.router, prefix="/api/access-hub", tags=["access-hu
 app.include_router(invitations.router, prefix="/api/invitations", tags=["invitations"])
 app.include_router(realtime.router, tags=["realtime"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(external_links.router, tags=["external-links"])
 
 # Register vacancies and parser routers with explicit logging
 logger.info("=== REGISTERING VACANCIES ROUTER ===")
@@ -730,14 +676,6 @@ try:
     logger.info("Exports router registered successfully at /api/exports")
 except Exception as e:
     logger.error(f"FAILED to register exports router: {e}")
-    raise
-
-logger.info("=== REGISTERING INTERNS ROUTER ===")
-try:
-    app.include_router(interns.router, prefix="/api/interns", tags=["interns"])
-    logger.info("Interns router registered successfully at /api/interns")
-except Exception as e:
-    logger.error(f"FAILED to register interns router: {e}")
     raise
 
 logger.info("=== REGISTERING PROJECTS ROUTER ===")
@@ -837,7 +775,6 @@ except Exception as e:
     raise
 
 app.include_router(extension_download.router, prefix="/api/extension", tags=["extension"])
-app.include_router(prometheus_invite.router, prefix="/api/prometheus", tags=["prometheus"])
 app.include_router(candidate_database.router, prefix="/api/candidate-database", tags=["candidate-database"])
 
 logger.info("=== REGISTERING RECRUITER WORKSPACES ROUTER ===")

@@ -9,11 +9,9 @@ import {
   LogOut,
   Menu,
   X,
-  Phone,
   Shield,
   UserCog,
   Briefcase,
-  GraduationCap,
   FolderKanban,
   ListTodo,
   Cloud,
@@ -29,7 +27,6 @@ import {
   AlertTriangle,
   ClipboardList,
   UserCheck,
-  MessageSquare,
   Volume2,
   VolumeX,
   Building2,
@@ -224,14 +221,6 @@ function getBlockForPath(path: string): string | null {
     path.startsWith("/blockers")
   ) {
     return "projects";
-  }
-  if (
-    path.startsWith("/chats") ||
-    path.startsWith("/interns") ||
-    path.startsWith("/practice-list") ||
-    path.startsWith("/calls")
-  ) {
-    return "practice";
   }
   if (
     [
@@ -696,27 +685,6 @@ export default function Layout() {
         id: "projects",
         label: "Проекты",
         items: projectItems,
-      });
-    }
-
-    // PRACTICE block — superadmin, owner, HR Admin (org_role='admin'),
-    // и любой член депта 'Практика'. Содержит: чаты с AI/критериями/отчётами,
-    // Созвоны, Практиканты, База практикантов.
-    const isHrAdmin = isPlatformAdmin || user?.org_role === "admin";
-    if (isHrAdmin || isPracticeMember) {
-      sections.push({
-        id: "practice",
-        label: "Практика",
-        items: [
-          { path: "/chats", icon: MessageSquare, label: "Чаты" },
-          { path: "/calls", icon: Phone, label: "Созвоны" },
-          { path: "/interns", icon: GraduationCap, label: "Практиканты" },
-          {
-            path: "/practice-list",
-            icon: ClipboardList,
-            label: "База практикантов",
-          },
-        ],
       });
     }
 

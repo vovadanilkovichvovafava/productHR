@@ -69,9 +69,7 @@ function lazyWithRetry<T extends ComponentType<any>>(
 // Lazy loaded pages - only loaded when navigated to
 // Using lazyWithRetry to handle chunk loading failures gracefully
 const DashboardPage = lazyWithRetry(() => import('@/pages/DashboardPage'));
-const ChatsPage = lazyWithRetry(() => import('@/pages/ChatsPage'));
 // ContactsPage lazy import removed — /contacts routes now redirect to /all-candidates
-const CallsPage = lazyWithRetry(() => import('@/pages/CallsPage'));
 const TrashPage = lazyWithRetry(() => import('@/pages/TrashPage'));
 const UsersPage = lazyWithRetry(() => import('@/pages/UsersPage'));
 const DepartmentsPage = lazyWithRetry(() => import('@/pages/DepartmentsPage'));
@@ -79,8 +77,6 @@ const SettingsPage = lazyWithRetry(() => import('@/pages/SettingsPage'));
 const AdminSimulatorPage = lazyWithRetry(() => import('@/pages/AdminSimulatorPage'));
 const VacanciesPage = lazyWithRetry(() => import('@/pages/VacanciesPage'));
 const EmailTemplatesPage = lazyWithRetry(() => import('@/pages/EmailTemplatesPage'));
-const InternsPage = lazyWithRetry(() => import('@/pages/InternsPage'));
-const InternStatsPage = lazyWithRetry(() => import('@/pages/InternStatsPage'));
 const ExportsPage = lazyWithRetry(() => import('@/pages/ExportsPage'));
 const ProjectsPage = lazyWithRetry(() => import('@/pages/ProjectsPage'));
 const ProjectDetailPage = lazyWithRetry(() => import('@/pages/ProjectDetailPage'));
@@ -93,7 +89,6 @@ const AllCandidatesPage = lazyWithRetry(() => import('@/pages/AllCandidatesPage'
 const StatusesPage = lazyWithRetry(() => import('@/pages/StatusesPage'));
 const RecruiterFunnelsPage = lazyWithRetry(() => import('@/pages/RecruiterFunnelsPage'));
 const RecruiterWorkspacePage = lazyWithRetry(() => import('@/pages/RecruiterWorkspacePage'));
-const PracticeListPage = lazyWithRetry(() => import('@/pages/PracticeListPage'));
 const FormBuilderPage = lazyWithRetry(() => import('@/pages/FormBuilderPage'));
 const DeletedCandidatesPage = lazyWithRetry(() => import('@/pages/DeletedCandidatesPage'));
 const AuditLogPage = lazyWithRetry(() => import('@/pages/AuditLogPage'));
@@ -209,8 +204,6 @@ export default function App() {
           <Route path="projects/:projectId" element={<Suspense fallback={<PageLoader />}><ProjectDetailPage /></Suspense>} />
           <Route path="projects/:projectId/tasks/:taskId" element={<Suspense fallback={<PageLoader />}><ProjectTaskPage /></Suspense>} />
           <Route path="all-tasks" element={<Suspense fallback={<PageLoader />}><AllTasksPage /></Suspense>} />
-          <Route path="chats" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin', 'practice']}><ChatsPage /></RoleRoute></Suspense>} />
-          <Route path="chats/:chatId" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin', 'practice']}><ChatsPage /></RoleRoute></Suspense>} />
           <Route path="team" element={<Suspense fallback={<PageLoader />}><TeamPage /></Suspense>} />
           <Route path="timeoff" element={<Suspense fallback={<PageLoader />}><TimeOffPage /></Suspense>} />
           <Route path="blockers" element={<Suspense fallback={<PageLoader />}><BlockersPage /></Suspense>} />
@@ -225,13 +218,8 @@ export default function App() {
           <Route path="vacancies/:vacancyId" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr']}><VacanciesPage /></RoleRoute></Suspense>} />
           <Route path="contacts" element={<Navigate to="/all-candidates" replace />} />
           <Route path="contacts/:entityId" element={<Navigate to="/all-candidates" replace />} />
-          <Route path="calls" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin', 'practice']}><CallsPage /></RoleRoute></Suspense>} />
-          <Route path="calls/:callId" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin', 'practice']}><CallsPage /></RoleRoute></Suspense>} />
           <Route path="my-funnels" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr']}><RecruiterFunnelsPage /></RoleRoute></Suspense>} />
           <Route path="workspaces" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr']}><RecruiterWorkspacePage /></RoleRoute></Suspense>} />
-<Route path="interns" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin', 'practice']}><InternsPage /></RoleRoute></Suspense>} />
-          <Route path="interns/:internId/stats" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin', 'practice']}><InternStatsPage /></RoleRoute></Suspense>} />
-          <Route path="practice-list" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin', 'practice']}><PracticeListPage /></RoleRoute></Suspense>} />
           <Route path="deleted-candidates" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr']}><DeletedCandidatesPage /></RoleRoute></Suspense>} />
           <Route path="audit-log" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin']}><AuditLogPage /></RoleRoute></Suspense>} />
           <Route path="ai-usage" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin']}><AiUsagePage /></RoleRoute></Suspense>} />
