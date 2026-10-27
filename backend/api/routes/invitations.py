@@ -49,9 +49,13 @@ async def require_invitation_access(
     from ..services.auth import get_user_org_role
     org_role = await get_user_org_role(user, org.id, db)
 
-    # Get user's department memberships with roles
+    # Get user's department memberships with roles — только отделы ЭТОЙ
+    # организации: лид отдела в другой организации раньше получал право
+    # приглашать сюда (до 27.10.2026).
     result = await db.execute(
-        select(DepartmentMember).where(DepartmentMember.user_id == user.id)
+        select(DepartmentMember)
+        .join(Department, Department.id == DepartmentMember.department_id)
+        .where(DepartmentMember.user_id == user.id, Department.org_id == org.id)
     )
     dept_memberships = result.scalars().all()
     user_dept_ids = {dm.department_id for dm in dept_memberships}
@@ -149,6 +153,36 @@ async def create_invitation(
     # Only owner can create owner/admin invites
     if invite_org_role in ("owner", "admin") and role != "owner":
         raise HTTPException(status_code=403, detail="Only owner can create owner/admin invitations")
+    # Роль рекрутёра (доступ к кандидатам и воронкам) выдают только owner/admin.
+    # Лид отдела с ролью «сотрудник» раньше приглашал с org_role=hr и сам
+    # принимал приглашение на второй адрес — получал HR-доступ (до 27.10.2026).
+    if invite_org_role == OrgRole.hr and role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Роль рекрутёра выдаёт только администратор")
+
+    # Роль в отделе — не выше своей: лид выдаёт саб-админа и сотрудника,
+    # саб-админ — только сотрудника; owner/admin — любую.
+    if role not in ("owner", "admin") and data.department_ids:
+        my_dept_roles = {
+            dm.department_id: dm.role for dm in (await db.execute(
+                select(DepartmentMember).where(DepartmentMember.user_id == user.id)
+            )).scalars().all()
+        }
+        rank = {DeptRole.member: 0, DeptRole.sub_admin: 1, DeptRole.lead: 2}
+        for dept_info in data.department_ids:
+            try:
+                wanted = DeptRole(dept_info.get("role", "member"))
+            except ValueError:
+                wanted = DeptRole.member
+            mine = my_dept_roles.get(dept_info.get("id"))
+            if mine is None or rank[wanted] >= rank.get(mine, 0):
+                raise HTTPException(status_code=403, detail="Нельзя выдать в отделе роль не ниже своей")
+
+    # Срок: бессрочное приглашение — только владельцу; иначе 1–90 дней
+    # (огромное число давало OverflowError → 500, отрицательное — бессрочное).
+    if data.expires_in_days < 0 or data.expires_in_days > 90:
+        raise HTTPException(status_code=400, detail="Срок приглашения — от 1 до 90 дней")
+    if data.expires_in_days == 0 and role != "owner":
+        raise HTTPException(status_code=403, detail="Бессрочное приглашение может создать только владелец")
 
     # Check if email is already a member of the organization
     if data.email:
@@ -393,6 +427,10 @@ async def accept_invitation(
             # Add existing user to org
             new_user = existing_user
         else:
+            if len(data.password or "") < 8:
+                raise HTTPException(status_code=400, detail="Пароль должен быть не короче 8 символов")
+            if not (data.name or "").strip() or len(data.name) > 255:
+                raise HTTPException(status_code=400, detail="Укажите имя (до 255 символов)")
             # Create new user with member role (access determined by OrgRole and DeptRole)
             new_user = User(
                 email=data.email,
