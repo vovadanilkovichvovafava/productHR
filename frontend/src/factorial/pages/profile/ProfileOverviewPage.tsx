@@ -8,7 +8,7 @@ import { getErrorDetail } from '@/utils';
 import ProfileTemplate from '@/factorial/templates/ProfileTemplate';
 import { getLeaveBalance, downloadEmployeeTemplate, resetEmployeePassword } from '@/factorial/api/employees';
 import { myDocuments, employeeDocuments } from '@/factorial/api/documents';
-import { formatDateRu, formatTenure } from '@/factorial/lib/formatDate';
+import { formatStartWithTenure } from '@/factorial/lib/formatDate';
 import { buildProfileTabs } from '@/factorial/lib/routes';
 import { useProfileEmployee } from '@/factorial/lib/useProfileEmployee';
 import LeaveBalanceCard from '@/factorial/components/cabinet/LeaveBalanceCard';
@@ -107,7 +107,7 @@ export default function ProfileOverviewPage() {
 
   const email = me?.user_email || '—';
   const startRaw = me?.department_start_date || me?.practice_start_date || me?.created_at || null;
-  const startStr = startRaw ? `${formatDateRu(startRaw)} (${formatTenure(startRaw)} назад)` : '—';
+  const startStr = startRaw ? formatStartWithTenure(startRaw) : '—';
 
   return (
     <ProfileTemplate

@@ -1,3 +1,5 @@
+import { parseDate } from './formatDate';
+
 function plural(n: number, one: string, few: string, many: string): string {
   const m10 = n % 10;
   const m100 = n % 100;
@@ -8,14 +10,14 @@ function plural(n: number, one: string, few: string, many: string): string {
 
 export function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—';
-  const d = new Date(iso);
+  const d = parseDate(iso);
   if (isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
 export function fmtShort(iso: string | null | undefined): string {
   if (!iso) return '—';
-  const d = new Date(iso);
+  const d = parseDate(iso);
   if (isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('ru-RU');
 }
@@ -23,7 +25,7 @@ export function fmtShort(iso: string | null | undefined): string {
 /** Human tenure since a start date, e.g. "1 год 2 месяца". */
 export function tenure(iso: string | null | undefined): string {
   if (!iso) return '—';
-  const start = new Date(iso);
+  const start = parseDate(iso);
   const now = new Date();
   if (isNaN(start.getTime()) || now < start) return '—';
   let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
@@ -51,6 +53,6 @@ export function initials(name: string | null | undefined): string {
 /** True if the date is in the past (probation completed / anniversary passed). */
 export function isPast(iso: string | null | undefined): boolean {
   if (!iso) return false;
-  const d = new Date(iso);
+  const d = parseDate(iso);
   return !isNaN(d.getTime()) && d.getTime() < Date.now();
 }

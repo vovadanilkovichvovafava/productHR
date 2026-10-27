@@ -1,5 +1,5 @@
 import type { Employee } from '@/factorial/api/types';
-import { formatDateRu, formatTenure } from '@/factorial/lib/formatDate';
+import { formatDateRu, formatStartWithTenure } from '@/factorial/lib/formatDate';
 import DetailRow from './DetailRow';
 
 /** Карточка договора над списком документов («Соглашения»). Данные — из
@@ -10,7 +10,7 @@ export default function ContractCard({ employee: me }: { employee?: Employee | n
   if (!me) return null; // нет карточки сотрудника — показываем только список документов
 
   const startRaw = me.department_start_date || me.practice_start_date || me.created_at || null;
-  const start = startRaw ? `${formatDateRu(startRaw)} (${formatTenure(startRaw)} назад)` : '—';
+  const start = startRaw ? formatStartWithTenure(startRaw) : '—';
   const fmt = (d?: string | null) => (d ? formatDateRu(d) : '—');
   const sign = (ok?: boolean, at?: string | null) => (ok ? `Подписан${at ? ' · ' + formatDateRu(at) : ''}` : 'Не подписан');
 
