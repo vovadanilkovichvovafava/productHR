@@ -166,6 +166,10 @@ async def init_database():
     # чтобы разовые шаги ниже уже работали с полными таблицами.
     await add_missing_model_columns(engine)
 
+    # Step 3.-0.5: разовый SQL из переменной BOOTSTRAP_SQL_GZ_B64 (перенос
+    # данных в новую базу, когда прямого доступа к ней нет).
+    await run_bootstrap_sql_once(engine)
+
     # Step 3.0: КОЛОНКИ, БЕЗ КОТОРЫХ ПАДАЕТ ВЕСЬ HR-РАЗДЕЛ.
     # create_all выше заводит только недостающие ТАБЛИЦЫ, колонки в уже
     # существующих он не добавляет. 28.09.2026 из-за этого лёг прод: код с
@@ -700,6 +704,66 @@ async def add_missing_model_columns(engine) -> list[str]:
     if added:
         logger.warning("SCHEMA_HEAL: добавлены колонки — %s", ", ".join(added))
     return added
+
+
+async def run_bootstrap_sql_once(engine) -> bool:
+    """Выполнить один раз SQL из переменной окружения BOOTSTRAP_SQL_GZ_B64.
+
+    27.10.2026: в базу productHR в Saturn нужно было перенести HR-команду из
+    Энцеладуса, а прямого доступа к базе у роли нет — Reset, Upload и терминал
+    Saturn молча отказывают. Доступ есть у самого бэкенда, поэтому SQL
+    (gzip + base64) кладётся в переменную, бэкенд выполняет его при старте.
+
+    Защиты:
+    - одна транзакция: упал любой оператор — не применилось ничего;
+    - отметка в data_migration_marks по хешу SQL: тот же SQL второй раз не
+      выполняется, переменную после переноса удаляют;
+    - отказ, если в базе уже есть кандидаты (entities): это не первичное
+      наполнение, и затирать живые данные такой SQL не должен.
+    Маркер BOOTSTRAP_SQL.
+    """
+    import base64
+    import gzip
+    import hashlib
+    import os
+
+    raw = os.environ.get("BOOTSTRAP_SQL_GZ_B64", "").strip()
+    if not raw:
+        return False
+    try:
+        sql = gzip.decompress(base64.b64decode(raw)).decode("utf-8")
+    except Exception as e:
+        logger.error(f"BOOTSTRAP_SQL: не удалось раскодировать переменную: {e}")
+        return False
+
+    key = "bootstrap_sql:" + hashlib.sha256(sql.encode("utf-8")).hexdigest()[:16]
+    try:
+        async with engine.begin() as conn:
+            done = await conn.execute(
+                text("SELECT 1 FROM data_migration_marks WHERE key = :key"), {"key": key}
+            )
+            if done.first():
+                logger.info("BOOTSTRAP_SQL: %s уже выполнен, переменную можно удалить", key)
+                return False
+            candidates = (await conn.execute(text("SELECT count(*) FROM entities"))).scalar()
+            if candidates:
+                logger.error(
+                    "BOOTSTRAP_SQL: отказ — в базе уже %s кандидатов, разовый SQL "
+                    "только для пустой базы", candidates,
+                )
+                return False
+            raw_conn = await conn.get_raw_connection()
+            await raw_conn.driver_connection.execute(sql)
+            await conn.execute(
+                text("INSERT INTO data_migration_marks (key, applied_at) VALUES (:key, now())"),
+                {"key": key},
+            )
+    except Exception as e:
+        logger.error(f"BOOTSTRAP_SQL: не выполнен, ничего не изменилось: {e}")
+        return False
+
+    logger.warning("BOOTSTRAP_SQL: %s выполнен, переменную BOOTSTRAP_SQL_GZ_B64 можно удалить", key)
+    return True
 
 
 async def check_schema_drift(engine) -> list[str]:
