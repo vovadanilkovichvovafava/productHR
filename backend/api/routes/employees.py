@@ -14,7 +14,7 @@ from typing import Optional, List
 
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -188,13 +188,18 @@ def _build_template_xlsx(rows: list, positions: list, with_example: bool) -> byt
 
 # ─── Pydantic schemas ───────────────────────────────────────
 
+# Длины — как у колонок в базе: длиннее Postgres отвечал «value too long», и
+# весь запрос (или весь импорт) падал с 500.
+_POS_MAX, _PHONE_MAX, _TG_MAX = 300, 50, 200
+
+
 class EmployeeCreate(BaseModel):
     user_id: int
     entity_id: Optional[int] = None
     department_id: Optional[int] = None
-    position: Optional[str] = None
-    phone: Optional[str] = None
-    telegram_username: Optional[str] = None
+    position: Optional[str] = Field(None, max_length=_POS_MAX)
+    phone: Optional[str] = Field(None, max_length=_PHONE_MAX)
+    telegram_username: Optional[str] = Field(None, max_length=_TG_MAX)
     practice_start_date: Optional[datetime] = None
     department_start_date: Optional[datetime] = None
     nda_signed: bool = False
@@ -204,9 +209,9 @@ class EmployeeCreate(BaseModel):
 
 class EmployeeUpdate(BaseModel):
     department_id: Optional[int] = None
-    position: Optional[str] = None
-    phone: Optional[str] = None
-    telegram_username: Optional[str] = None
+    position: Optional[str] = Field(None, max_length=_POS_MAX)
+    phone: Optional[str] = Field(None, max_length=_PHONE_MAX)
+    telegram_username: Optional[str] = Field(None, max_length=_TG_MAX)
     practice_start_date: Optional[datetime] = None
     department_start_date: Optional[datetime] = None
     nda_signed: Optional[bool] = None
@@ -326,18 +331,18 @@ class ReminderItem(BaseModel):
 
 
 class BulkImportRow(BaseModel):
-    email: str
-    last_name: Optional[str] = None
-    first_name: Optional[str] = None
-    middle_name: Optional[str] = None
-    position: Optional[str] = None
-    phone: Optional[str] = None
-    telegram_username: Optional[str] = None
-    department_start_date: Optional[str] = None  # ISO или ДД.ММ.ГГГГ
-    address: Optional[str] = None
-    passport_number: Optional[str] = None
-    payment_method: Optional[str] = None
-    payment_details: Optional[str] = None
+    email: str = Field(..., max_length=255)
+    last_name: Optional[str] = Field(None, max_length=200)
+    first_name: Optional[str] = Field(None, max_length=200)
+    middle_name: Optional[str] = Field(None, max_length=200)
+    position: Optional[str] = Field(None, max_length=_POS_MAX)
+    phone: Optional[str] = Field(None, max_length=_PHONE_MAX)
+    telegram_username: Optional[str] = Field(None, max_length=_TG_MAX)
+    department_start_date: Optional[str] = Field(None, max_length=40)  # ISO или ДД.ММ.ГГГГ
+    address: Optional[str] = Field(None, max_length=1000)
+    passport_number: Optional[str] = Field(None, max_length=100)
+    payment_method: Optional[str] = Field(None, max_length=100)
+    payment_details: Optional[str] = Field(None, max_length=1000)
 
 
 # ─── Helpers ─────────────────────────────────────────────────
@@ -384,11 +389,38 @@ def _parse_import_date(s: str) -> Optional[datetime]:
     return None
 
 
+# Ключи extra_data, которые пишет только сервер: метаданные скана паспорта
+# ставит ручка загрузки. Через PUT их подменяли (имя файла и content_type
+# попадали в окно просмотра без экранирования).
+_SERVER_EXTRA_KEYS = {"passport"}
+_EXTRA_MAX_KEYS = 100
+_EXTRA_MAX_VALUE = 4000          # символов на значение (в JSON)
+_EXTRA_MAX_TOTAL = 64 * 1024     # весь extra_data
+
+
 def _merge_extra(base: Optional[dict], patch: Optional[dict]) -> dict:
-    """Слить patch поверх base, сохранив все прочие ключи base (passport, documents и т.п.)."""
+    """Слить patch поверх base, сохранив все прочие ключи base (passport, documents и т.п.).
+
+    ``null`` в patch удаляет ключ — так форма стирает поле (раньше пустое поле
+    не уходило вовсе, и после «Сохранить» старое значение возвращалось).
+    Служебные ключи не трогаются; новое значение — до 4000 символов в JSON,
+    весь extra_data — до 64 КБ.
+    """
+    import json as _json
     out = dict(base or {})
     for k, v in (patch or {}).items():
+        if not isinstance(k, str) or k in _SERVER_EXTRA_KEYS:
+            continue
+        if v is None:
+            out.pop(k, None)
+            continue
+        if v == out.get(k):
+            continue  # форма присылает весь extra_data — неизменённое не проверяем
+        if len(_json.dumps(v, ensure_ascii=False, default=str)) > _EXTRA_MAX_VALUE:
+            raise HTTPException(status_code=400, detail=f"Поле «{k}» слишком длинное")
         out[k] = v
+    if len(out) > _EXTRA_MAX_KEYS or len(_json.dumps(out, ensure_ascii=False, default=str)) > _EXTRA_MAX_TOTAL:
+        raise HTTPException(status_code=400, detail="Слишком много дополнительных данных")
     return out
 
 
@@ -600,6 +632,8 @@ async def bulk_import_employees(
     org = await get_user_org(current_user, db)
     if not org or not await _is_admin_or_owner(current_user, org.id, db):
         raise HTTPException(status_code=403, detail="Admin access required")
+    if len(rows) > 2000:
+        raise HTTPException(status_code=400, detail="За раз — не больше 2000 строк")
     updated, skipped, errors = 0, [], []
     for r in rows:
         email = (r.email or "").strip().lower()
@@ -740,7 +774,9 @@ async def update_my_profile(
     # Self-service: сотрудник правит ТОЛЬКО безопасные поля. Привилегированные
     # (счётчики отпусков/больничных, подписание NDA/договора и их даты, дата
     # найма, отдел) меняет только HR через PUT /{employee_id}.
-    SELF_EDITABLE = {"position", "phone", "telegram_username", "extra_data"}
+    # Должность ставит HR: сотрудник переписывал её себе сам, и она уходила в
+    # выгрузки и оргсхему (до 27.10.2026).
+    SELF_EDITABLE = {"phone", "telegram_username", "extra_data"}
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         if field not in SELF_EDITABLE:
@@ -1356,10 +1392,17 @@ async def reject_leave_request(
 
 # ─── Secure passport upload (employee self-service, encrypted at rest) ───
 
+_PASSPORT_MAX_BYTES = 8 * 1024 * 1024
+# Скан паспорта — картинка или PDF. Тип из запроса шёл в окно просмотра как
+# есть, и `image/x" onerror="…` выполнялся у того, кто открыл скан.
+_PASSPORT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"}
+
+
 class PassportUpload(BaseModel):
-    filename: str
-    content_type: str
-    data_base64: str  # raw file bytes, base64-encoded (no data: prefix)
+    filename: str = Field(..., max_length=255)
+    content_type: str = Field(..., max_length=100)
+    # raw file bytes, base64-encoded (no data: prefix); длина — до декодирования
+    data_base64: str = Field(..., max_length=(_PASSPORT_MAX_BYTES * 4) // 3 + 8)
 
 
 def _passport_fernet():
@@ -1437,11 +1480,16 @@ async def upload_my_passport(
     emp = result.scalar_one_or_none()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee profile not found")
+    content_type = (payload.content_type or "").strip().lower()
+    if content_type not in _PASSPORT_TYPES:
+        raise HTTPException(status_code=400, detail="Скан паспорта — картинка (JPG, PNG, WEBP, HEIC) или PDF")
     try:
-        raw = _b64.b64decode(payload.data_base64)
+        raw = _b64.b64decode(payload.data_base64, validate=True)
     except Exception:
         raise HTTPException(status_code=400, detail="Некорректные данные файла")
-    if len(raw) > 8 * 1024 * 1024:
+    if not raw:
+        raise HTTPException(status_code=400, detail="Пустой файл")
+    if len(raw) > _PASSPORT_MAX_BYTES:
         raise HTTPException(status_code=400, detail="Файл слишком большой (макс 8 МБ)")
     enc = _passport_fernet().encrypt(raw)
     _passport_path(emp.id).write_bytes(enc)
@@ -1449,8 +1497,8 @@ async def upload_my_passport(
     emp.passport_data = enc
     extra = dict(emp.extra_data or {})
     extra["passport"] = {
-        "filename": payload.filename,
-        "content_type": payload.content_type,
+        "filename": payload.filename.replace("/", "_").replace("\\", "_").strip() or "passport",
+        "content_type": content_type,
         "uploaded_at": datetime.utcnow().isoformat(),
     }
     emp.extra_data = extra
@@ -1529,6 +1577,12 @@ async def upload_employee_document(employee_id: int, request: Request, file: Upl
     clen = request.headers.get("content-length")
     if clen and clen.isdigit() and int(clen) > 12 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Файл больше 10 МБ")
+    # Каждый файл лежит и в базе, и на диске — без предела сотрудник раздувал базу.
+    doc_count = (await db.execute(
+        select(func.count(EmployeeDocument.id)).where(EmployeeDocument.employee_id == employee_id)
+    )).scalar() or 0
+    if doc_count >= 100:
+        raise HTTPException(status_code=400, detail="У сотрудника уже 100 документов — удалите лишние")
     raw = await file.read()
     if len(raw) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Файл больше 10 МБ")
@@ -1537,7 +1591,7 @@ async def upload_employee_document(employee_id: int, request: Request, file: Upl
     fpath = _employee_docs_dir() / f"{employee_id}_{uuid.uuid4().hex}.enc"
     fpath.write_bytes(enc)
     # file_data (bytea) переживает редеплой; диск остаётся legacy-fallback.
-    doc = EmployeeDocument(employee_id=employee_id, filename=file.filename, content_type=file.content_type, size=len(raw), path=str(fpath), file_data=enc, uploaded_by=current_user.id)
+    doc = EmployeeDocument(employee_id=employee_id, filename=(file.filename or "file")[:255], content_type=(file.content_type or "")[:100] or None, size=len(raw), path=str(fpath), file_data=enc, uploaded_by=current_user.id)
     db.add(doc)
     await db.commit()
     await db.refresh(doc)

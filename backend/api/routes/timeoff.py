@@ -1,10 +1,12 @@
 """Time-off / vacation request endpoints."""
 import html
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Literal, Optional
+
 from pydantic import BaseModel
 
 from ..models.database import TimeOffRequest, User, OrgMember, OrgRole, Employee, LeaveRequest, Department, DepartmentMember, DeptRole, UserRole
@@ -178,7 +180,8 @@ class TimeOffCreate(BaseModel):
 
 @router.get("")
 async def list_timeoff(
-    status: str | None = None,
+    # Значение не из enum на Postgres давало «invalid input value for enum» → 500.
+    status: Optional[Literal["pending", "approved", "rejected"]] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -271,7 +274,7 @@ async def timeoff_calendar(
 
 @router.get("/all", response_model=list[TimeOffAllItem])
 async def list_all_timeoff(
-    status: str | None = None,
+    status: Optional[Literal["pending", "approved", "rejected"]] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -379,7 +382,7 @@ async def approve_timeoff(
 @router.post("/{request_id}/reject")
 async def reject_timeoff(
     request_id: int,
-    reason: str | None = None,
+    reason: Optional[str] = Query(None, max_length=1000),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

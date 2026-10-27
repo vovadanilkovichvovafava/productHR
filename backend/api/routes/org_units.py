@@ -1,7 +1,7 @@
 """HR org-chart units — изолировано от рекрутинговых departments/прав."""
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,14 +13,15 @@ router = APIRouter()
 
 
 class OrgUnitCreate(BaseModel):
-    name: str
+    # Длины — как у колонок (String(255)/String(20)): длиннее давало 500.
+    name: str = Field(..., min_length=1, max_length=255)
     parent_id: Optional[int] = None
-    color: Optional[str] = None
+    color: Optional[str] = Field(None, max_length=20)
 
 
 class OrgUnitUpdate(BaseModel):
-    name: Optional[str] = None
-    color: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    color: Optional[str] = Field(None, max_length=20)
     sort_order: Optional[int] = None
     parent_id: Optional[int] = None
 
