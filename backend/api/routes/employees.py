@@ -22,9 +22,9 @@ from sqlalchemy.orm import selectinload
 from api.database import get_db
 from api.models.database import (
     Employee, LeaveRequest, User, Organization, Department,
-    DepartmentMember, OrgUnit, OrgMember, OrgRole, Notification, EmployeeDocument,
+    DepartmentMember, OrgUnit, OrgMember, OrgRole, Notification, EmployeeDocument, UserRole,
 )
-from api.services.auth import get_current_user, get_user_org, hash_password
+from api.services.auth import get_current_user, get_user_org, hash_password, revoke_all_user_tokens
 
 logger = logging.getLogger("hr-analyzer.employees")
 
@@ -850,6 +850,43 @@ class ResetPasswordResponse(BaseModel):
     temporary_password: str
 
 
+# Чем выше роль в организации, тем больше число: сбрасывать пароль можно только
+# тому, кто строго НИЖЕ (админ — рекрутёру и сотруднику, владелец — ещё и админу).
+_ORG_ROLE_RANK = {OrgRole.member: 0, OrgRole.hr: 1, OrgRole.admin: 2, OrgRole.owner: 3}
+
+
+async def _ensure_may_reset_password(actor: User, target: User, org_id: int, db: AsyncSession) -> None:
+    """Можно ли ``actor`` выдать ``target`` новый пароль из «Сотрудников».
+
+    Пароль — от ВСЕГО аккаунта на платформе, а проверялась одна роль админа в
+    организации сотрудника. Так админ (через автосинк у суперадмина и владельца
+    тоже есть запись Employee) сбрасывал пароль владельцу и суперадмину и
+    получал их аккаунты (до 27.10.2026).
+    """
+    if actor.role == UserRole.superadmin:
+        return
+    if target.id == actor.id:
+        raise HTTPException(status_code=400, detail="Свой пароль меняется в профиле")
+    if target.role == UserRole.superadmin:
+        raise HTTPException(status_code=403, detail="Пароль этого пользователя здесь не сбрасывается")
+
+    memberships = (await db.execute(
+        select(OrgMember.org_id, OrgMember.role).where(OrgMember.user_id == target.id)
+    )).all()
+    if any(m_org != org_id for m_org, _ in memberships):
+        # Аккаунт состоит и в другой организации — пароль у него общий.
+        raise HTTPException(
+            status_code=403,
+            detail="Сотрудник состоит и в другой организации — пароль сбрасывает администратор платформы",
+        )
+    actor_role = (await db.execute(
+        select(OrgMember.role).where(OrgMember.user_id == actor.id, OrgMember.org_id == org_id)
+    )).scalar_one_or_none()
+    target_role = next((r for m_org, r in memberships if m_org == org_id), OrgRole.member)
+    if actor_role is None or _ORG_ROLE_RANK.get(target_role, 0) >= _ORG_ROLE_RANK.get(actor_role, 0):
+        raise HTTPException(status_code=403, detail="Нельзя сбросить пароль сотруднику с такой же или более высокой ролью")
+
+
 @router.post("/{employee_id}/reset-password", response_model=ResetPasswordResponse)
 async def reset_employee_password(
     employee_id: int,
@@ -876,9 +913,15 @@ async def reset_employee_password(
         raise HTTPException(status_code=403, detail="Только администратор может выдавать пароль")
     if not emp.user_id or not emp.user:
         raise HTTPException(status_code=400, detail="У сотрудника нет учётной записи")
+    await _ensure_may_reset_password(current_user, emp.user, emp.org_id, db)
 
     temp_password = secrets.token_urlsafe(8)
     emp.user.password_hash = hash_password(temp_password)
+    # Как в сбросе суперадмина: временный пароль меняют при входе, а прежние
+    # сессии и refresh-токены гаснут — иначе захват был бы незаметен владельцу.
+    emp.user.must_change_password = True
+    emp.user.token_version = (emp.user.token_version or 0) + 1
+    await revoke_all_user_tokens(db, emp.user.id)
     await db.commit()
     return ResetPasswordResponse(temporary_password=temp_password)
 
