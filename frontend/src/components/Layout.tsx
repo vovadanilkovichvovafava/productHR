@@ -13,8 +13,6 @@ import {
   UserCog,
   Briefcase,
   FolderKanban,
-  ListTodo,
-  Cloud,
   GitBranch,
   Bell,
   Check,
@@ -24,7 +22,6 @@ import {
   UserPlus,
   ChevronDown,
   Calendar,
-  AlertTriangle,
   ClipboardList,
   UserCheck,
   Volume2,
@@ -62,12 +59,10 @@ import toast from "react-hot-toast";
 const pathToTourAttribute: Record<string, string> = {
   "/all-candidates": "candidates-link",
   "/analytics": "analytics-link",
-  "/chats": "chats-link",
   "/dashboard": "dashboard-link",
 };
 
 const BLOCK_ICONS: Record<string, LucideIcon> = {
-  projects: FolderKanban,
   hr: Briefcase,
   admin: Shield,
 };
@@ -211,16 +206,10 @@ function FABButton({
 }
 
 function getBlockForPath(path: string): string | null {
-  if (
-    path.startsWith("/projects") ||
-    path.startsWith("/all-tasks") ||
-    path.startsWith("/saturn") ||
-    path.startsWith("/team") ||
-    path.startsWith("/dept-manager") ||
-    path.startsWith("/timeoff") ||
-    path.startsWith("/blockers")
-  ) {
-    return "projects";
+  // Отпуска и руководитель отдела — кадровые экраны, живут в блоке HR
+  // (в Энцеладусе висели в «Проектах», которых в продукте нет).
+  if (path.startsWith("/dept-manager") || path.startsWith("/timeoff")) {
+    return "hr";
   }
   if (
     [
@@ -639,65 +628,23 @@ export default function Layout() {
     const sections: NavSection[] = [];
 
     // Роли:
-    // - platform admin (superadmin/owner) — видит ВСЁ
-    // - HR-блок (org_role=admin/hr, но НЕ платформенный админ) — видит ТОЛЬКО HR
-    // - обычные сотрудники (member) — видят только Проекты (ограниченные)
-    // - Practice-only (член депта 'Практика', не платформ-админ) — видит ТОЛЬКО блок Практика
+    // - platform admin (superadmin/owner) — видит всё;
+    // - HR (org_role=admin/hr) и наблюдатель — блок HR;
+    // - обычный сотрудник — в меню ничего, его место — кабинет кадров
+    //   (/factorial, см. utils/landing.ts).
+    // Блоков «Проекты» и «Практика» в продукте нет (вырезаны при выделении
+    // из Энцеладуса, 27.10.2026).
     const isPlatformAdmin =
       user?.role === "superadmin" || user?.org_role === "owner";
-    const isHrOnly =
-      !isPlatformAdmin &&
-      (user?.org_role === "admin" || user?.org_role === "hr");
-    const isPracticeMember = (user?.department_names || []).some(
-      (n) => n.trim().toLowerCase() === "практика",
-    );
-    const isPracticeOnly = isPracticeMember && !isPlatformAdmin;
-    // Лид отдела видит проекты/задачи целиком (по своему отделу), как платформ-админ
-    const isLead = user?.department_role === "lead";
-    const seesAllProjects = isPlatformAdmin || isLead;
-
-    // PROJECTS block — скрыт у HR-only и Practice-only
-    if (!isHrOnly && !isPracticeOnly) {
-      const projectItems: { path: string; icon: LucideIcon; label: string }[] =
-        [
-          {
-            path: "/projects",
-            icon: FolderKanban,
-            label: seesAllProjects ? "Все проекты" : "Мои проекты",
-          },
-          {
-            path: "/all-tasks",
-            icon: ListTodo,
-            label: seesAllProjects ? "Все задачи" : "Мои задачи",
-          },
-        ];
-      if (seesAllProjects) {
-        projectItems.push(
-          { path: "/team", icon: Users, label: "Команда" },
-          { path: "/timeoff", icon: Calendar, label: "Отпуска" },
-          { path: "/blockers", icon: AlertTriangle, label: "Блокеры" },
-        );
-        if (isPlatformAdmin) {
-          projectItems.push({ path: "/saturn", icon: Cloud, label: "Saturn" });
-        }
-      }
-      sections.push({
-        id: "projects",
-        label: "Проекты",
-        items: projectItems,
-      });
-    }
 
     // HR block — superadmin, owner, admin (HR Admin), hr (рекрутер),
     // а также НАБЛЮДАТЕЛЬ (is_readonly) — ментор с read-only доступом к HR.
-    // Наблюдатель видит HR-блок ДАЖЕ будучи practice-only (практик-лид, который
-    // одновременно ментор HR): иначе он застревал в интерн-продукте и не мог
-    // посмотреть кандидатов. Запись всё равно режется на бэке (403) и баннером.
-    // Обычный сотрудник (member без наблюдателя) и practice-only НЕ видят HR.
+    // Запись у наблюдателя режется на бэке (403) и баннером.
+    // Обычный сотрудник (member без наблюдателя) HR не видит.
     const isObserver = user?.is_readonly === true;
     const isHrRole =
       isPlatformAdmin || user?.org_role === "admin" || user?.org_role === "hr" || isObserver;
-    if (isHrRole && (!isPracticeOnly || isObserver)) {
+    if (isHrRole) {
       const hrItems: { path: string; icon: LucideIcon; label: string }[] = [];
       hrItems.push({
         path: "/all-candidates",

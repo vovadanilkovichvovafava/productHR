@@ -78,12 +78,6 @@ const AdminSimulatorPage = lazyWithRetry(() => import('@/pages/AdminSimulatorPag
 const VacanciesPage = lazyWithRetry(() => import('@/pages/VacanciesPage'));
 const EmailTemplatesPage = lazyWithRetry(() => import('@/pages/EmailTemplatesPage'));
 const ExportsPage = lazyWithRetry(() => import('@/pages/ExportsPage'));
-const ProjectsPage = lazyWithRetry(() => import('@/pages/ProjectsPage'));
-const ProjectDetailPage = lazyWithRetry(() => import('@/pages/ProjectDetailPage'));
-const ProjectTaskPage = lazyWithRetry(() => import('@/pages/ProjectTaskPage'));
-const AllTasksPage = lazyWithRetry(() => import('@/pages/AllTasksPage'));
-const SaturnPage = lazyWithRetry(() => import('@/pages/SaturnPage'));
-const TeamPage = lazyWithRetry(() => import('@/pages/TeamPage'));
 const DeptManagerPage = lazyWithRetry(() => import('@/pages/DeptManagerPage'));
 const AllCandidatesPage = lazyWithRetry(() => import('@/pages/AllCandidatesPage'));
 const StatusesPage = lazyWithRetry(() => import('@/pages/StatusesPage'));
@@ -101,7 +95,6 @@ const PENDashboardPage = lazyWithRetry(() => import('@/pages/PENDashboardPage'))
 const ExtensionPage = lazyWithRetry(() => import('@/pages/ExtensionPage'));
 const CsvImportPage = lazyWithRetry(() => import('@/pages/CsvImportPage'));
 const TimeOffPage = lazyWithRetry(() => import('@/pages/TimeOffPage'));
-const BlockersPage = lazyWithRetry(() => import('@/pages/BlockersPage'));
 const HRReportsPage = lazyWithRetry(() => import('@/pages/HRReportsPage'));
 const FactorialModule = lazyWithRetry(() => import('@/factorial/FactorialModule'));
 const CandidateArchivePage = lazyWithRetry(() => import('@/pages/CandidateArchivePage'));
@@ -200,13 +193,7 @@ export default function App() {
           {/* Open routes — any authenticated user */}
           <Route index element={<DefaultRedirect />} />
           <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
-          <Route path="projects" element={<Suspense fallback={<PageLoader />}><ProjectsPage /></Suspense>} />
-          <Route path="projects/:projectId" element={<Suspense fallback={<PageLoader />}><ProjectDetailPage /></Suspense>} />
-          <Route path="projects/:projectId/tasks/:taskId" element={<Suspense fallback={<PageLoader />}><ProjectTaskPage /></Suspense>} />
-          <Route path="all-tasks" element={<Suspense fallback={<PageLoader />}><AllTasksPage /></Suspense>} />
-          <Route path="team" element={<Suspense fallback={<PageLoader />}><TeamPage /></Suspense>} />
           <Route path="timeoff" element={<Suspense fallback={<PageLoader />}><TimeOffPage /></Suspense>} />
-          <Route path="blockers" element={<Suspense fallback={<PageLoader />}><BlockersPage /></Suspense>} />
           <Route path="my-profile" element={<Suspense fallback={<PageLoader />}><EmployeePortalPage /></Suspense>} />
           <Route path="factorial/*" element={<Suspense fallback={<PageLoader />}><FactorialModule /></Suspense>} />
 
@@ -230,7 +217,6 @@ export default function App() {
           <Route path="extension" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr']}><ExtensionPage /></RoleRoute></Suspense>} />
           <Route path="analytics" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr']}><DashboardPage /></RoleRoute></Suspense>} />
           <Route path="hr-reports" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr']}><HRReportsPage /></RoleRoute></Suspense>} />
-          <Route path="saturn" element={<Suspense fallback={<PageLoader />}><SaturnPage /></Suspense>} />
 
           {/* HR Admin routes — superadmin, owner, admin (Настя). NOT for hr recruiter */}
           <Route path="pen" element={<Suspense fallback={<PageLoader />}><RoleRoute allow={['hr_admin']}><PENDashboardPage /></RoleRoute></Suspense>} />

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, ListTodo, Bell, Loader2, AlertTriangle, Link2 as LinkIcon } from "lucide-react";
+import { KeyRound, Bell, Loader2, AlertTriangle, Link2 as LinkIcon } from "lucide-react";
 import clsx from "clsx";
 import api from "@/services/api/client";
 import AccessHub from "./AccessHub";
-import MyTasks from "./MyTasks";
 import Notifications from "./Notifications";
 
 /**
@@ -15,7 +14,7 @@ import Notifications from "./Notifications";
  */
 
 export type Me = { id: number; name: string; email: string; role: string; org_role?: string | null };
-type Tab = "access" | "tasks" | "bell";
+type Tab = "access" | "bell";
 
 export default function MiniApp() {
   const [me, setMe] = useState<Me | null>(null);
@@ -87,7 +86,6 @@ export default function MiniApp() {
 
   const TABS: { key: Tab; label: string; icon: typeof KeyRound }[] = [
     { key: "access", label: "Доступы", icon: KeyRound },
-    { key: "tasks", label: "Задачи", icon: ListTodo },
     { key: "bell", label: "События", icon: Bell },
   ];
 
@@ -95,7 +93,6 @@ export default function MiniApp() {
     <div className="hf-ma">
       <div className="hf-ma-body">
         {tab === "access" && <AccessHub me={me} />}
-        {tab === "tasks" && <MyTasks userId={me.id} />}
         {tab === "bell" && <Notifications />}
       </div>
 

@@ -19,10 +19,10 @@ from slowapi.errors import RateLimitExceeded
 
 from api.limiter import limiter
 from api.routes import auth, users, criteria, entities, entity_ai, organizations, sharing, departments, invitations, realtime, admin, vacancies, parser, search, scoring, currency, parse_jobs
-from api.routes import email_templates, analytics, exports, projects, saturn, notifications, project_statuses, forms, employees, documents, org_units, magic_button, pen
+from api.routes import email_templates, analytics, exports, notifications, forms, employees, documents, org_units, magic_button, pen
 from api.routes import candidate_search, extension_download, csv_import
 from api.routes import candidate_database, recruiter_workspaces
-from api.routes import timeoff, blockers, tags, integrations, staff_board, access_hub, audit, ai_usage
+from api.routes import timeoff, tags, staff_board, access_hub, audit, ai_usage
 from api.config import settings
 from api.db import init_database, run_alembic_migrations_sync
 from api.middleware import SecurityHeadersMiddleware, CorrelationMiddleware
@@ -47,35 +47,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Каталога может не быть (локальный запуск, старый образ) — тогда просто не
 # монтируем, веб-версия от этого не зависит.
 MINIAPP_DIR = Path(__file__).parent / "static-miniapp"
-
-
-async def saturn_auto_sync_task():
-    """Periodically sync projects from Saturn (every 5 min)."""
-    from api.database import AsyncSessionLocal
-    from api.services.saturn_sync import SaturnSyncService
-
-    # Wait for startup to complete
-    await asyncio.sleep(30)
-
-    # Initial sync on startup
-    try:
-        async with AsyncSessionLocal() as session:
-            service = SaturnSyncService(session)
-            result = await service.sync_all()
-            logger.info(f"Saturn initial sync: {result.get('projects_synced', 0)} projects, {result.get('apps_synced', 0)} apps")
-    except Exception as e:
-        logger.error(f"Saturn initial sync error: {e}")
-
-    # Then every 5 minutes
-    while True:
-        await asyncio.sleep(300)
-        try:
-            async with AsyncSessionLocal() as session:
-                service = SaturnSyncService(session)
-                result = await service.sync_all()
-                logger.info(f"Saturn sync: {result.get('projects_synced', 0)} projects, {result.get('apps_synced', 0)} apps")
-        except Exception as e:
-            logger.error(f"Saturn auto-sync error: {e}")
 
 
 async def employee_reminders_task():
@@ -179,210 +150,6 @@ async def employee_reminders_task():
         await asyncio.sleep(86400)
 
 
-async def standup_reminder_task():
-    """Send daily reminders at 11:30 MSK to chats with auto_tasks_enabled that had no standup today."""
-    from datetime import datetime, timedelta, timezone
-    from api.database import AsyncSessionLocal
-    from api.models.database import Chat
-    from sqlalchemy import select, or_
-
-    MSK = timezone(timedelta(hours=3))
-
-    # Wait for bot to start
-    await asyncio.sleep(60)
-
-    while True:
-        try:
-            now_msk = datetime.now(MSK)
-            # Calculate seconds until next 11:30 MSK
-            target = now_msk.replace(hour=11, minute=30, second=0, microsecond=0)
-            if now_msk >= target:
-                target += timedelta(days=1)
-            wait_seconds = (target - now_msk).total_seconds()
-            logger.info(f"Standup reminder: next check in {wait_seconds:.0f}s (at {target.strftime('%H:%M %Z')})")
-            await asyncio.sleep(wait_seconds)
-
-            # It's 11:30 MSK — check which chats need a reminder
-            today_start_utc = datetime.now(MSK).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(
-                timezone.utc
-            ).replace(tzinfo=None)
-
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    select(Chat).where(
-                        Chat.auto_tasks_enabled == True,
-                        Chat.is_active == True,
-                        or_(Chat.deleted_at == None, Chat.deleted_at.is_(None)),
-                        Chat.telegram_chat_id != None,
-                        # No standup today: either never had one, or last one was before today
-                        or_(
-                            Chat.last_standup_at == None,
-                            Chat.last_standup_at < today_start_utc,
-                        ),
-                    )
-                )
-                chats_to_remind = list(result.scalars().all())
-
-                if chats_to_remind:
-                    from api.bot import get_bot
-                    bot = get_bot()
-                    sent = 0
-                    for chat in chats_to_remind:
-                        try:
-                            await bot.send_message(
-                                chat.telegram_chat_id,
-                                "👋 Привет! Что сегодня собираешься делать?\n\n"
-                                "💡 Напиши план на день — я автоматически создам задачи.",
-                            )
-                            sent += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to send standup reminder to chat {chat.telegram_chat_id}: {e}")
-                    logger.info(f"Standup reminders sent: {sent}/{len(chats_to_remind)} chats")
-                else:
-                    logger.info("Standup reminder: all chats already have standups today")
-
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error(f"Standup reminder task error: {e}")
-            # On error, wait 1 hour before retry
-            await asyncio.sleep(3600)
-
-
-async def daily_review_check_task():
-    """Daily 20:00 МСК: для каждой орги собрать список юзеров, которые сегодня
-    не двинули ни одной таски в статус review, и отправить этот список
-    каждому owner/admin орги в Telegram. Главный сигнал «человек работал».
-    Если у юзера нет telegram_id — он не учитывается в рассылке (как admin),
-    но в списке появляется.
-    """
-    from datetime import datetime, timedelta, timezone
-    from api.database import AsyncSessionLocal
-    from api.models.database import (
-        User, Organization, OrgMember, OrgRole, ProjectTask, TaskStatus, Project,
-    )
-    from sqlalchemy import select
-
-    MSK = timezone(timedelta(hours=3))
-
-    # Wait for bot startup
-    await asyncio.sleep(60)
-
-    while True:
-        try:
-            now_msk = datetime.now(MSK)
-            target = now_msk.replace(hour=20, minute=0, second=0, microsecond=0)
-            if now_msk >= target:
-                target += timedelta(days=1)
-            wait_seconds = (target - now_msk).total_seconds()
-            logger.info(
-                f"Daily review check: next run in {wait_seconds:.0f}s "
-                f"(at {target.strftime('%Y-%m-%d %H:%M %Z')})"
-            )
-            await asyncio.sleep(wait_seconds)
-
-            # 20:00 МСК. «Сегодня» = с 00:00 МСК до сейчас.
-            today_start_msk = datetime.now(MSK).replace(hour=0, minute=0, second=0, microsecond=0)
-            today_start_utc = today_start_msk.astimezone(timezone.utc).replace(tzinfo=None)
-
-            async with AsyncSessionLocal() as db:
-                # По каждой орге отдельный отчёт.
-                orgs = (await db.execute(select(Organization))).scalars().all()
-
-                from api.bot import get_bot
-                bot = get_bot()
-
-                for org in orgs:
-                    members_q = await db.execute(
-                        select(OrgMember).where(OrgMember.org_id == org.id)
-                    )
-                    members = list(members_q.scalars().all())
-                    if not members:
-                        continue
-
-                    user_ids = [m.user_id for m in members]
-                    users_q = await db.execute(
-                        select(User).where(User.id.in_(user_ids))
-                    )
-                    users = {u.id: u for u in users_q.scalars().all()}
-
-                    # Кто двинул хотя бы одну таску в review за сегодня?
-                    # (Аудит-лога нет — используем status=review AND updated_at >= today_start.
-                    # Прокси даёт ложно-положительные «работал», если юзер просто
-                    # отредактировал review-таску, но не ложно-отрицательные —
-                    # настоящего бездельника не пропустим.)
-                    project_ids_q = await db.execute(
-                        select(Project.id).where(Project.org_id == org.id)
-                    )
-                    project_ids = [r[0] for r in project_ids_q.all()]
-
-                    active_user_ids: set[int] = set()
-                    if project_ids:
-                        active_q = await db.execute(
-                            select(ProjectTask.assignee_id)
-                            .where(
-                                ProjectTask.project_id.in_(project_ids),
-                                ProjectTask.status == TaskStatus.review,
-                                ProjectTask.updated_at >= today_start_utc,
-                                ProjectTask.assignee_id.is_not(None),
-                            )
-                        )
-                        active_user_ids = {r[0] for r in active_q.all()}
-
-                    silent_users = [
-                        users[uid] for uid in user_ids
-                        if uid in users and uid not in active_user_ids
-                    ]
-
-                    # Кому шлём — owner и admin орги.
-                    recipients = [
-                        users[m.user_id] for m in members
-                        if m.role in (OrgRole.owner, OrgRole.admin)
-                        and users.get(m.user_id) and users[m.user_id].telegram_id
-                    ]
-                    if not recipients:
-                        logger.info(f"Daily review check: org {org.id} has no admins with telegram")
-                        continue
-
-                    if not silent_users:
-                        msg = (
-                            f"✅ <b>{datetime.now(MSK).strftime('%d.%m')} — все молодцы</b>\n\n"
-                            f"Сегодня каждый из {len(user_ids)} участников орги "
-                            f"перевёл хотя бы одну задачу в Ревью."
-                        )
-                    else:
-                        lines = [
-                            f"⚠️ <b>{datetime.now(MSK).strftime('%d.%m')} — никто не двинул таску в Ревью</b>",
-                            "",
-                            f"Тихие сегодня ({len(silent_users)} из {len(user_ids)}):",
-                        ]
-                        for u in silent_users:
-                            tag = f" @{u.telegram_username}" if u.telegram_username else ""
-                            lines.append(f"• {u.name}{tag}")
-                        msg = "\n".join(lines)
-
-                    sent = 0
-                    for admin in recipients:
-                        try:
-                            await bot.send_message(admin.telegram_id, msg, parse_mode="HTML")
-                            sent += 1
-                        except Exception as e:
-                            logger.warning(
-                                f"Daily review check: failed to DM admin {admin.id} "
-                                f"(tg {admin.telegram_id}): {e}"
-                            )
-                    logger.info(
-                        f"Daily review check (org {org.id}): silent={len(silent_users)}/"
-                        f"{len(user_ids)}, sent to {sent}/{len(recipients)} admins"
-                    )
-
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error(f"Daily review check task error: {e}", exc_info=True)
-            await asyncio.sleep(3600)
-
-
 async def check_playwright_status():
     """Check Playwright status at startup and log the result."""
     import os
@@ -471,34 +238,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Start Saturn auto-sync task (every 5 min)
-    saturn_sync_task = None
-    if os.environ.get("SATURN_API_TOKEN"):
-        saturn_sync_task = asyncio.create_task(saturn_auto_sync_task())
-        logger.info("Saturn auto-sync task started (every 5 min)")
-
-    # Итог дня в 18:00 МСК: отчёт + комментарии по задачам (28.09.2026)
-    evening_digest_bg_task = None
-    try:
-        from api.bot import evening_digest_task
-        evening_digest_bg_task = asyncio.create_task(evening_digest_task())
-        logger.info("Evening digest task started (18:00 MSK)")
-    except Exception as e:
-        logger.warning(f"Evening digest task not started: {e}")
-
     # Start employee reminders task (daily)
     employee_reminders_bg_task = asyncio.create_task(employee_reminders_task())
     logger.info("Employee reminders task started (daily)")
-
-    # Daily 20:00 МСК review check — DISABLED: рассылка уходила всем
-    # owner+admin орги (Егор, Маша, Настя), а должен получать только
-    # запросивший. Включить обратно когда уточним кому слать.
-    daily_review_bg_task = None
-    # daily_review_bg_task = asyncio.create_task(daily_review_check_task())
-    # logger.info("Daily review check task started (20:00 МСК)")
-
-    # Standup reminder task — DISABLED (user requested removal)
-    # standup_reminder_bg_task = asyncio.create_task(standup_reminder_task())
 
     # Log all registered routes for debugging
     logger.info("=== REGISTERED API ROUTES ===")
@@ -517,14 +259,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if bot_task:
         bot_task.cancel()
-    if saturn_sync_task:
-        saturn_sync_task.cancel()
     if employee_reminders_bg_task:
         employee_reminders_bg_task.cancel()
-    if daily_review_bg_task:
-        daily_review_bg_task.cancel()
-    if standup_reminder_bg_task:
-        standup_reminder_bg_task.cancel()
 
     # Close Redis connection
     try:
@@ -678,36 +414,12 @@ except Exception as e:
     logger.error(f"FAILED to register exports router: {e}")
     raise
 
-logger.info("=== REGISTERING PROJECTS ROUTER ===")
-try:
-    app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
-    logger.info("Projects router registered successfully at /api/projects")
-except Exception as e:
-    logger.error(f"FAILED to register projects router: {e}")
-    raise
-
-logger.info("=== REGISTERING SATURN ROUTER ===")
-try:
-    app.include_router(saturn.router, prefix="/api/saturn", tags=["saturn"])
-    logger.info("Saturn router registered successfully at /api/saturn")
-except Exception as e:
-    logger.error(f"FAILED to register saturn router: {e}")
-    raise
-
 logger.info("=== REGISTERING NOTIFICATIONS ROUTER ===")
 try:
     app.include_router(notifications.router, prefix="/api", tags=["notifications"])
     logger.info("Notifications router registered successfully at /api")
 except Exception as e:
     logger.error(f"FAILED to register notifications router: {e}")
-    raise
-
-logger.info("=== REGISTERING PROJECT STATUSES ROUTER ===")
-try:
-    app.include_router(project_statuses.router, prefix="/api/project-statuses", tags=["project-statuses"])
-    logger.info("Project statuses router registered successfully at /api/project-statuses")
-except Exception as e:
-    logger.error(f"FAILED to register project statuses router: {e}")
     raise
 
 logger.info("=== REGISTERING FORMS ROUTER ===")
@@ -793,14 +505,6 @@ except Exception as e:
     logger.error(f"FAILED to register timeoff router: {e}")
     raise
 
-logger.info("=== REGISTERING BLOCKERS ROUTER ===")
-try:
-    app.include_router(blockers.router, prefix="/api/blockers", tags=["blockers"])
-    logger.info("Blockers router registered successfully at /api/blockers")
-except Exception as e:
-    logger.error(f"FAILED to register blockers router: {e}")
-    raise
-
 logger.info("=== REGISTERING TAGS ROUTER ===")
 try:
     app.include_router(tags.router, prefix="/api/tags", tags=["tags"])
@@ -808,15 +512,6 @@ try:
 except Exception as e:
     logger.error(f"FAILED to register tags router: {e}")
     raise
-
-logger.info("=== REGISTERING INTEGRATIONS ROUTER ===")
-try:
-    app.include_router(integrations.router, prefix="/api/integrations", tags=["integrations"])
-    logger.info("Integrations router registered at /api/integrations (Claude MCP, API tokens)")
-except Exception as e:
-    logger.error(f"FAILED to register integrations router: {e}")
-    raise
-
 
 @app.get("/health")
 async def health_check():
@@ -867,8 +562,7 @@ async def health_check_deep():
 
 
 # Отладочные адреса — только суперадмину (24.10.2026): раньше открывались без
-# входа; autotasks-test при каждом вызове тратил деньги на Claude, autotasks-log
-# показывал тексты сообщений, debug/routes — карту всего API.
+# входа, а debug/routes показывал карту всего API.
 @app.get("/debug/routes", dependencies=[Depends(get_superadmin)])
 async def debug_routes():
     """Debug endpoint to list all registered routes."""
@@ -928,148 +622,6 @@ async def playwright_health_check():
         result["error"] = f"Chromium launch failed: {type(e).__name__}: {e}"
 
     return result
-
-
-@app.get("/health/autotasks-log", dependencies=[Depends(get_superadmin)])
-async def autotasks_log():
-    """Read the in-memory auto-tasks debug log."""
-    from api.bot import _autotasks_debug_log
-    return {"log": list(_autotasks_debug_log), "count": len(_autotasks_debug_log)}
-
-
-@app.get("/health/autotasks-test", dependencies=[Depends(get_superadmin)])
-async def autotasks_test_pipeline():
-    """Test the full auto-tasks pipeline with a sample message to see where it fails."""
-    from api.database import AsyncSessionLocal
-    from api.models.database import User, OrgMember, Project, ProjectMember, Chat
-    from api.services.task_trigger import should_trigger, should_trigger_ai
-    from sqlalchemy import select
-
-    results = {}
-    try:
-        async with AsyncSessionLocal() as session:
-            # Step 1: Check trigger
-            test_text = "Миша сегодня сделай на проекте ZavodCamp\n1. Тест вкладок\n2. Связка блока"
-            results["1_regex_trigger"] = should_trigger(test_text)
-            try:
-                results["1b_ai_trigger"] = await should_trigger_ai(test_text)
-            except Exception as e:
-                results["1b_ai_trigger_error"] = str(e)
-
-            # Step 2: Find user by telegram_id (superadmin: 532224121)
-            tg_id = 532224121
-            result = await session.execute(select(User).where(User.telegram_id == tg_id))
-            user = result.scalar_one_or_none()
-            results["2_user_by_tg_id"] = {"found": user is not None, "name": user.name if user else None, "id": user.id if user else None}
-
-            # Step 3: Find org
-            if user:
-                org_result = await session.execute(select(OrgMember.org_id).where(OrgMember.user_id == user.id).limit(1))
-                org_id = org_result.scalar_one_or_none()
-                results["3_org_id"] = org_id
-
-                # Step 4: Find projects
-                if org_id:
-                    all_proj = await session.execute(select(Project).where(Project.org_id == org_id))
-                    projects = list(all_proj.scalars().all())
-                    results["4_org_projects"] = [{"id": p.id, "name": p.name, "status": str(p.status)} for p in projects[:20]]
-
-                    # Step 5: User's projects
-                    user_proj = await session.execute(
-                        select(Project)
-                        .join(ProjectMember, ProjectMember.project_id == Project.id)
-                        .where(ProjectMember.user_id == user.id)
-                        .where(Project.status == 'active')
-                    )
-                    user_projects = list(user_proj.scalars().all())
-                    results["5_user_projects"] = [{"id": p.id, "name": p.name} for p in user_projects]
-
-            # Step 6: Check ANTHROPIC_API_KEY
-            import os
-            api_key = os.getenv("ANTHROPIC_API_KEY", "")
-            results["6_anthropic_key"] = "set" if api_key else "NOT SET"
-            results["6_key_prefix"] = api_key[:15] + "..." if api_key else "none"
-
-            # Step 7: Full pipeline test
-            try:
-                from api.services.task_trigger import create_tasks_from_message
-                tasks = await create_tasks_from_message(
-                    db=session,
-                    message_text=test_text,
-                    user_name="Vladimir Danilkovich",
-                    telegram_user_id=tg_id,
-                    chat_id=-5166803692,  # RND - Миша chat
-                    telegram_username="architector_alex",
-                )
-                results["7_tasks_created"] = tasks
-            except Exception as e:
-                results["7_pipeline_error"] = f"{type(e).__name__}: {e}"
-
-    except Exception as e:
-        results["error"] = str(e)
-
-    return results
-
-
-@app.get("/health/autotasks")
-async def autotasks_debug():
-    """Debug auto-tasks: show chats with auto_tasks, recent messages, trigger status."""
-    from datetime import datetime, timedelta
-    from api.database import AsyncSessionLocal
-    from api.models.database import Chat, Message
-    from api.services.task_trigger import should_trigger
-    from sqlalchemy import select, func, desc
-
-    try:
-        async with AsyncSessionLocal() as session:
-            # Get all auto_tasks chats
-            result = await session.execute(
-                select(Chat).where(Chat.auto_tasks_enabled == True, Chat.is_active == True)
-            )
-            chats = list(result.scalars().all())
-
-            chat_info = []
-            for chat in chats:
-                # Get last 5 messages from this chat
-                msg_result = await session.execute(
-                    select(Message)
-                    .where(Message.chat_id == chat.id)
-                    .order_by(desc(Message.timestamp))
-                    .limit(5)
-                )
-                messages = list(msg_result.scalars().all())
-
-                msg_info = []
-                for m in messages:
-                    text = (m.content or "")[:80]
-                    sender = f"{m.first_name or ''} {m.last_name or ''}".strip() or m.username or str(m.telegram_user_id)
-                    msg_info.append({
-                        "id": m.id,
-                        "sender": sender,
-                        "tg_user_id": m.telegram_user_id,
-                        "text": text,
-                        "regex_trigger": should_trigger(text) if text else False,
-                        "time": m.timestamp.isoformat() if m.timestamp else None,
-                    })
-
-                chat_info.append({
-                    "id": chat.id,
-                    "title": chat.custom_name or chat.title,
-                    "telegram_chat_id": chat.telegram_chat_id,
-                    "auto_tasks": chat.auto_tasks_enabled,
-                    "org_id": chat.org_id,
-                    "owner_id": chat.owner_id,
-                    "last_standup_at": chat.last_standup_at.isoformat() if getattr(chat, 'last_standup_at', None) else None,
-                    "last_activity": chat.last_activity.isoformat() if chat.last_activity else None,
-                    "recent_messages": msg_info,
-                })
-
-            return {
-                "auto_tasks_chats": len(chats),
-                "chats": chat_info,
-            }
-    except Exception as e:
-        return {"error": str(e)}
 
 
 # Mini App монтируем РАНЬШЕ SPA-роута ниже: тот ловит "/{full_path:path}" и
