@@ -1,0 +1,118 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment variables (CRITICAL: never commit local keys/secrets)
+.env
+.env.local
+backend/.env.local  # Local AI key for testing only — DELETE after testing
+.env.*.local
+!.env.example
+!backend/.env.example
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Audio/Video temp files
+*.ogg
+*.mp3
+*.wav
+*.mp4
+*.oga
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+frontend/dist/
+
+# Playwright test artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright/.cache/
+**/test-results/
+**/playwright-report/
+
+# Visual regression snapshots (optional - remove if you want to track them)
+**/*.spec.ts-snapshots/
+
+# Local-only Codex/reference files
+AGENTS.md
+frontend/public/demo-assets/
+
+# Factorial module: re-include lib/ (the broad Python `lib/` rule above wrongly
+# matches frontend/src/factorial/lib/ and would drop cn.ts / routes.ts / formatDate.ts on push)
+!frontend/src/factorial/lib/
+!frontend/src/factorial/lib/**
+
+# Runtime data & process artifacts — must never be pushed
+backend/uploads/
+*.pid
+
+# Standing rule: never push these (even on "push all")
+begin.txt
+speech.txt
+
+# Local-only dev helpers & notes (machine-specific paths / local creds — never push)
+FACTORIAL_DEMO.md
+recover.ps1
+backend/run_local.sh
+backend/requirements.win.txt
+backend/requirements.local.txt
+docs/superpowers/
+
+# Сборка Telegram Mini App — делается в Docker, в репозитории не нужна
+frontend/dist-miniapp/
+backend/static-miniapp/
+
+# Локальный env для launch.json (macOS)
+backend/dev.env

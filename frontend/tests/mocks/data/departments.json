@@ -1,0 +1,202 @@
+[
+  {
+    "id": 1,
+    "name": "Отдел разработки и инновационных технологий",
+    "description": "Отвечает за разработку программного обеспечения, внедрение новых технологий и техническую поддержку продуктов компании. Включает команды frontend, backend, mobile разработки, QA и DevOps.",
+    "head": {
+      "id": 3,
+      "name": "Иван Сидоров",
+      "email": "ivan.sidorov@ourcompany.com",
+      "position": "CTO"
+    },
+    "employees_count": 25,
+    "sub_departments": [
+      {
+        "id": 11,
+        "name": "Frontend команда",
+        "employees_count": 8
+      },
+      {
+        "id": 12,
+        "name": "Backend команда",
+        "employees_count": 10
+      },
+      {
+        "id": 13,
+        "name": "QA и тестирование",
+        "employees_count": 5
+      },
+      {
+        "id": 14,
+        "name": "DevOps и инфраструктура",
+        "employees_count": 2
+      }
+    ],
+    "budget": {
+      "annual": 45000000,
+      "currency": "RUB",
+      "spent": 12500000,
+      "remaining": 32500000
+    },
+    "location": "Москва, офис на Тверской",
+    "created_at": "2023-01-01T00:00:00Z",
+    "tags": ["разработка", "IT", "технологии", "ключевой"],
+    "is_active": true
+  },
+  {
+    "id": 2,
+    "name": "Отдел продаж и развития бизнеса",
+    "description": "Занимается привлечением новых клиентов, ведением существующих, развитием партнерских отношений и увеличением выручки компании.",
+    "head": {
+      "id": 8,
+      "name": "Ольга Менеджерова-Продажная",
+      "email": "olga.sales@ourcompany.com",
+      "position": "Директор по продажам"
+    },
+    "employees_count": 15,
+    "sub_departments": [
+      {
+        "id": 21,
+        "name": "Отдел корпоративных продаж",
+        "employees_count": 8
+      },
+      {
+        "id": 22,
+        "name": "Отдел работы с партнерами",
+        "employees_count": 4
+      },
+      {
+        "id": 23,
+        "name": "Клиентская поддержка",
+        "employees_count": 3
+      }
+    ],
+    "budget": {
+      "annual": 30000000,
+      "currency": "RUB",
+      "spent": 8000000,
+      "remaining": 22000000
+    },
+    "location": "Москва, офис на Тверской",
+    "created_at": "2023-01-01T00:00:00Z",
+    "tags": ["продажи", "бизнес", "revenue"],
+    "is_active": true
+  },
+  {
+    "id": 3,
+    "name": "Отдел маркетинга и коммуникаций",
+    "description": "Отвечает за продвижение продуктов и услуг компании, управление брендом, PR, контент-маркетинг, SMM и организацию маркетинговых мероприятий.",
+    "head": {
+      "id": 10,
+      "name": "Виктория Маркетологова",
+      "email": "victoria.marketing@ourcompany.com",
+      "position": "Директор по маркетингу"
+    },
+    "employees_count": 12,
+    "sub_departments": [
+      {
+        "id": 31,
+        "name": "Контент и SMM",
+        "employees_count": 5
+      },
+      {
+        "id": 32,
+        "name": "Performance маркетинг",
+        "employees_count": 4
+      },
+      {
+        "id": 33,
+        "name": "PR и коммуникации",
+        "employees_count": 3
+      }
+    ],
+    "budget": {
+      "annual": 25000000,
+      "currency": "RUB",
+      "spent": 7500000,
+      "remaining": 17500000
+    },
+    "location": "Москва, офис на Тверской",
+    "created_at": "2023-01-01T00:00:00Z",
+    "tags": ["маркетинг", "PR", "контент"],
+    "is_active": true
+  },
+  {
+    "id": 4,
+    "name": "Отдел по работе с персоналом и организационному развитию (HR)",
+    "description": "Управляет процессами найма, адаптации, обучения и развития сотрудников. Отвечает за корпоративную культуру, компенсации и льготы, HR-аналитику.",
+    "head": {
+      "id": 5,
+      "name": "Елена Николаевна Рекрутерова",
+      "email": "elena.recruiter@ourcompany.com",
+      "position": "HR Director"
+    },
+    "employees_count": 8,
+    "sub_departments": [
+      {
+        "id": 41,
+        "name": "Рекрутинг",
+        "employees_count": 4
+      },
+      {
+        "id": 42,
+        "name": "Обучение и развитие",
+        "employees_count": 2
+      },
+      {
+        "id": 43,
+        "name": "HR операции",
+        "employees_count": 2
+      }
+    ],
+    "budget": {
+      "annual": 15000000,
+      "currency": "RUB",
+      "spent": 4000000,
+      "remaining": 11000000
+    },
+    "location": "Москва, офис на Тверской",
+    "created_at": "2023-01-01T00:00:00Z",
+    "tags": ["HR", "персонал", "найм"],
+    "is_active": true
+  },
+  {
+    "id": 5,
+    "name": "Финансово-юридический департамент",
+    "description": "Управляет финансами компании, бухгалтерским учетом, налоговым планированием, юридическим сопровождением сделок и договорами.",
+    "head": {
+      "id": 2,
+      "name": "Мария Ивановна Смирнова",
+      "email": "m.smirnova@ourcompany.com",
+      "position": "CFO"
+    },
+    "employees_count": 10,
+    "sub_departments": [
+      {
+        "id": 51,
+        "name": "Бухгалтерия",
+        "employees_count": 5
+      },
+      {
+        "id": 52,
+        "name": "Юридический отдел",
+        "employees_count": 3
+      },
+      {
+        "id": 53,
+        "name": "Финансовый контроль",
+        "employees_count": 2
+      }
+    ],
+    "budget": {
+      "annual": 20000000,
+      "currency": "RUB",
+      "spent": 5000000,
+      "remaining": 15000000
+    },
+    "location": "Москва, офис на Тверской",
+    "created_at": "2023-01-01T00:00:00Z",
+    "tags": ["финансы", "юридический", "бухгалтерия"],
+    "is_active": true
+  }
+]

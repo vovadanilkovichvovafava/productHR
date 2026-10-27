@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Enceladus Magic Button",
+  "version": "1.9.2",
+  "description": "Добавляйте кандидатов в Enceladus одним кликом",
+  "permissions": ["activeTab", "storage", "scripting", "cookies", "alarms"],
+  "host_permissions": [
+    "https://hh.ru/*",
+    "https://*.hh.ru/*",
+    "https://rabota.by/*",
+    "https://*.rabota.by/*",
+    "https://career.habr.com/*",
+    "https://www.linkedin.com/*",
+    "https://*.railway.app/*",
+    "https://enceladus.site/*",
+    "https://*.enceladus.site/*",
+    "https://*.saturn.ac/*",
+    "http://localhost:8000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://hh.ru/resume/*", "https://*.hh.ru/resume/*", "https://rabota.by/resume/*", "https://*.rabota.by/resume/*"],
+      "js": ["content/common.js", "content/hh.js"]
+    },
+    {
+      "matches": ["https://career.habr.com/*/profile", "https://career.habr.com/*"],
+      "js": ["content/common.js", "content/habr.js"]
+    },
+    {
+      "matches": ["https://www.linkedin.com/in/*"],
+      "js": ["content/common.js", "content/linkedin.js"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

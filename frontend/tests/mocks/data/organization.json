@@ -1,0 +1,189 @@
+{
+  "id": 1,
+  "name": "ООО 'Инновационные HR Решения с Очень Длинным Юридическим Названием для Тестирования Интерфейса'",
+  "legal_name": "Общество с Ограниченной Ответственностью 'Инновационные HR Решения с Очень Длинным Юридическим Названием для Тестирования Интерфейса и Усечения Текста'",
+  "short_name": "ООО 'HR Решения'",
+  "inn": "7701234567",
+  "kpp": "770101001",
+  "ogrn": "1234567890123",
+  "legal_address": "125009, г. Москва, ул. Тверская, д. 1, корп. 2, строение 3, этаж 4, офис 567",
+  "actual_address": "125009, г. Москва, ул. Тверская, д. 1, корп. 2, строение 3, этаж 4, офис 567",
+  "postal_address": "125009, г. Москва, ул. Тверская, д. 1, корп. 2, строение 3, этаж 4, офис 567",
+  "phone": "+7 (495) 123-45-67",
+  "additional_phones": [
+    "+7 (495) 123-45-68",
+    "+7 (495) 123-45-69",
+    "+7 (800) 555-00-00"
+  ],
+  "email": "info@hr-solutions.ru",
+  "website": "https://hr-solutions.ru",
+  "ceo": {
+    "id": 1,
+    "name": "Александр Петрович Длинноефамилиев-Константинопольский",
+    "email": "ceo@hr-solutions.ru",
+    "phone": "+7 (495) 123-45-67"
+  },
+  "founded_date": "2020-01-15",
+  "employees_count": 70,
+  "departments_count": 5,
+  "industry": "Информационные технологии / HR Tech",
+  "description": "Компания разрабатывает инновационные решения для автоматизации HR-процессов с использованием искусственного интеллекта. Основные продукты: система анализа звонков и встреч, управление персоналом, рекрутинговый CRM, аналитика HR-метрик.",
+  "mission": "Делать HR-процессы прозрачными, эффективными и основанными на данных",
+  "vision": "Стать лидером на рынке HR-технологий в России и СНГ к 2026 году",
+  "values": [
+    "Инновации и технологическое совершенство",
+    "Клиентоориентированность",
+    "Прозрачность и открытость",
+    "Командная работа",
+    "Непрерывное обучение и развитие"
+  ],
+  "bank_details": {
+    "bank_name": "ПАО Сбербанк",
+    "bik": "044525225",
+    "correspondent_account": "30101810400000000225",
+    "checking_account": "40702810938000012345"
+  },
+  "social_media": {
+    "linkedin": "https://linkedin.com/company/hr-solutions",
+    "facebook": "https://facebook.com/hr.solutions",
+    "telegram": "@hr_solutions_official",
+    "twitter": "https://twitter.com/hr_solutions",
+    "vk": "https://vk.com/hr_solutions",
+    "youtube": "https://youtube.com/c/hr-solutions"
+  },
+  "offices": [
+    {
+      "id": 1,
+      "city": "Москва",
+      "address": "125009, г. Москва, ул. Тверская, д. 1, корп. 2, строение 3, этаж 4",
+      "type": "headquarters",
+      "employees_count": 60,
+      "phone": "+7 (495) 123-45-67"
+    },
+    {
+      "id": 2,
+      "city": "Санкт-Петербург",
+      "address": "191186, г. Санкт-Петербург, Невский проспект, д. 100",
+      "type": "branch",
+      "employees_count": 10,
+      "phone": "+7 (812) 987-65-43"
+    }
+  ],
+  "financial_info": {
+    "annual_revenue": {
+      "2024": 150000000,
+      "2023": 100000000,
+      "2022": 50000000
+    },
+    "currency": "RUB",
+    "fiscal_year_start": "01-01",
+    "last_updated": "2024-03-21T00:00:00Z"
+  },
+  "certifications": [
+    "ISO 9001:2015 - Система менеджмента качества",
+    "ISO 27001:2013 - Система управления информационной безопасностью",
+    "Сертификат соответствия ФСТЭК России"
+  ],
+  "partnerships": [
+    {
+      "id": 1,
+      "name": "Microsoft",
+      "type": "Технологический партнер",
+      "since": "2021-06-01"
+    },
+    {
+      "id": 2,
+      "name": "AWS",
+      "type": "Cloud партнер",
+      "since": "2020-03-15"
+    },
+    {
+      "id": 3,
+      "name": "Сбербанк",
+      "type": "Стратегический клиент",
+      "since": "2022-01-10"
+    }
+  ],
+  "awards": [
+    {
+      "title": "Лучший HR Tech стартап 2023",
+      "organization": "TechCrunch Russia",
+      "date": "2023-11-15"
+    },
+    {
+      "title": "Инновация года в области HR",
+      "organization": "HR Tech Summit",
+      "date": "2023-09-20"
+    }
+  ],
+  "working_hours": {
+    "monday": "09:00-18:00",
+    "tuesday": "09:00-18:00",
+    "wednesday": "09:00-18:00",
+    "thursday": "09:00-18:00",
+    "friday": "09:00-17:00",
+    "saturday": "closed",
+    "sunday": "closed",
+    "timezone": "Europe/Moscow"
+  },
+  "settings": {
+    "language": "ru",
+    "currency": "RUB",
+    "date_format": "DD.MM.YYYY",
+    "time_format": "24h",
+    "first_day_of_week": "monday"
+  },
+  "subscription": {
+    "plan": "Enterprise",
+    "status": "active",
+    "start_date": "2024-01-01T00:00:00Z",
+    "end_date": "2024-12-31T23:59:59Z",
+    "features": [
+      "Unlimited users",
+      "Advanced analytics",
+      "API access",
+      "Priority support",
+      "Custom integrations",
+      "White-label option"
+    ],
+    "monthly_cost": 500000,
+    "currency": "RUB"
+  },
+  "integrations": [
+    {
+      "name": "Telegram",
+      "status": "active",
+      "enabled": true
+    },
+    {
+      "name": "WhatsApp",
+      "status": "active",
+      "enabled": true
+    },
+    {
+      "name": "Slack",
+      "status": "active",
+      "enabled": true
+    },
+    {
+      "name": "Microsoft Teams",
+      "status": "active",
+      "enabled": false
+    },
+    {
+      "name": "Google Workspace",
+      "status": "active",
+      "enabled": true
+    },
+    {
+      "name": "Zoom",
+      "status": "active",
+      "enabled": true
+    }
+  ],
+  "created_at": "2020-01-15T00:00:00Z",
+  "updated_at": "2024-03-21T12:00:00Z",
+  "is_active": true,
+  "logo_url": "https://hr-solutions.ru/logo.png",
+  "favicon_url": "https://hr-solutions.ru/favicon.ico"
+}

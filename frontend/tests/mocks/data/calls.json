@@ -1,0 +1,312 @@
+[
+  {
+    "id": 1,
+    "title": "Очень длинное название звонка для тестирования переноса текста и усечения в пользовательском интерфейсе - Обсуждение квартальных результатов и планирование стратегии развития компании на следующий год",
+    "status": "completed",
+    "duration": 3600,
+    "started_at": "2024-03-15T10:00:00Z",
+    "ended_at": "2024-03-15T11:00:00Z",
+    "recording_url": "https://example.com/recordings/call-1.mp3",
+    "transcript": "Полная транскрипция звонка здесь. Обсуждались важные вопросы бизнеса, стратегия развития, финансовые показатели...",
+    "summary": "В ходе встречи обсуждались квартальные результаты компании. Выручка выросла на 15% по сравнению с предыдущим кварталом. Были определены ключевые направления развития на следующий год.",
+    "participants": [
+      {
+        "id": 1,
+        "name": "Александр Петрович Длинноефамилиев-Константинопольский",
+        "email": "aleksandr.dlouhyprijmeni@example.com",
+        "role": "CEO",
+        "speaking_time": 1800,
+        "speaking_percentage": 50.0,
+        "interruptions": 3,
+        "questions_asked": 5
+      },
+      {
+        "id": 2,
+        "name": "Мария Ивановна Смирнова",
+        "email": "maria.smirnova@example.com",
+        "role": "CFO",
+        "speaking_time": 1200,
+        "speaking_percentage": 33.3,
+        "interruptions": 1,
+        "questions_asked": 8
+      },
+      {
+        "id": 3,
+        "name": "Иван Сидоров",
+        "email": "ivan.sidorov@example.com",
+        "role": "CTO",
+        "speaking_time": 600,
+        "speaking_percentage": 16.7,
+        "interruptions": 0,
+        "questions_asked": 2
+      }
+    ],
+    "tags": ["квартальный отчет", "стратегия", "финансы"],
+    "sentiment": "positive",
+    "action_items": [
+      "Подготовить детальный отчет по продажам",
+      "Организовать встречу с инвесторами",
+      "Утвердить бюджет на следующий квартал"
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Собеседование: Senior Full-Stack Developer",
+    "status": "completed",
+    "duration": 2700,
+    "started_at": "2024-03-16T14:00:00Z",
+    "ended_at": "2024-03-16T14:45:00Z",
+    "recording_url": "https://example.com/recordings/call-2.mp3",
+    "transcript": "Кандидат: Здравствуйте! HR: Добрый день, расскажите о себе...",
+    "summary": "Проведено техническое интервью с кандидатом на позицию Senior Full-Stack Developer. Кандидат имеет 7 лет опыта работы с React и Node.js. Демонстрирует сильные навыки в архитектуре приложений.",
+    "participants": [
+      {
+        "id": 4,
+        "name": "Елена Николаевна Рекрутерова",
+        "email": "elena.recruiter@example.com",
+        "role": "HR Manager",
+        "speaking_time": 1350,
+        "speaking_percentage": 50.0,
+        "interruptions": 2,
+        "questions_asked": 12
+      },
+      {
+        "id": 5,
+        "name": "Дмитрий Программистов",
+        "email": "dmitry.candidate@gmail.com",
+        "role": "Candidate",
+        "speaking_time": 1350,
+        "speaking_percentage": 50.0,
+        "interruptions": 0,
+        "questions_asked": 3
+      }
+    ],
+    "tags": ["собеседование", "developer", "hiring"],
+    "sentiment": "neutral",
+    "action_items": [
+      "Отправить тестовое задание кандидату",
+      "Запланировать второй раунд интервью"
+    ]
+  },
+  {
+    "id": 3,
+    "title": "Ежедневный стендап команды разработки",
+    "status": "processing",
+    "duration": 900,
+    "started_at": "2024-03-17T09:00:00Z",
+    "ended_at": "2024-03-17T09:15:00Z",
+    "recording_url": "https://example.com/recordings/call-3.mp3",
+    "transcript": null,
+    "summary": null,
+    "participants": [
+      {
+        "id": 6,
+        "name": "Команда из 5 человек",
+        "email": "team@example.com",
+        "role": "Development Team",
+        "speaking_time": 180,
+        "speaking_percentage": 20.0,
+        "interruptions": 0,
+        "questions_asked": 0
+      }
+    ],
+    "tags": ["standup", "daily", "development"],
+    "sentiment": null,
+    "action_items": []
+  },
+  {
+    "id": 4,
+    "title": "Экстренное совещание по критической проблеме в production!!!",
+    "status": "completed",
+    "duration": 1800,
+    "started_at": "2024-03-17T23:30:00Z",
+    "ended_at": "2024-03-18T00:00:00Z",
+    "recording_url": "https://example.com/recordings/call-4.mp3",
+    "transcript": "СРОЧНО! Упал сервер! Что делать?!",
+    "summary": "Экстренное совещание по поводу критической ошибки в production. База данных была перегружена из-за неоптимизированного запроса. Проблема была оперативно решена путем отката последнего деплоя.",
+    "participants": [
+      {
+        "id": 7,
+        "name": "Сергей Девопсов",
+        "email": "sergey.devops@example.com",
+        "role": "DevOps Engineer",
+        "speaking_time": 1000,
+        "speaking_percentage": 55.5,
+        "interruptions": 8,
+        "questions_asked": 15
+      },
+      {
+        "id": 8,
+        "name": "Анна Бэкендова",
+        "email": "anna.backend@example.com",
+        "role": "Backend Developer",
+        "speaking_time": 800,
+        "speaking_percentage": 44.5,
+        "interruptions": 5,
+        "questions_asked": 10
+      }
+    ],
+    "tags": ["urgent", "production", "incident", "критический"],
+    "sentiment": "negative",
+    "action_items": [
+      "Откатить последний деплой",
+      "Провести post-mortem анализ",
+      "Добавить мониторинг для предотвращения подобных инцидентов"
+    ]
+  },
+  {
+    "id": 5,
+    "title": "",
+    "status": "failed",
+    "duration": 0,
+    "started_at": "2024-03-18T10:00:00Z",
+    "ended_at": null,
+    "recording_url": null,
+    "transcript": null,
+    "summary": null,
+    "participants": [],
+    "tags": [],
+    "sentiment": null,
+    "action_items": []
+  },
+  {
+    "id": 6,
+    "title": "Презентация новой функциональности для клиента АО 'Очень Длинное Название Компании с Ограниченной Ответственностью и Дополнительными Словами для Тестирования'",
+    "status": "completed",
+    "duration": 5400,
+    "started_at": "2024-03-19T11:00:00Z",
+    "ended_at": "2024-03-19T12:30:00Z",
+    "recording_url": "https://example.com/recordings/call-6.mp3",
+    "transcript": "Добрый день уважаемые коллеги! Сегодня мы представим вам новую функциональность...",
+    "summary": "Презентация новых возможностей системы для ключевого клиента. Продемонстрированы улучшения в аналитике, новый дашборд и интеграция с внешними системами. Клиент остался доволен и готов к внедрению.",
+    "participants": [
+      {
+        "id": 9,
+        "name": "Ольга Менеджерова-Продажная",
+        "email": "olga.sales@example.com",
+        "role": "Sales Manager",
+        "speaking_time": 2700,
+        "speaking_percentage": 50.0,
+        "interruptions": 1,
+        "questions_asked": 8
+      },
+      {
+        "id": 10,
+        "name": "Клиент Важный Васильевич",
+        "email": "important.client@verylongcompanyname.ru",
+        "role": "Client Representative",
+        "speaking_time": 2160,
+        "speaking_percentage": 40.0,
+        "interruptions": 10,
+        "questions_asked": 20
+      },
+      {
+        "id": 11,
+        "name": "Техподдержка",
+        "email": "support@example.com",
+        "role": "Technical Support",
+        "speaking_time": 540,
+        "speaking_percentage": 10.0,
+        "interruptions": 0,
+        "questions_asked": 2
+      }
+    ],
+    "tags": ["презентация", "клиент", "demo", "продажи"],
+    "sentiment": "positive",
+    "action_items": [
+      "Подготовить договор на внедрение",
+      "Назначить менеджера проекта",
+      "Составить план обучения пользователей"
+    ]
+  },
+  {
+    "id": 7,
+    "title": "Планерка отдела маркетинга - обсуждение стратегии продвижения на Q2 2024",
+    "status": "completed",
+    "duration": 4200,
+    "started_at": "2024-03-20T15:00:00Z",
+    "ended_at": "2024-03-20T16:10:00Z",
+    "recording_url": "https://example.com/recordings/call-7.mp3",
+    "transcript": "Повестка дня: 1. Анализ текущих кампаний 2. Планирование новых активностей...",
+    "summary": "Обсуждение маркетинговой стратегии на второй квартал. Проанализированы результаты текущих рекламных кампаний в социальных сетях. Запланированы новые активности: контекстная реклама, email-маркетинг, участие в отраслевых конференциях.",
+    "participants": [
+      {
+        "id": 12,
+        "name": "Виктория Маркетологова",
+        "email": "victoria.marketing@example.com",
+        "role": "Marketing Director",
+        "speaking_time": 2100,
+        "speaking_percentage": 50.0,
+        "interruptions": 5,
+        "questions_asked": 10
+      },
+      {
+        "id": 13,
+        "name": "Максим Контентов",
+        "email": "maxim.content@example.com",
+        "role": "Content Manager",
+        "speaking_time": 1260,
+        "speaking_percentage": 30.0,
+        "interruptions": 2,
+        "questions_asked": 5
+      },
+      {
+        "id": 14,
+        "name": "SMM Специалист Алиса",
+        "email": "alice.smm@example.com",
+        "role": "SMM Specialist",
+        "speaking_time": 840,
+        "speaking_percentage": 20.0,
+        "interruptions": 1,
+        "questions_asked": 3
+      }
+    ],
+    "tags": ["маркетинг", "планирование", "Q2", "стратегия"],
+    "sentiment": "positive",
+    "action_items": [
+      "Разработать креативы для рекламных кампаний",
+      "Согласовать бюджет с финансовым директором",
+      "Подготовить контент-план на апрель"
+    ]
+  },
+  {
+    "id": 8,
+    "title": "1-on-1 встреча: обратная связь и обсуждение карьерного роста",
+    "status": "completed",
+    "duration": 1800,
+    "started_at": "2024-03-21T13:00:00Z",
+    "ended_at": "2024-03-21T13:30:00Z",
+    "recording_url": "https://example.com/recordings/call-8.mp3",
+    "transcript": "Руководитель: Как у тебя дела? Сотрудник: Спасибо, в целом хорошо...",
+    "summary": "Проведена персональная встреча с сотрудником для обсуждения его достижений, сложностей и карьерных амбиций. Сотрудник заинтересован в развитии лидерских навыков и переходе на позицию тимлида в течение года.",
+    "participants": [
+      {
+        "id": 15,
+        "name": "Руководитель Отдела",
+        "email": "manager@example.com",
+        "role": "Team Lead",
+        "speaking_time": 900,
+        "speaking_percentage": 50.0,
+        "interruptions": 3,
+        "questions_asked": 15
+      },
+      {
+        "id": 16,
+        "name": "Младший Разработчик",
+        "email": "junior.dev@example.com",
+        "role": "Junior Developer",
+        "speaking_time": 900,
+        "speaking_percentage": 50.0,
+        "interruptions": 0,
+        "questions_asked": 5
+      }
+    ],
+    "tags": ["1-on-1", "feedback", "карьера", "развитие"],
+    "sentiment": "positive",
+    "action_items": [
+      "Записаться на курс по лидерству",
+      "Начать менторить стажера",
+      "Подготовиться к следующей встрече через месяц"
+    ]
+  }
+]

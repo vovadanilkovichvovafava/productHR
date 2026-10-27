@@ -1,0 +1,355 @@
+[
+  {
+    "id": 1,
+    "type": "person",
+    "name": "Александр Петрович Длинноефамилиев-Константинопольский",
+    "company": "ООО 'Очень Длинное Название Компании с Ограниченной Ответственностью и Дополнительными Словами'",
+    "position": "Генеральный директор по развитию и стратегическому планированию",
+    "email": "a.dlinnoefamiliev-konstantinopolsky@verylongcompanydomainname.ru",
+    "phone": "+7 (999) 123-45-67",
+    "additional_phones": [
+      "+7 (999) 123-45-68",
+      "+7 (999) 123-45-69"
+    ],
+    "address": "Москва, ул. Тверская, д. 1, корп. 2, стр. 3, офис 456",
+    "notes": "Ключевой клиент. Предпочитает общение по email. Важно: всегда согласовывать встречи заранее минимум за неделю. Не звонить после 18:00.",
+    "tags": ["VIP", "клиент", "руководитель"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/aleksandr-dlouhy",
+      "telegram": "@alex_long_name",
+      "facebook": null
+    },
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-03-20T15:30:00Z",
+    "last_contact_date": "2024-03-19T11:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/aleksandr.jpg"
+  },
+  {
+    "id": 2,
+    "type": "person",
+    "name": "Мария Ивановна Смирнова",
+    "company": "АО 'Инновационные Технологии'",
+    "position": "Финансовый директор",
+    "email": "m.smirnova@innovtech.ru",
+    "phone": "+7 (495) 234-56-78",
+    "additional_phones": [],
+    "address": "Санкт-Петербург, Невский проспект, д. 100",
+    "notes": "Отвечает за финансовые вопросы. Очень пунктуальна.",
+    "tags": ["клиент", "финансы", "CFO"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/maria-smirnova",
+      "telegram": null,
+      "facebook": "https://facebook.com/maria.smirnova"
+    },
+    "created_at": "2024-01-20T11:00:00Z",
+    "updated_at": "2024-03-15T14:20:00Z",
+    "last_contact_date": "2024-03-15T10:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/maria.jpg"
+  },
+  {
+    "id": 3,
+    "type": "company",
+    "name": "ПАО 'МегаКорпорация с Невероятно Длинным Юридическим Названием для Тестирования Интерфейса'",
+    "company": null,
+    "position": null,
+    "email": "info@megacorp-very-long-domain-name-for-testing.com",
+    "phone": "+7 (800) 555-35-35",
+    "additional_phones": [
+      "+7 (495) 555-35-36",
+      "+7 (812) 555-35-37"
+    ],
+    "address": "Москва, Международная улица, д. 10, Бизнес-центр 'Башня', этаж 25",
+    "notes": "Крупнейший партнер. Годовой контракт на сумму 50 млн рублей. Требует особого внимания и индивидуального подхода. Регулярные встречи каждый квартал.",
+    "tags": ["партнер", "VIP", "крупный клиент", "стратегический"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/company/megacorp",
+      "telegram": "@megacorp_official",
+      "facebook": "https://facebook.com/megacorp"
+    },
+    "created_at": "2023-12-01T09:00:00Z",
+    "updated_at": "2024-03-21T10:00:00Z",
+    "last_contact_date": "2024-03-19T11:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/logos/megacorp.png"
+  },
+  {
+    "id": 4,
+    "type": "person",
+    "name": "Иван Сидоров",
+    "company": "Фриланс",
+    "position": "Senior Full-Stack Developer",
+    "email": "ivan.sidorov@gmail.com",
+    "phone": "+7 (999) 888-77-66",
+    "additional_phones": [],
+    "address": "",
+    "notes": "Кандидат на позицию CTO. Сильные навыки в React, Node.js, Python.",
+    "tags": ["кандидат", "developer", "фриланс"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/ivan-sidorov",
+      "telegram": "@ivan_dev",
+      "github": "https://github.com/ivansidorov"
+    },
+    "created_at": "2024-03-10T12:00:00Z",
+    "updated_at": "2024-03-16T16:00:00Z",
+    "last_contact_date": "2024-03-16T14:00:00Z",
+    "is_active": true,
+    "avatar_url": null
+  },
+  {
+    "id": 5,
+    "type": "person",
+    "name": "Елена Николаевна Рекрутерова",
+    "company": "ООО 'НашаКомпания'",
+    "position": "HR Manager",
+    "email": "elena.recruiter@ourcompany.com",
+    "phone": "+7 (495) 123-45-67",
+    "additional_phones": [
+      "+7 (916) 123-45-67"
+    ],
+    "address": "Москва, ул. Ленина, д. 5",
+    "notes": "Внутренний сотрудник. Отвечает за найм персонала.",
+    "tags": ["сотрудник", "HR", "внутренний"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/elena-recruiter",
+      "telegram": "@elena_hr",
+      "facebook": null
+    },
+    "created_at": "2023-11-01T09:00:00Z",
+    "updated_at": "2024-03-16T15:00:00Z",
+    "last_contact_date": "2024-03-16T14:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/elena.jpg"
+  },
+  {
+    "id": 6,
+    "type": "person",
+    "name": "Дмитрий Программистов",
+    "company": null,
+    "position": "Backend Developer",
+    "email": "dmitry.candidate@gmail.com",
+    "phone": "+7 (903) 555-12-34",
+    "additional_phones": [],
+    "address": null,
+    "notes": "Кандидат. Прошел первое интервью успешно. Ожидается второй раунд.",
+    "tags": ["кандидат", "backend", "перспективный"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/dmitry-prog",
+      "telegram": "@dmitry_dev",
+      "github": "https://github.com/dmitryprog"
+    },
+    "created_at": "2024-03-16T15:00:00Z",
+    "updated_at": "2024-03-16T15:00:00Z",
+    "last_contact_date": "2024-03-16T14:00:00Z",
+    "is_active": true,
+    "avatar_url": null
+  },
+  {
+    "id": 7,
+    "type": "company",
+    "name": "ИП Петров Василий Иванович",
+    "company": null,
+    "position": null,
+    "email": "petrov.ip@yandex.ru",
+    "phone": "+7 (926) 777-88-99",
+    "additional_phones": [],
+    "address": "Москва, ул. Пушкина, д. 10, кв. 5",
+    "notes": "Малый бизнес. Заинтересован в нашем продукте для автоматизации HR-процессов.",
+    "tags": ["клиент", "малый бизнес", "потенциальный"],
+    "social_media": {},
+    "created_at": "2024-02-15T10:00:00Z",
+    "updated_at": "2024-03-01T12:00:00Z",
+    "last_contact_date": "2024-03-01T10:00:00Z",
+    "is_active": true,
+    "avatar_url": null
+  },
+  {
+    "id": 8,
+    "type": "person",
+    "name": "Ольга Менеджерова-Продажная",
+    "company": "ООО 'НашаКомпания'",
+    "position": "Sales Manager / Менеджер по продажам корпоративных решений",
+    "email": "olga.sales@ourcompany.com",
+    "phone": "+7 (495) 999-88-77",
+    "additional_phones": [
+      "+7 (915) 999-88-77"
+    ],
+    "address": "Москва, ул. Арбат, д. 20",
+    "notes": "Внутренний сотрудник. Отвечает за продажи крупным клиентам. Высокие показатели эффективности. Премирована в прошлом квартале.",
+    "tags": ["сотрудник", "продажи", "внутренний", "топ исполнитель"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/olga-sales",
+      "telegram": "@olga_sales",
+      "facebook": "https://facebook.com/olga.sales"
+    },
+    "created_at": "2023-09-01T09:00:00Z",
+    "updated_at": "2024-03-19T13:00:00Z",
+    "last_contact_date": "2024-03-19T11:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/olga.jpg"
+  },
+  {
+    "id": 9,
+    "type": "person",
+    "name": "Клиент Важный Васильевич",
+    "company": "АО 'Очень Длинное Название Компании с Ограниченной Ответственностью и Дополнительными Словами для Тестирования'",
+    "position": "Представитель заказчика / Руководитель отдела автоматизации бизнес-процессов",
+    "email": "important.client@verylongcompanyname.ru",
+    "phone": "+7 (499) 111-22-33",
+    "additional_phones": [
+      "+7 (926) 111-22-33",
+      "+7 (916) 111-22-34"
+    ],
+    "address": "Москва, Кутузовский проспект, д. 1",
+    "notes": "Представитель ключевого клиента. Очень требователен к качеству. Важно всегда быть на связи и оперативно отвечать на запросы. Предпочитает детальные презентации с демонстрацией всех возможностей системы.",
+    "tags": ["клиент", "VIP", "требовательный", "ключевой"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/important-client",
+      "telegram": null,
+      "facebook": null
+    },
+    "created_at": "2024-01-10T10:00:00Z",
+    "updated_at": "2024-03-19T13:00:00Z",
+    "last_contact_date": "2024-03-19T11:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/client.jpg"
+  },
+  {
+    "id": 10,
+    "type": "person",
+    "name": "Виктория Маркетологова",
+    "company": "ООО 'НашаКомпания'",
+    "position": "Marketing Director",
+    "email": "victoria.marketing@ourcompany.com",
+    "phone": "+7 (495) 777-66-55",
+    "additional_phones": [],
+    "address": "Москва, ул. Маркса, д. 15",
+    "notes": "Внутренний сотрудник. Руководитель отдела маркетинга.",
+    "tags": ["сотрудник", "маркетинг", "руководитель", "внутренний"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/victoria-marketing",
+      "telegram": "@vika_marketing",
+      "instagram": "https://instagram.com/vika_marketing"
+    },
+    "created_at": "2023-10-01T09:00:00Z",
+    "updated_at": "2024-03-20T16:00:00Z",
+    "last_contact_date": "2024-03-20T15:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/victoria.jpg"
+  },
+  {
+    "id": 11,
+    "type": "person",
+    "name": "",
+    "company": "Неизвестная компания",
+    "position": "",
+    "email": "unknown@example.com",
+    "phone": "",
+    "additional_phones": [],
+    "address": "",
+    "notes": "Контакт без имени. Требует уточнения данных.",
+    "tags": ["неполные данные", "требует уточнения"],
+    "social_media": {},
+    "created_at": "2024-03-21T10:00:00Z",
+    "updated_at": "2024-03-21T10:00:00Z",
+    "last_contact_date": null,
+    "is_active": false,
+    "avatar_url": null
+  },
+  {
+    "id": 12,
+    "type": "company",
+    "name": "Startup XYZ",
+    "company": null,
+    "position": null,
+    "email": "contact@startupxyz.io",
+    "phone": "+7 (999) 000-11-22",
+    "additional_phones": [],
+    "address": "Москва, Сколково, Инновационный центр",
+    "notes": "Молодой стартап в области AI. Потенциальный партнер для интеграций.",
+    "tags": ["партнер", "стартап", "AI", "перспективный"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/company/startup-xyz",
+      "telegram": "@startupxyz",
+      "twitter": "https://twitter.com/startupxyz"
+    },
+    "created_at": "2024-03-05T14:00:00Z",
+    "updated_at": "2024-03-15T11:00:00Z",
+    "last_contact_date": "2024-03-15T10:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/logos/startupxyz.png"
+  },
+  {
+    "id": 13,
+    "type": "person",
+    "name": "Максим Контентов",
+    "company": "ООО 'НашаКомпания'",
+    "position": "Content Manager / Менеджер по контенту и работе с социальными сетями",
+    "email": "maxim.content@ourcompany.com",
+    "phone": "+7 (916) 555-44-33",
+    "additional_phones": [],
+    "address": "Москва, ул. Тверская, д. 25, кв. 100",
+    "notes": "Внутренний сотрудник. Отвечает за создание контента для блога и социальных сетей. Креативный подход к работе.",
+    "tags": ["сотрудник", "контент", "SMM", "внутренний"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/maxim-content",
+      "telegram": "@maxim_content",
+      "instagram": "https://instagram.com/maxim_content",
+      "twitter": "https://twitter.com/maxim_content"
+    },
+    "created_at": "2024-01-15T09:00:00Z",
+    "updated_at": "2024-03-20T17:00:00Z",
+    "last_contact_date": "2024-03-20T15:00:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/maxim.jpg"
+  },
+  {
+    "id": 14,
+    "type": "person",
+    "name": "Анна Бэкендова",
+    "company": "ООО 'НашаКомпания'",
+    "position": "Backend Developer / Senior Python/Django разработчик",
+    "email": "anna.backend@ourcompany.com",
+    "phone": "+7 (926) 333-22-11",
+    "additional_phones": [],
+    "address": "Санкт-Петербург, ул. Ломоносова, д. 5",
+    "notes": "Внутренний сотрудник. Один из лучших разработчиков в команде. Специализируется на Python/Django. Работает удаленно из Санкт-Петербурга.",
+    "tags": ["сотрудник", "developer", "backend", "Python", "удаленно", "внутренний"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/anna-backend",
+      "telegram": "@anna_backend",
+      "github": "https://github.com/annabackend"
+    },
+    "created_at": "2023-08-01T09:00:00Z",
+    "updated_at": "2024-03-18T01:00:00Z",
+    "last_contact_date": "2024-03-17T23:30:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/anna.jpg"
+  },
+  {
+    "id": 15,
+    "type": "person",
+    "name": "Сергей Девопсов",
+    "company": "ООО 'НашаКомпания'",
+    "position": "DevOps Engineer / Инженер по автоматизации и поддержке инфраструктуры",
+    "email": "sergey.devops@ourcompany.com",
+    "phone": "+7 (915) 444-55-66",
+    "additional_phones": [
+      "+7 (495) 444-55-67"
+    ],
+    "address": "Москва, ул. Бауманская, д. 10",
+    "notes": "Внутренний сотрудник. Отвечает за инфраструктуру и CI/CD. Всегда на связи в случае инцидентов. Спас компанию во время критической проблемы в production.",
+    "tags": ["сотрудник", "DevOps", "инфраструктура", "герой", "внутренний"],
+    "social_media": {
+      "linkedin": "https://linkedin.com/in/sergey-devops",
+      "telegram": "@sergey_devops",
+      "github": "https://github.com/sergeydevops"
+    },
+    "created_at": "2023-07-01T09:00:00Z",
+    "updated_at": "2024-03-18T01:00:00Z",
+    "last_contact_date": "2024-03-17T23:30:00Z",
+    "is_active": true,
+    "avatar_url": "https://example.com/avatars/sergey.jpg"
+  }
+]

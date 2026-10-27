@@ -1,0 +1,52 @@
+# Node modules (rebuilt in Docker)
+**/node_modules
+
+# Python venv (пересоздаётся в Docker). В git не лежит, но при локальной
+# сборке попадал бы в контекст — а это полгигабайта на ровном месте.
+**/.venv
+
+# Build outputs (rebuilt in Docker)
+frontend/dist
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Python cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+*.egg-info
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+**/*.test.*
+**/*.spec.*
+coverage/
+.pytest_cache/
+
+# Documentation
+README.md
+*.md
+
+# Nested Dockerfiles (we use root Dockerfile only)
+backend/Dockerfile
+frontend/Dockerfile

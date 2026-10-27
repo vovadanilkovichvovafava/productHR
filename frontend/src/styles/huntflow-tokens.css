@@ -1,0 +1,1019 @@
+/* =========================================================================
+   Huntflow Design Tokens
+   ----------------------------------------------------------------------
+   Префикс --hf-* чтобы не конфликтовать с существующими --tw-dark-* / theme.
+   ========================================================================= */
+
+:root {
+  /* ===== Базовые палитры (50 → 900) ===== */
+
+  /* Main neutrals — основной нейтральный ряд */
+  --hf-main-50:  #f8f8f8;
+  --hf-main-75:  #f9f9f9;
+  --hf-main-100: #f5f5f5;
+  --hf-main-200: #ededed;
+  --hf-main-300: #d7d7d7;
+  --hf-main-400: #cdcdcd;
+  --hf-main-500: #b4b4b4;
+  --hf-main-600: #989898;
+  --hf-main-700: #696969;
+  --hf-main-750: #444444;
+  --hf-main-800: #1e1e1e;
+  --hf-main-900: #050505;
+  --hf-black: #000000;
+  --hf-white: #ffffff;
+
+  /* Cyan — бренд-акцент */
+  --hf-cyan-50:  #f6fdfe;
+  --hf-cyan-100: #e8fbff;
+  --hf-cyan-200: #d6f6fd;
+  --hf-cyan-300: #97dff2;
+  --hf-cyan-400: #56d2ec;
+  --hf-cyan-500: #25cfe8;
+  --hf-cyan-600: #0ab3ce;
+  --hf-cyan-700: #0093ac;
+  --hf-cyan-800: #00758a;
+  --hf-cyan-900: #005766;
+
+  /* Green — accent action */
+  --hf-green-50:  #f4faec;
+  --hf-green-100: #e8f5d8;
+  --hf-green-200: #d3ebb3;
+  --hf-green-300: #b6df82;
+  --hf-green-400: #94ce45;
+  --hf-green-500: #7ac016;
+  --hf-green-600: #70b60b;
+  --hf-green-700: #5f9b09;
+  --hf-green-800: #4d7d08;
+  --hf-green-900: #365806;
+
+  /* Pistou green — switch active */
+  --hf-pistou-green-500: #7ac016;
+  --hf-pistou-green-600: #70b60b;
+
+  /* Red — danger */
+  --hf-red-50:  #fff9f9;
+  --hf-red-100: #ffecec;
+  --hf-red-200: #ffd8d8;
+  --hf-red-300: #ffb3af;
+  --hf-red-400: #ff7a73;
+  --hf-red-500: #ff533b;
+  --hf-red-600: #ff0000;
+  --hf-red-700: #df0000;
+  --hf-red-800: #b80000;
+  --hf-red-900: #8f0000;
+
+  /* Yellow — warning */
+  --hf-yellow-300: #ffd22e;
+  --hf-yellow-400: #ffbd22;
+  --hf-yellow-500: #f5a400;
+  --hf-yellow-600: #e27000;
+
+  /* Дополнительные палитры (для статусов/тегов) */
+
+  /* Alpha overlays (main on transparent) */
+  --hf-alpha-100: rgba(5, 5, 5, 0.03);
+  --hf-alpha-150: rgba(5, 5, 5, 0.05);
+  --hf-alpha-200: rgba(5, 5, 5, 0.08);
+  --hf-alpha-250: rgba(0, 0, 0, 0.12);
+  --hf-alpha-300: rgba(5, 5, 5, 0.16);
+  --hf-alpha-400: rgba(5, 5, 5, 0.20);
+  --hf-alpha-600: rgba(5, 5, 5, 0.45);
+  --hf-black-alpha-04: rgba(0, 0, 0, 0.04);
+  --hf-black-alpha-05: rgba(0, 0, 0, 0.05);
+  --hf-black-alpha-06: rgba(0, 0, 0, 0.06);
+  --hf-black-alpha-07: rgba(0, 0, 0, 0.07);
+  --hf-black-alpha-08: rgba(0, 0, 0, 0.08);
+  --hf-black-alpha-10: rgba(0, 0, 0, 0.10);
+  --hf-black-alpha-14: rgba(0, 0, 0, 0.14);
+  --hf-black-alpha-16: rgba(0, 0, 0, 0.16);
+  --hf-black-alpha-20: rgba(0, 0, 0, 0.20);
+  --hf-black-alpha-25: rgba(0, 0, 0, 0.25);
+  --hf-black-alpha-30: rgba(0, 0, 0, 0.30);
+  --hf-black-alpha-35: rgba(0, 0, 0, 0.35);
+  --hf-black-alpha-50: rgba(0, 0, 0, 0.50);
+  --hf-black-alpha-60: rgba(0, 0, 0, 0.60);
+  --hf-black-alpha-65: rgba(0, 0, 0, 0.65);
+  --hf-black-alpha-70: rgba(0, 0, 0, 0.70);
+  --hf-black-alpha-80: rgba(0, 0, 0, 0.80);
+  --hf-white-alpha-02: rgba(255, 255, 255, 0.02);
+  --hf-white-alpha-03: rgba(255, 255, 255, 0.03);
+  --hf-white-alpha-04: rgba(255, 255, 255, 0.04);
+  --hf-white-alpha-05: rgba(255, 255, 255, 0.05);
+  --hf-white-alpha-06: rgba(255, 255, 255, 0.06);
+  --hf-white-alpha-08: rgba(255, 255, 255, 0.08);
+  --hf-white-alpha-10: rgba(255, 255, 255, 0.10);
+  --hf-white-alpha-12: rgba(255, 255, 255, 0.12);
+  --hf-white-alpha-15: rgba(255, 255, 255, 0.15);
+  --hf-white-alpha-16: rgba(255, 255, 255, 0.16);
+  --hf-white-alpha-20: rgba(255, 255, 255, 0.20);
+  --hf-white-alpha-25: rgba(255, 255, 255, 0.25);
+  --hf-white-alpha-30: rgba(255, 255, 255, 0.30);
+  --hf-white-alpha-35: rgba(255, 255, 255, 0.35);
+  --hf-white-alpha-40: rgba(255, 255, 255, 0.40);
+  --hf-white-alpha-45: rgba(255, 255, 255, 0.45);
+  --hf-white-alpha-50: rgba(255, 255, 255, 0.50);
+  --hf-white-alpha-55: rgba(255, 255, 255, 0.55);
+  --hf-white-alpha-56: rgba(255, 255, 255, 0.56);
+  --hf-white-alpha-60: rgba(255, 255, 255, 0.60);
+  --hf-white-alpha-68: rgba(255, 255, 255, 0.68);
+  --hf-white-alpha-70: rgba(255, 255, 255, 0.70);
+  --hf-white-alpha-72: rgba(255, 255, 255, 0.72);
+  --hf-white-alpha-75: rgba(255, 255, 255, 0.75);
+  --hf-white-alpha-80: rgba(255, 255, 255, 0.80);
+  --hf-white-alpha-88: rgba(255, 255, 255, 0.88);
+  --hf-white-alpha-90: rgba(255, 255, 255, 0.90);
+
+  /* ===== Семантические токены ===== */
+
+  --hf-text-main:       var(--hf-main-900);
+  --hf-text-semilight:  var(--hf-main-600);
+  --hf-modal-backdrop:  rgba(5, 5, 5, 0.42);
+
+  --hf-link-default: var(--hf-cyan-700);
+  --hf-link-hover:   var(--hf-red-500);
+
+
+  /* Backgrounds */
+  --hf-bg-body:    #f2f2f2;
+  --hf-bg-surface: var(--hf-white);
+  --hf-bg-panel:   var(--hf-main-100);
+  --hf-bg-muted:   #f5f6f7;
+  --hf-bg-stage:   #f3f4f5;
+  --hf-bg-dark:    #1a1a24;
+  --hf-bg-dark-deep: #0a0a14;
+  --hf-bg-dark-panel: #161620;
+
+  /* Workspace shell */
+  --hf-workspace-bg:       var(--hf-bg-body);
+  --hf-workspace-divider:  var(--hf-main-200);
+
+  /* Buttons */
+  --hf-btn-disabled-bg:          #e8ebee;
+
+  /* Inputs */
+  --hf-input-bg:                       var(--hf-white);
+  --hf-input-border:                   var(--hf-main-300);
+  --hf-input-text:                     var(--hf-text-main);
+  --hf-input-placeholder:              var(--hf-text-semilight);
+  --hf-input-border-strong:            var(--hf-alpha-300);
+  --hf-input-border-strong-hover:      rgba(0, 0, 0, 0.24);
+
+  /* Tabs */
+  /* Активный таб подсвечивается cyan-500 (видели на huntflow при выборе) */
+
+  /* Sidebar (фирменный тёмно-синий, не зависит от app theme) */
+  --hf-sidebar-bg:               #1d2441;
+  --hf-sidebar-text:             var(--hf-white);
+  --hf-sidebar-text-secondary:   var(--hf-white-alpha-60);
+  --hf-sidebar-divider:          #BBA5D8;
+  --hf-sidebar-active-bg:        rgba(154, 211, 255, 0.17);
+  --hf-sidebar-active-text:      #32d9f1;
+  --hf-sidebar-resize:           #21c9e8;
+  --hf-sidebar-resize-handle:    #7d8797;
+  --hf-sidebar-status-active:    var(--hf-green-500);
+  --hf-sidebar-status-paused:    #d9bd2f;
+  --hf-sidebar-user-bg:          #bfeeff;
+  --hf-sidebar-user-text:        #0b6f9a;
+  --hf-sidebar-width-default:    266px;
+  --hf-sidebar-width:            var(--hf-sidebar-width-default);
+  --hf-sidebar-card-px:          14px;
+  --hf-sidebar-card-py:          14px;
+  --hf-sidebar-card-shadow:      inset -1px 0 0 var(--hf-white-alpha-04);
+  --hf-sidebar-top-tabs-pb:      10px;
+  --hf-sidebar-block-py:         5px;
+  --hf-sidebar-block-icon:       14px;
+  --hf-sidebar-block-fs:         8px;
+  --hf-sidebar-block-lh:         10px;
+  --hf-sidebar-block-stroke:     1.8;
+  --hf-sidebar-scroll-pr:        6px;
+  --hf-sidebar-nav-item-h:       40px;
+  --hf-sidebar-nav-gap:          12px;
+  --hf-sidebar-nav-px:           12px;
+  --hf-sidebar-nav-radius:       var(--hf-radius-s);
+  --hf-sidebar-nav-icon:         20px;
+  --hf-sidebar-nav-fs:           var(--hf-fs-s);
+  --hf-sidebar-nav-lh:           var(--hf-lh-primary);
+  --hf-sidebar-nav-fw:           var(--hf-fw-regular);
+  --hf-sidebar-secondary-fs:     var(--hf-fs-xxs);
+  --hf-sidebar-secondary-lh:     var(--hf-lh-secondary);
+  --hf-sidebar-divider-requests-mt: 19px;
+  --hf-sidebar-divider-requests-mb: 14px;
+  --hf-sidebar-divider-funnels-y:   17px;
+  --hf-sidebar-divider-closed-y:    18px;
+  --hf-sidebar-dot-size:         8px;
+  --hf-sidebar-dot-mt:           6px;
+  --hf-sidebar-request-gap:      10px;
+  --hf-sidebar-request-py:       1px;
+  --hf-sidebar-request-list-mt:  6px;
+  --hf-sidebar-subnav-py:        1px;
+  --hf-sidebar-subnav-px:        12px;
+  --hf-sidebar-subnav-indent:    var(--hf-space-3xl);
+  --hf-sidebar-subnav-radius:    var(--hf-radius-s);
+  --hf-sidebar-chevron-btn:      18px;
+  --hf-sidebar-chevron-icon:     13px;
+  --hf-sidebar-chevron-ml:       2px;
+  --hf-sidebar-chevron-radius:   var(--hf-radius-xs);
+  --hf-sidebar-funnels-search-h:  46px;
+  --hf-sidebar-funnels-option-h:  64px;
+  --hf-sidebar-funnels-avatar:    22px;
+  --hf-sidebar-fab-wrap:         63px;
+  --hf-sidebar-fab-wrap-my:      12px;
+  --hf-sidebar-fab-menu-bottom:  72px;
+  --hf-sidebar-fab-menu-z:       110;
+  --hf-sidebar-fab-menu-w:       300px;
+  --hf-sidebar-fab-menu-radius:  7px;
+  --hf-sidebar-fab-menu-py:      7px;
+  --hf-sidebar-fab-menu-shadow:  0 0 0 1px var(--hf-white-alpha-70), 0 3px 12px var(--hf-black-alpha-20);
+  --hf-sidebar-fab-menu-item-h:  40px;
+  --hf-sidebar-fab-menu-item-mx: 8px;
+  --hf-sidebar-fab-size:         63px;
+  --hf-sidebar-fab-icon:         39px;
+  --hf-sidebar-fab-stroke:       1.6;
+  --hf-sidebar-fab-shadow-inner: inset 0 2px 1px var(--hf-black-alpha-14);
+  --hf-sidebar-bottom-pt:        10px;
+  --hf-sidebar-bottom-mb:        6px;
+  --hf-sidebar-bottom-icon:      16px;
+  --hf-sidebar-user-gap:         9px;
+  --hf-sidebar-user-px:          10px;
+  --hf-sidebar-user-py:          6px;
+  --hf-sidebar-user-avatar:      32px;
+  --hf-sidebar-user-name-fs:     13px;
+  --hf-sidebar-user-name-lh:     17px;
+  --hf-sidebar-user-email-fs:    10px;
+  --hf-sidebar-user-email-lh:    14px;
+  --hf-sidebar-settings-btn:     28px;
+  --hf-sidebar-settings-icon:    15px;
+  --hf-sidebar-settings-radius:  6px;
+  --hf-sidebar-settings-scale:   1.06;
+  --hf-sidebar-user-chevron:     16px;
+  --hf-sidebar-user-menu-gap:    2px;
+  /* Была 80 — выше поповера уведомлений (NotifPeek, z-[40]/[41]/[45]), поэтому
+     полоска-ручка для растягивания сайдбара рисовалась ПОВЕРХ открытой
+     панели «Уведомления». Опущена ниже любого поповера/пика в приложении. */
+  --hf-sidebar-resizer-z:        20;
+  --hf-sidebar-resizer-right:    -8px;
+  --hf-sidebar-resizer-w:        14px;
+  --hf-sidebar-resizer-line-right: 6px;
+  --hf-sidebar-resizer-line-top: 8px;
+  --hf-sidebar-resizer-line-w:   2px;
+  --hf-sidebar-resizer-line-h:   calc(100% - 16px);
+  --hf-sidebar-resizer-handle-w: 3px;
+  --hf-sidebar-resizer-handle-h: 16px;
+  --hf-sidebar-resizer-handle-opacity-hover: 0.7;
+
+  /* HR settings popover */
+  --hf-settings-overlay-z:       260;
+  --hf-settings-modal-left:      31px;
+  --hf-settings-modal-top:       25px;
+  --hf-settings-modal-w:         805px;
+  --hf-settings-modal-max-h:     calc(100vh - 50px);
+  --hf-settings-modal-max-w:     calc(100vw - 62px);
+  --hf-settings-modal-shadow:    0 0 40px 0 var(--hf-black-alpha-16);
+  --hf-settings-header-min-h:    62px;
+  --hf-settings-close-top:       13px;
+  --hf-settings-close-right:     21px;
+  --hf-settings-close-size:      24px;
+  --hf-settings-close-icon:      18px;
+  --hf-settings-body-pb:         26px;
+  --hf-settings-search-h:        41px;
+  --hf-settings-search-radius:   5px;
+  --hf-settings-search-pl:       42px;
+  --hf-settings-search-pr:       10px;
+  --hf-settings-search-icon:     20px;
+  --hf-settings-search-icon-left: 12px;
+  --hf-settings-grid-col:        243px;
+  --hf-settings-grid-gap-x:      10px;
+  --hf-settings-section-mt:      27px;
+  --hf-settings-card-min-h:      83px;
+  --hf-settings-card-radius:     6px;
+  --hf-settings-card-icon:       20px;
+  --hf-settings-card-icon-stroke: 1.7;
+  --hf-settings-title-fs:        var(--hf-fs-m);
+  --hf-settings-title-lh:        var(--hf-lh-primary);
+  --hf-settings-card-desc-mt:    4px;
+  --hf-settings-card-desc-fs:    var(--hf-fs-xxs);
+  --hf-settings-card-desc-lh:    var(--hf-lh-secondary);
+
+  /* Candidate edit modal */
+  --hf-edit-overlay-z:              50;
+  --hf-edit-overlay-top:            75px;
+  --hf-edit-modal-h:                1022.667px;
+  --hf-edit-modal-w:                764px;
+  --hf-edit-modal-max-w:            calc(100vw - 16px);
+  --hf-edit-modal-radius:           16px;
+  --hf-edit-modal-lh:               22px;
+  --hf-edit-header-h:               113.333px;
+  --hf-edit-header-border:          1.333px;
+  --hf-edit-header-pr:              60px;
+  --hf-edit-avatar:                 64px;
+  --hf-edit-title-fs:               20px;
+  --hf-edit-title-lh:               28px;
+  --hf-edit-close-top:              20px;
+  --hf-edit-close-right:            24px;
+  --hf-edit-close-h:                28.771px;
+  --hf-edit-close-w:                28px;
+  --hf-edit-close-icon:             28px;
+  --hf-edit-body-h:                 836px;
+  --hf-edit-left-w:                 270px;
+  --hf-edit-column-py:              24px;
+  --hf-edit-label-mb:               4px;
+  --hf-edit-label-fs:               var(--hf-fs-xs);
+  --hf-edit-label-lh:               var(--hf-lh-primary);
+  --hf-edit-field-h:                40px;
+  --hf-edit-field-radius:           var(--hf-radius-s);
+  --hf-edit-field-px:               16px;
+  --hf-edit-field-pr-clear:         52px;
+  --hf-edit-field-fs:               var(--hf-fs-xs);
+  --hf-edit-field-lh:               var(--hf-lh-primary);
+  --hf-edit-clear-offset:           1.333px;
+  --hf-edit-clear-h:                37.333px;
+  --hf-edit-clear-w:                36px;
+  --hf-edit-clear-icon:             14px;
+  --hf-edit-error-fs:               11px;
+  --hf-edit-error-lh:               15px;
+  --hf-edit-source-icon:            24px;
+  --hf-edit-resume-h:               460px;
+  --hf-edit-file-mt:                10px;
+  --hf-edit-file-h:                 28px;
+  --hf-edit-file-name-min-w:        228.583px;
+  --hf-edit-file-icon:              18px;
+  --hf-edit-file-close-icon:        16px;
+  --hf-edit-footer-h:               73.333px;
+  --hf-edit-footer-border:          1.333px;
+  --hf-edit-footer-py:              20px;
+  --hf-edit-btn-h:                  32px;
+  --hf-edit-btn-radius:             var(--hf-radius-s);
+  --hf-edit-btn-border:             1.333px;
+  --hf-edit-btn-px:                 12px;
+  --hf-edit-btn-fs:                 var(--hf-fs-xxs);
+  --hf-edit-btn-lh:                 var(--hf-lh-secondary);
+  --hf-edit-save-min-w:             100px;
+  --hf-edit-delete-min-w:           81px;
+  --hf-edit-cancel-min-w:           79px;
+
+  /* Candidate list settings modal */
+  --hf-list-settings-z:             120;
+  --hf-list-settings-top:           75px;
+  --hf-list-settings-w:             764px;
+  --hf-list-settings-radius:        16px;
+  --hf-list-settings-lh:            22px;
+  --hf-list-settings-header-h:      69px;
+  --hf-list-settings-x:             24px;
+  --hf-list-settings-title-fs:      20px;
+  --hf-list-settings-title-lh:      28px;
+  --hf-list-settings-close:         32px;
+  --hf-list-settings-close-radius:  6px;
+  --hf-list-settings-close-icon:    18px;
+  --hf-list-settings-heading-mb:    9px;
+  --hf-list-settings-heading-mb-sm: 7px;
+  --hf-list-settings-heading-fs:    var(--hf-fs-s);
+  --hf-list-settings-heading-lh:    22px;
+  --hf-list-settings-option-h:      20px;
+  --hf-list-settings-option-gap:    8px;
+  --hf-list-settings-option-fs:     var(--hf-fs-xs);
+  --hf-list-settings-option-lh:     20px;
+  --hf-list-settings-check:         16px;
+  --hf-list-settings-check-radius:  4px;
+  --hf-list-settings-check-icon:    11px;
+  --hf-list-settings-dot:           8px;
+  --hf-list-settings-footer-h:      73px;
+
+  /* Interview modal */
+  --hf-interview-overlay-z:          270;
+  --hf-interview-overlay-pt:         75px;
+  --hf-interview-modal-w:            764px;
+  --hf-interview-modal-h:            961.333px;
+  --hf-interview-modal-max-h:        calc(100vh - 99px);
+  --hf-interview-modal-fs:           var(--hf-fs-s);
+  --hf-interview-modal-lh:           22px;
+  --hf-interview-header-h:           84px;
+  --hf-interview-avatar:             64px;
+  --hf-interview-title-max-w:        600px;
+  --hf-interview-title-lh:           28px;
+  --hf-interview-close-top:          2px;
+  --hf-interview-close-size:         28px;
+  --hf-interview-close-icon:         22px;
+  --hf-interview-tabs-h:             50px;
+  --hf-interview-tab-h:              24px;
+  --hf-interview-tab-border:         2px;
+  --hf-interview-body-mx:            24px;
+  --hf-interview-body-h:             710.667px;
+  --hf-interview-main-w:             478px;
+  --hf-interview-side-w:             238px;
+  --hf-interview-main-py:            24px;
+  --hf-interview-sidebar-p:          24px;
+  --hf-interview-label-fs:           var(--hf-fs-xs);
+  --hf-interview-label-lh:           var(--hf-lh-primary);
+  --hf-interview-control-h:          40px;
+  --hf-interview-control-fs:         var(--hf-fs-xs);
+  --hf-interview-control-lh:         var(--hf-lh-primary);
+  --hf-interview-chevron-right:      12px;
+  --hf-interview-chevron-size:       16px;
+  --hf-interview-date-grid:          120px 182.4px 1fr;
+  --hf-interview-time-w:             80px;
+  --hf-interview-time-dash-w:        14.4px;
+  --hf-interview-timezone-gap:       3px;
+  --hf-interview-timezone-icon:      12px;
+  --hf-interview-zoom-h:             24px;
+  --hf-interview-zoom-w:             427.6px;
+  --hf-interview-zoom-gap:           10px;
+  --hf-interview-zoom-icon-box:      24px;
+  --hf-interview-zoom-icon:          18px;
+  --hf-interview-zoom-chevron-w:     26.4px;
+  --hf-interview-zoom-chevron-h:     22px;
+  --hf-interview-zoom-chevron:       13px;
+  --hf-interview-textarea-h:         100px;
+  --hf-interview-select-mt:          4px;
+  --hf-interview-select-mt-second:   10px;
+  --hf-interview-checkbox-size:      14px;
+  --hf-interview-participant-avatar: 20px;
+  --hf-interview-participant-fs:     11px;
+  --hf-interview-email-mt:           22px;
+  --hf-interview-reminder-w:         56px;
+  --hf-interview-remove-size:        14px;
+  --hf-interview-availability-h:     44px;
+  --hf-interview-footer-h:           48px;
+  --hf-interview-btn-h:              32px;
+
+  /* Candidate top stage bar */
+  --hf-candidates-stage-fw:         var(--hf-fw-regular);
+  --hf-candidates-stage-badge-min:  24px;
+  --hf-candidates-stage-badge-px:   6px;
+  --hf-candidates-stage-empty-gap:  var(--hf-space-xs);
+  --hf-candidates-stage-empty-color: #bdbdbd;
+  --hf-candidates-stage-empty-fw:   var(--hf-fw-medium);
+  --hf-candidates-stage-underline-x: 22px;
+  --hf-candidates-stage-underline-h: 2px;
+  --hf-candidates-top-action-size:  52px;
+  --hf-candidates-top-options-icon: 24px;
+  --hf-candidates-top-admin-icon:   20px;
+  --hf-candidates-top-icon-scale-hover: 1.12;
+  --hf-candidates-top-icon-scale-active: 1.06;
+  --hf-candidates-stage-arrow-top:  14px;
+  --hf-candidates-stage-arrow-left: 12px;
+  --hf-candidates-stage-arrow-right-admin: 132px;
+  --hf-candidates-stage-arrow-right: 72px;
+  --hf-candidates-stage-arrow-size: 36px;
+  --hf-candidates-stage-arrow-icon: 18px;
+  /* Была 90 — выше .hf-vacancy-modal-overlay (z-index: 50), поэтому стрелка
+     прокрутки этапов рисовалась ПОВЕРХ открытых модалок (превью/редактирование
+     заявки). Опущена ниже любого модального оверлея в приложении. */
+  --hf-candidates-stage-arrow-z:    30;
+  --hf-candidates-stage-arrow-shadow: 0 2px 10px var(--hf-alpha-200);
+  --hf-candidates-stage-tooltip-top: 52px;
+  --hf-candidates-stage-tooltip-z:   120;
+  --hf-candidates-stage-tooltip-w:   330px;
+  --hf-candidates-stage-tooltip-py:  7px;
+  --hf-candidates-stage-tooltip-fs:  13px;
+  --hf-candidates-stage-tooltip-lh:  18px;
+  --hf-candidates-stage-tooltip-left-middle: 245px;
+  --hf-candidates-stage-tooltip-left-late: 660px;
+  --hf-candidates-stage-tooltip-shadow: 0 2px 6px var(--hf-black-alpha-30);
+  --hf-candidates-stagebar-h:       52px;
+  --hf-candidates-search-toggle-w:  60px;  /* шире зона нажатия лупы (была 44) */
+  --hf-candidates-search-icon:      22px;  /* крупнее иконка лупы (была 18) */
+  --hf-candidates-search-clear-pr:  42px;
+  --hf-candidates-search-action-right: 28px;
+  --hf-candidates-all-gap:          6px;
+  --hf-candidates-all-px:           9px;
+  --hf-candidates-all-underline-x:  8px;
+  /* 270, а не 220: на окне 1024 px (ноутбук с масштабом) под имя оставалось
+     85 px — «Никитин…», «Ковалёв…» (20.10.2026). */
+  --hf-candidates-list-w-min:       270px;
+  --hf-candidates-list-w-fluid:     28%;
+  --hf-candidates-list-w-max:       420px;
+  --hf-candidates-list-w:           clamp(
+    var(--hf-candidates-list-w-min),
+    var(--hf-candidates-list-w-fluid),
+    var(--hf-candidates-list-w-max)
+  );
+  --hf-profile-photo:               200px;
+  --hf-profile-photo-compact:       150px;
+  --hf-profile-title-fs:            30px;
+  --hf-profile-title-lh:            40px;
+  --hf-profile-title-compact-fs:    30px;
+  --hf-profile-title-compact-lh:    36px;
+  --hf-profile-fallback-fs:         36px;
+  --hf-profile-fallback-fw:         600;
+  --hf-profile-info-label-w:        96.833px;
+  --hf-profile-info-label-h:        24px;
+  --hf-candidates-loading-row-h:     92px;
+  --hf-candidates-loading-row-gap:   13px;
+  --hf-candidates-loading-row-radius: var(--hf-radius-m);
+  --hf-candidates-loading-avatar:    56px;
+  --hf-candidates-loading-line-gap:  7px;
+  --hf-candidates-loading-title-h:   17px;
+  --hf-candidates-loading-text-h:    14px;
+  --hf-candidates-loading-title-w:   54%;
+  --hf-candidates-loading-role-w:    36%;
+  --hf-candidates-loading-company-w: 46%;
+  --hf-candidates-loading-line-radius: var(--hf-radius-xs);
+  --hf-candidates-loading-detail-py: 28px;
+  --hf-candidates-loading-head-mb:   28px;
+  --hf-candidates-loading-head-gap:  10px;
+  --hf-candidates-loading-action-h:  36px;
+  --hf-candidates-loading-action-1-w: 178px;
+  --hf-candidates-loading-action-2-w: 128px;
+  --hf-candidates-loading-action-3-w: 150px;
+  --hf-candidates-loading-name-mt:   22px;
+  --hf-candidates-loading-name-h:    31px;
+  --hf-candidates-loading-name-w:    430px;
+  --hf-candidates-loading-name-radius: 5px;
+  --hf-candidates-loading-subtitle-h: 18px;
+  --hf-candidates-loading-subtitle-w: 320px;
+  --hf-candidates-loading-meta-mt:   22px;
+  --hf-candidates-loading-meta-gap:  13px;
+  --hf-candidates-loading-meta-label-w: 86px;
+  --hf-candidates-loading-meta-value-w: 240px;
+  --hf-candidates-loading-meta-h:    16px;
+  --hf-candidates-loading-photo:     160px;
+  --hf-candidates-loading-panel-h:   320px;
+
+  /* Candidate timeline glyphs */
+  --hf-timeline-user-mask-h:         31px;
+  --hf-timeline-user-mask-w:         24px;
+  --hf-timeline-user-left-stage:    -51px;
+  --hf-timeline-user-left-notes:    -60px;
+  --hf-timeline-user-head-left:      7px;
+  --hf-timeline-user-head-top:       0px;
+  --hf-timeline-user-head-size:      10px;
+  --hf-timeline-user-body-left:      3px;
+  --hf-timeline-user-body-top:       14px;
+  --hf-timeline-user-body-h:         8px;
+  --hf-timeline-user-body-w:         18px;
+  --hf-timeline-dot-top:             8px;
+  --hf-timeline-dot-size:            8px;
+  --hf-timeline-dot-left-stage:     -43px;
+  --hf-timeline-dot-left-notes:     -52px;
+  --hf-timeline-meta-size:           14px;
+  --hf-timeline-meta-fs:             9px;
+  --hf-timeline-meta-eye-size:       2px;
+  --hf-timeline-meta-left-eye-x:     3px;
+  --hf-timeline-meta-right-eye-x:    3px;
+  --hf-timeline-meta-mouth-left:     4px;
+  --hf-timeline-meta-mouth-top:      8px;
+  --hf-timeline-meta-mouth-w:        6px;
+  --hf-timeline-meta-mouth-h:        3px;
+
+  /* Topbar */
+
+  /* FAB */
+  --hf-fab-bg:    #5892C2;
+
+  /* Measured Huntflow UI colors */
+  --hf-ui-text-strong:       #202431;
+  --hf-ui-text-muted:        #70757d;
+  --hf-ui-text-soft:         #777777;
+  --hf-ui-text-avatar-blue:  #39c7ff;
+  --hf-ui-icon-muted:        #5f6670;
+  --hf-ui-icon-light:        #c8cdd1;
+  --hf-ui-close:             #a5a5a5;
+  --hf-ui-close-icon:        var(--hf-main-500);
+  --hf-ui-delete:            #7c7c7c;
+  --hf-ui-border:            #d9d9d9;
+  --hf-ui-border-hover:      #c8c8c8;
+  --hf-ui-border-strong:     #c7c7c7;
+  --hf-ui-divider:           #e6e6e6;
+  --hf-ui-divider-soft:      #eeeeee;
+  --hf-ui-line:              #d5d5d5;
+  --hf-ui-hover:             #f7f7f7;
+  --hf-ui-selected:          #e8e8e8;
+  --hf-ui-avatar-dark:       #173f5a;
+  --hf-ui-resume-text:       #1c1c1c;
+  --hf-ui-resume-secondary:  #555555;
+  --hf-ui-resume-muted:      #b0b0b0;
+  --hf-ui-resume-arrow:      #a8adb2;
+  --hf-ui-resume-arrow-off:  #cfd3d6;
+  --hf-ui-expand-icon:       #b8bdc2;
+  --hf-ui-social-whatsapp:   #25D366;
+  --hf-ui-social-telegram:   #229ED9;
+  --hf-ui-social-viber:      #7360F2;
+  --hf-ui-template-ai:       #ff4ab6;
+  --hf-ui-link-alt:          #0aa7bd;
+  --hf-ui-link-cyan:         #008ca6;
+  --hf-ui-muted-1:           #8f999c;
+  --hf-ui-muted-2:           #969a9e;
+  --hf-ui-muted-3:           #9fa6ab;
+  --hf-ui-muted-4:           #aab0b4;
+  --hf-ui-muted-5:           #BFC3C7;
+  --hf-ui-muted-6:           #c1c1c1;
+  --hf-ui-muted-7:           #d2d2d2;
+  --hf-ui-muted-8:           #e4e4e4;
+  --hf-ui-muted-9:           #e7e7e7;
+  --hf-ui-scrollbar:         #8f8f8f;
+  --hf-ui-scrollbar-hover:   #7a7a7a;
+  --hf-ui-scrollbar-size:    8px;
+  --hf-ui-card-border:       #ebebeb;
+  --hf-loading-base:          var(--hf-main-200);
+  --hf-loading-highlight:     var(--hf-main-50);
+  --hf-loading-spinner-track: var(--hf-main-200);
+  --hf-loading-spinner-fill:  var(--hf-cyan-500);
+  --hf-loading-spinner-size:  20px;
+  --hf-loading-spinner-border: 2px;
+  --hf-loading-spinner-size-sm: 16px;
+  --hf-loading-spinner-size-md: 18px;
+  --hf-loading-spinner-radius: var(--hf-radius-pill);
+  --hf-loading-spinner-duration: 0.8s;
+  --hf-dark-panel-alpha-50:   rgba(26, 26, 36, 0.50);
+  --hf-dark-panel-alpha-80:   rgba(22, 22, 32, 0.80);
+  --hf-dark-panel-alpha-95:   rgba(26, 26, 36, 0.95);
+  --hf-status-blue:          #60a5fa;
+  --hf-status-blue-bg:       rgba(59, 130, 246, 0.10);
+  --hf-status-blue-badge:    rgba(59, 130, 246, 0.15);
+  --hf-status-cyan:          #22d3ee;
+  --hf-status-cyan-bg:       rgba(6, 182, 212, 0.10);
+  --hf-status-cyan-badge:    rgba(6, 182, 212, 0.15);
+  --hf-status-purple:        #c084fc;
+  --hf-status-purple-bg:     rgba(168, 85, 247, 0.10);
+  --hf-status-purple-badge:  rgba(168, 85, 247, 0.15);
+  --hf-status-indigo:        #818cf8;
+  --hf-status-indigo-bg:     rgba(99, 102, 241, 0.10);
+  --hf-status-indigo-badge:  rgba(99, 102, 241, 0.15);
+  --hf-status-orange:        #fb923c;
+  --hf-status-orange-bg:     rgba(249, 115, 22, 0.10);
+  --hf-status-orange-badge:  rgba(249, 115, 22, 0.15);
+  --hf-status-yellow:        #facc15;
+  --hf-status-yellow-bg:     rgba(234, 179, 8, 0.10);
+  --hf-status-yellow-badge:  rgba(234, 179, 8, 0.15);
+  --hf-status-green:         #4ade80;
+  --hf-status-green-bg:      rgba(34, 197, 94, 0.10);
+  --hf-status-green-badge:   rgba(34, 197, 94, 0.15);
+  --hf-status-red:           #f87171;
+  --hf-status-red-bg:        rgba(239, 68, 68, 0.10);
+  --hf-status-red-badge:     rgba(239, 68, 68, 0.15);
+  --hf-status-gray:          #9ca3af;
+  --hf-status-gray-bg:       rgba(107, 114, 128, 0.10);
+  --hf-status-gray-badge:    rgba(107, 114, 128, 0.15);
+  --hf-status-pink:          #f472b6;
+  --hf-status-pink-bg:       rgba(236, 72, 153, 0.10);
+  --hf-status-pink-badge:    rgba(236, 72, 153, 0.15);
+  --hf-status-teal:          #2dd4bf;
+  --hf-status-teal-bg:       rgba(20, 184, 166, 0.10);
+  --hf-status-teal-badge:    rgba(20, 184, 166, 0.15);
+  --hf-status-lime:          #a3e635;
+  --hf-status-lime-bg:       rgba(132, 204, 22, 0.10);
+  --hf-status-lime-badge:    rgba(132, 204, 22, 0.15);
+  --hf-status-rose:          #fb7185;
+  --hf-status-rose-bg:       rgba(244, 63, 94, 0.10);
+  --hf-status-rose-badge:    rgba(244, 63, 94, 0.15);
+  --hf-status-sky:           #38bdf8;
+  --hf-status-sky-bg:        rgba(14, 165, 233, 0.10);
+  --hf-status-sky-badge:     rgba(14, 165, 233, 0.15);
+  --hf-accent:               var(--hf-status-blue);
+  --hf-accent-hover:         var(--hf-cyan-600);
+  --hf-accent-bg-10:         var(--hf-status-blue-bg);
+  --hf-accent-bg-15:         var(--hf-status-blue-badge);
+  --hf-accent-bg-20:         rgba(59, 130, 246, 0.20);
+  --hf-accent-bg-25:         rgba(59, 130, 246, 0.25);
+  --hf-accent-bg-30:         rgba(59, 130, 246, 0.30);
+  --hf-accent-border-20:     var(--hf-accent-bg-20);
+  --hf-accent-border-30:     var(--hf-accent-bg-30);
+  --hf-accent-border-40:     rgba(59, 130, 246, 0.40);
+  --hf-dark-50:              var(--tw-dark-50);
+  --hf-dark-100:             var(--tw-dark-100);
+  --hf-dark-200:             var(--tw-dark-200);
+  --hf-dark-300:             var(--tw-dark-300);
+  --hf-dark-400:             var(--tw-dark-400);
+  --hf-dark-500:             var(--tw-dark-500);
+  --hf-dark-600:             var(--tw-dark-600);
+  --hf-dark-700:             var(--tw-dark-700);
+  --hf-dark-800:             var(--tw-dark-800);
+  --hf-risk-high-gradient-from:   var(--hf-red-500);
+  --hf-risk-high-gradient-to:     var(--hf-red-600);
+  --hf-risk-medium-gradient-from: var(--hf-status-orange);
+  --hf-risk-medium-gradient-to:   var(--hf-yellow-600);
+  --hf-risk-low-gradient-from:    var(--hf-status-green);
+  --hf-risk-low-gradient-to:      var(--hf-green-600);
+  --hf-import-icon-gradient-from: var(--hf-status-blue-badge);
+  --hf-import-icon-gradient-to:   var(--hf-status-purple-badge);
+  --hf-report-candidate:        #d4a843;
+  --hf-report-rejection-light:  #c4c4c4;
+  --hf-report-rejection-medium: #999999;
+  --hf-report-rejection-dark:   #555555;
+  --hf-report-source-green:     #8cb369;
+  --hf-report-source-red:       #e05263;
+  --hf-report-source-blue:      #5b8cbe;
+  --hf-report-source-purple:    #9b59b6;
+  --hf-report-source-orange:    #e67e22;
+  --hf-analytics-bg:            var(--hf-main-50);
+  --hf-analytics-surface:       var(--hf-white);
+  --hf-analytics-border:        var(--hf-ui-border);
+  --hf-analytics-border-strong: var(--hf-main-900);
+  --hf-analytics-border-soft:   var(--hf-ui-divider);
+  --hf-analytics-text:          var(--hf-main-900);
+  --hf-analytics-muted:         var(--hf-main-600);
+  --hf-analytics-soft:          var(--hf-main-500);
+  --hf-analytics-excel:         #18b957;
+  --hf-analytics-menu-shadow:   0 8px 24px var(--hf-black-alpha-12);
+  --hf-analytics-sheet-shadow:  0 1px 3px var(--hf-black-alpha-08);
+  --hf-analytics-sidebar-w:     260px;
+  --hf-analytics-header-px:     34px;
+  --hf-analytics-header-py:     26px;
+  --hf-analytics-filter-h:      40px;
+  --hf-analytics-sheet-max:     1040px;
+  --hf-analytics-sheet-p:       34px;
+  --hf-analytics-chart-label-w: 190px;
+  --hf-analytics-chart-side-w:  150px;
+  --hf-analytics-bar-h:         28px;
+
+  /* ===== Размеры и spacing ===== */
+
+  /* Spacing scale */
+  --hf-space-xxs: 2px;
+  --hf-space-xs:  4px;
+  --hf-space-s:   8px;
+  --hf-space-m:   12px;
+  --hf-space-l:   16px;
+  --hf-space-xl:  20px;
+  --hf-space-xxl: 24px;
+  --hf-space-3xl: 32px;
+  --hf-space-4xl: 40px;
+
+  /* Border radii */
+  --hf-radius-xxs: 2px;
+  --hf-radius-xs:  4px;
+  --hf-radius-s:   8px;    /* default для кнопок/инпутов */
+  --hf-radius-m:   12px;   /* карточки */
+  --hf-radius-l:   16px;   /* dropzone, большие карточки */
+  --hf-radius-pill: 999px;
+
+  /* Borders */
+  --hf-border-xs: 1px;
+
+  /* Button sizes */
+
+  /* Avatar sizes */
+  --hf-avatar-3xs: 20px;
+
+  /* Shadows */
+  --hf-shadow-card:     0 1px 4px 0 rgba(0, 0, 0, 0.04);
+  --hf-shadow-card-lg:  0 4px 12px 0 rgba(0, 0, 0, 0.08);
+  --hf-shadow-dropdown: 0 0 40px 0 rgba(5, 5, 5, 0.16);
+  --hf-shadow-popover:  var(--hf-shadow-dropdown);
+  --hf-shadow-sm:       0 1px 2px 0 var(--hf-black-alpha-05);
+  --hf-shadow-lg:       0 10px 15px -3px var(--hf-black-alpha-10), 0 4px 6px -4px var(--hf-black-alpha-10);
+  --hf-shadow-xl:       0 20px 25px -5px var(--hf-black-alpha-10), 0 8px 10px -6px var(--hf-black-alpha-10);
+  --hf-shadow-2xl:      0 25px 50px -12px var(--hf-black-alpha-25);
+  --hf-z-dropdown:      60;
+
+  /* ===== Типографика ===== */
+
+  /* Размеры */
+  --hf-fs-6xs: 9px;
+  --hf-fs-5xs: 10px;
+  --hf-fs-4xs: 11px;
+  --hf-fs-3xs: 12px;
+  --hf-fs-2xs: 13px;
+  --hf-fs-xxs: 14px;
+  --hf-fs-xs:  15px;  /* body */
+  --hf-fs-s:   16px;
+  --hf-fs-m:   18px;  /* h4 */
+  --hf-fs-l:   20px;  /* h3, subtitle */
+  /* Line heights */
+  --hf-lh-secondary:  20px;
+  --hf-lh-field:      22px;
+  --hf-lh-primary:    24px;  /* body */
+  --hf-lh-normal:     var(--hf-lh-primary);
+  --hf-lh-tight:      var(--hf-lh-secondary);
+  --hf-lh-h2:         28px;
+
+  /* Weights */
+  --hf-fw-regular: 400;
+  --hf-fw-medium:  500;
+  --hf-fw-semibold: 600;
+  --hf-fw-bold: 700;
+
+  --hf-font-body: 'Graphik', 'Arial', 'Tahoma', 'Verdana', sans-serif;
+
+  /* Vacancy modal */
+  --hf-vacancy-modal-top: 20px;
+  --hf-vacancy-modal-width: 764px;
+  --hf-vacancy-modal-shadow: 0 10px 42px var(--hf-black-alpha-30);
+  --hf-vacancy-modal-header-h: 70px;
+  --hf-vacancy-modal-header-top: 20px;
+  --hf-vacancy-modal-footer-h: 74px;
+  --hf-vacancy-modal-x: 24px;
+  --hf-vacancy-modal-y: 24px;
+  /* minmax(0, 1fr): БЕЗ этого у 1fr-колонки min-width:auto, и длинный текст/
+     ссылка в описании распирает её шире трека — правая колонка (валюта) и часть
+     текста уезжают за край модалки. minmax(0,…) зажимает колонку по контейнеру. */
+  --hf-vacancy-modal-main-col: minmax(0, 1fr);
+  --hf-vacancy-modal-side-col: 275.33px;
+  --hf-vacancy-modal-body-bottom: 36px;
+  --hf-vacancy-field-h: 40px;
+  --hf-vacancy-field-radius: var(--hf-radius-s);
+  --hf-vacancy-field-px: 16px;
+  --hf-vacancy-field-focus-border: var(--hf-cyan-500);
+  --hf-vacancy-hint-lh: var(--hf-lh-secondary);
+  --hf-vacancy-control-fs: var(--hf-fs-xs);
+  --hf-vacancy-control-lh: var(--hf-lh-primary);
+  --hf-vacancy-salary-w: 250px;
+  --hf-vacancy-editor-icon: 20px;
+  --hf-vacancy-editor-btn: 28px;
+  --hf-vacancy-editor-toolbar-h: 45px;
+  --hf-vacancy-editor-min-h: 160px;
+  --hf-vacancy-footer-btn-h: 33px;
+  --hf-vacancy-footer-btn-px: 11px;
+  --hf-vacancy-footer-primary-btn-min-w: 98.5px;
+  --hf-vacancy-button-icon: 16px;
+  --hf-request-preview-body-min-h: 536px;
+  --hf-request-preview-icon: 18px;
+  --hf-vacancy-pill-h: 28px;
+  --hf-vacancy-pill-px: 8px;
+  --hf-vacancy-pill-gap: 6px;
+  --hf-vacancy-pill-radius: 15px;
+  --hf-vacancy-small-icon: 18px;
+  --hf-vacancy-settings-icon: 18px;
+  --hf-vacancy-close-icon: 28px;
+  --hf-vacancy-chevron-icon: 24px;
+  --hf-vacancy-select-chevron-right: 8px;
+  --hf-vacancy-select-menu-top: 10px;
+  --hf-vacancy-select-menu-w: 300px;
+  --hf-vacancy-select-menu-shadow: 0 4px 14px var(--hf-black-alpha-16);
+  --hf-vacancy-select-option-h: 42px;
+  --hf-vacancy-select-option-inner-px: 8px;
+  --hf-vacancy-select-icon: 20px;
+  --hf-vacancy-select-icon-slot: 24px;
+  --hf-vacancy-select-icon-danger: var(--hf-red-500);
+  --hf-vacancy-avatar: 24px;
+  --hf-vacancy-avatar-fs: 11px;
+  --hf-vacancy-side-title-mb: 9px;
+  --hf-vacancy-side-text-lh: 22px;
+  --hf-vacancy-recruiters-sep-pb: 27px;
+  --hf-vacancy-recruiter-gap: 8px;
+  --hf-vacancy-dd-mt: 10px;
+  --hf-vacancy-dd-max-h: 180px;
+  --hf-vacancy-dd-radius: 6px;
+  --hf-vacancy-dd-shadow: 0 4px 12px var(--hf-black-alpha-10);
+  --hf-vacancy-dd-item-px: 10px;
+  --hf-vacancy-dd-item-fs: 13px;
+  --hf-vacancy-dd-check: 14px;
+  --hf-vacancy-dd-check-radius: 3px;
+  --hf-vacancy-people-grid-a: 70px;
+  --hf-vacancy-people-grid-b: 146px;
+  --hf-vacancy-people-grid-gap: 10px;
+
+  /* Vacancy workspace */
+  --hf-vacancy-workspace-bg: var(--hf-bg-body);
+  --hf-vacancy-workspace-header: var(--hf-main-900);
+  --hf-vacancy-workspace-surface: var(--hf-white);
+  --hf-vacancy-workspace-line: var(--hf-ui-divider);
+  --hf-vacancy-workspace-line-strong: var(--hf-ui-border);
+  --hf-vacancy-workspace-text: var(--hf-main-900);
+  --hf-vacancy-workspace-muted: var(--hf-main-600);
+  --hf-vacancy-workspace-soft: var(--hf-main-500);
+  --hf-vacancy-workspace-hover: var(--hf-main-100);
+  --hf-vacancy-workspace-selected: var(--hf-ui-selected);
+  --hf-vacancy-topbar-h: 56px;
+  --hf-vacancy-topbar-radius: 14px;
+  --hf-vacancy-topbar-px: 24px;
+  --hf-vacancy-source-tabs-min-w: 284px;
+  --hf-vacancy-source-tabs-closed-min-w: 420px;
+  --hf-vacancy-source-tabs-px: 20px;
+  --hf-vacancy-source-tabs-gap: 14px;
+  --hf-vacancy-source-ai-size: 30px;
+  --hf-vacancy-source-ai-offset: -8px;
+  --hf-vacancy-source-ai-icon: 18px;
+  --hf-vacancy-stage-h: 52px;
+  --hf-vacancy-stage-gap: 26px;
+  --hf-vacancy-stage-active-line: 3px;
+  --hf-vacancy-stage-count: 28px;
+  --hf-vacancy-stage-search-toggle-w: 42px;
+  --hf-vacancy-stage-search-pl: 16px;
+  --hf-vacancy-icon-btn: 50px;
+  --hf-vacancy-icon-btn-radius: 14px;
+  --hf-vacancy-main-radius: 14px;
+  --hf-vacancy-main-gap: 8px;
+  --hf-vacancy-candidate-list-w: clamp(220px, 30%, 350px);
+  --hf-vacancy-empty-max-w: 520px;
+  --hf-vacancy-empty-card-w: 760px;
+  --hf-vacancy-empty-pt: clamp(64px, 24vh, 250px);
+  --hf-vacancy-empty-title-mb: 12px;
+  --hf-vacancy-empty-section-mt: 30px;
+  --hf-vacancy-empty-link-gap: 14px;
+  --hf-vacancy-empty-hint-mt: 28px;
+  --hf-vacancy-empty-source-gap: 10px;
+  --hf-vacancy-empty-title-fs: 28px;
+  --hf-vacancy-empty-title-lh: 34px;
+  --hf-vacancy-empty-hint-box-py: 18px;
+  --hf-vacancy-empty-hint-box-radius: 20px;
+  --hf-vacancy-empty-help-h: 33px;
+  --hf-vacancy-empty-help-px: 14px;
+  --hf-vacancy-empty-help-radius: 16px;
+  --hf-vacancy-closed-icon: 76px;
+  --hf-vacancy-closed-card-w: 660px;
+  --hf-vacancy-closed-pt: clamp(78px, 18vh, 150px);
+  --hf-vacancy-closed-note-w: 640px;
+  --hf-vacancy-closed-note-mt: 68px;
+  --hf-closed-vacancies-bg: #f2f2f2;
+  --hf-closed-vacancies-surface: var(--hf-white);
+  --hf-closed-vacancies-text: var(--hf-main-900);
+  --hf-closed-vacancies-muted: var(--hf-main-600);
+  --hf-closed-vacancies-soft: var(--hf-main-500);
+  --hf-closed-vacancies-border: var(--hf-ui-divider);
+  --hf-closed-vacancies-border-strong: var(--hf-main-300);
+  --hf-closed-vacancies-inner-w: 948px;
+  --hf-closed-vacancies-header-h: 56px;
+  --hf-closed-vacancies-search-w: 230px;
+  --hf-closed-vacancies-menu-w: 448px;
+  --hf-closed-vacancies-sort-w: 230px;
+  --hf-closed-vacancies-toolbar-h: 52px;
+  --hf-closed-vacancies-filter-h: 36px;
+  --hf-closed-vacancies-search-h: 38px;
+  --hf-closed-vacancies-search-toggle: 36px;
+  --hf-closed-vacancies-row-py: 14px;
+  --hf-closed-vacancies-row-px: 24px;
+  --hf-closed-vacancies-title-fs: 17px;
+  --hf-closed-vacancies-title-lh: 24px;
+  --hf-closed-vacancies-title-color: #0097aa;
+  --hf-vacancies-page-surface: var(--hf-white);
+  --hf-vacancies-page-surface-soft: var(--hf-main-50);
+  --hf-vacancies-page-surface-hover: var(--hf-main-75);
+  --hf-vacancies-page-chip: var(--hf-main-100);
+  --hf-vacancies-page-border: var(--hf-ui-divider);
+  --hf-vacancies-page-border-strong: var(--hf-ui-border);
+  --hf-vacancies-page-text: var(--hf-main-900);
+  --hf-vacancies-page-muted: var(--hf-main-700);
+  --hf-vacancies-page-soft: var(--hf-main-600);
+  --hf-vacancies-page-faint: var(--hf-main-500);
+  --hf-funnels-head-px: 8px;
+  --hf-funnels-head-py: 8px;
+  --hf-funnels-title-gap: 12px;
+  --hf-funnels-title-icon: 28px;
+  --hf-funnels-toolbar-gap: 8px;
+  --hf-funnels-toolbar-h: 52px;
+  --hf-funnels-toolbar-radius: 12px;
+  --hf-funnels-search-w: 360px;
+  --hf-funnels-search-closed-w: 44px;
+  --hf-funnels-search-icon: 18px;
+  --hf-funnels-search-input-px: 42px;
+  --hf-funnels-search-clear: 28px;
+  --hf-funnels-filter-h: 40px;
+  --hf-funnels-filter-px: 14px;
+  --hf-funnels-small-icon: 16px;
+  --hf-funnels-mobile-icon: 20px;
+  --hf-funnels-menu-top: 8px;
+  --hf-funnels-menu-w: 300px;
+  --hf-funnels-menu-option-h: 38px;
+  --hf-funnels-menu-check: 15px;
+  --hf-funnels-recruiter-menu-w: 360px;
+  --hf-funnels-avatar: 26px;
+
+  /* Candidate modal */
+  --hf-candidate-modal-top: 8px;
+  --hf-candidate-modal-width: 764px;
+  --hf-candidate-modal-shadow: 0 10px 42px var(--hf-black-alpha-30);
+  --hf-candidate-modal-z: 260;
+  --hf-candidate-modal-header-h: 113.33px;
+  --hf-candidate-modal-body-h: 836px;
+  --hf-candidate-modal-footer-h: 73.33px;
+  --hf-candidate-modal-x: 24px;
+  --hf-candidate-modal-y: 20px;
+  --hf-candidate-modal-body-y: 28px;
+  --hf-candidate-left-col-w: 270px;
+  --hf-candidate-avatar: 64px;
+  --hf-candidate-avatar-head: 18px;
+  --hf-candidate-avatar-body-w: 34px;
+  --hf-candidate-avatar-body-h: 17px;
+  --hf-candidate-title-mb: 6px;
+  --hf-candidate-import-h: 28px;
+  --hf-candidate-import-gap: 4px;
+  --hf-candidate-import-radius: 15px;
+  --hf-candidate-import-icon: 18px;
+  --hf-candidate-import-chevron: 18px;
+  --hf-candidate-import-shadow: none;
+  --hf-candidate-upload-menu-top: 38px;
+  --hf-candidate-upload-menu-w: 300px;
+  --hf-candidate-upload-option-h: 40px;
+  --hf-candidate-close-top: 20px;
+  --hf-candidate-close-right: 24px;
+  --hf-candidate-close-size: 28px;
+  --hf-candidate-control-h: 40px;
+  --hf-candidate-control-radius: var(--hf-radius-s);
+  --hf-candidate-control-px: 16px;
+  --hf-candidate-control-fs: var(--hf-fs-xs);
+  --hf-candidate-control-lh: var(--hf-lh-primary);
+  --hf-candidate-source-menu-top: 68px;
+  --hf-candidate-source-menu-max-h: 340px;
+  --hf-candidate-source-search-h: 40px;
+  --hf-candidate-source-search-m: 8px;
+  --hf-candidate-source-option-h: 32px;
+  --hf-candidate-resume-h: 460px;
+  --hf-candidate-error-fs: 11px;
+  --hf-candidate-error-lh: 15px;
+  --hf-candidate-footer-btn-h: 32px;
+  --hf-candidate-primary-min-w: 100px;
+
+  /* ===== Transitions ===== */
+  --hf-transition-fast: 0.1s ease-out;
+}
+
+/* Минимум списка «Все кандидаты» 270 px — только там, где рядом помещается
+   карточка. На узком (телефон) прежние 220: иначе карточке не остаётся места.
+   Раскладка «список ИЛИ карточка» для телефона — отдельная задача. */
+@media (max-width: 899px) {
+  :root {
+    --hf-candidates-list-w-min: 220px;
+  }
+}

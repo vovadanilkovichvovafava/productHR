@@ -1,0 +1,16 @@
+Saturn backend redeploy nudge
+==============================
+
+Purpose: force a fresh build of the `backend` service from main HEAD.
+
+Context: builds of this service were failing on the Saturn build host at
+`#13 exporting layers` (deployment #8465, commit c6ed8a3) — the host ran
+out of disk/memory while exporting the (large) image layers, so every
+attempt rolled back to the last good build `ae68809` (May 27, pre-Factorial).
+
+This marker carries no application logic. Bumping it only re-triggers
+auto-deploy so the backend finally picks up the Factorial work
+(org_units API + employees.org_unit_id/manager_id + start.sh migration
+safety-net) now that the build-host issue is resolved.
+
+Last nudge: 2026-06-03

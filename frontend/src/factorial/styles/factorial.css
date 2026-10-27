@@ -1,0 +1,117 @@
+/* Scoped Factorial styles — everything under .factorial-root so it never collides
+   with the host (Энцеладус) hf-* design tokens. */
+.factorial-root {
+  --fx-primary: #E61A42;
+  --fx-primary-hover: #CC0D38;
+  --fx-text: #0D1626;
+  --fx-muted: #64748B;
+  --fx-border: #E5E7EB;
+  height: 100%;
+  background: #F4F4F5;
+  color: var(--fx-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.factorial-root *, .factorial-root *::before, .factorial-root *::after { box-sizing: border-box; }
+/* thin scrollbars (clone parity) */
+.factorial-root .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.factorial-root .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.factorial-root .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(13,22,38,.14); border-radius: 4px; }
+.factorial-root .scrollbar-thin:hover::-webkit-scrollbar-thumb { background: rgba(13,22,38,.24); }
+
+/* Tabs */
+.factorial-root .fx-tabs { display: flex; gap: 4px; padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--fx-border); position: sticky; top: 0; z-index: 5; }
+.factorial-root .fx-tab { padding: 6px 14px; border-radius: 8px; font-size: 14px; color: var(--fx-muted); text-decoration: none; }
+.factorial-root .fx-tab:hover { background: #F4F4F5; }
+.factorial-root .fx-tab--active { background: #F1F1F3; color: var(--fx-text); font-weight: 500; }
+
+/* Page */
+.factorial-root .fx-page { padding: 28px 32px; max-width: 1180px; }
+.factorial-root .fx-h1 { font-size: 22px; font-weight: 600; margin: 0; }
+.factorial-root .fx-h2 { font-size: 18px; font-weight: 600; margin: 0 0 12px; }
+.factorial-root .fx-sub { color: var(--fx-muted); font-size: 14px; margin-top: 2px; }
+.factorial-root .fx-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+
+/* Cabinet header */
+.factorial-root .fx-cabinet-head { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+
+/* Stats row */
+.factorial-root .fx-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+.factorial-root .fx-stat { background: #fff; border: 1px solid var(--fx-border); border-radius: 14px; padding: 16px 18px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+.factorial-root .fx-stat-value { font-size: 18px; font-weight: 600; }
+.factorial-root .fx-stat-label { font-size: 12px; color: var(--fx-muted); margin-top: 6px; }
+.factorial-root .fx-stat-hint { font-size: 11px; color: #94A3B8; margin-top: 2px; }
+
+/* Cards */
+.factorial-root .fx-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.factorial-root .fx-card { background: #fff; border: 1px solid var(--fx-border); border-radius: 16px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.factorial-root .fx-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.factorial-root .fx-card-title { font-size: 15px; font-weight: 600; margin: 0; }
+
+/* Pills */
+.factorial-root .fx-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 9999px; font-size: 12px; font-weight: 500; background: #F3F4F6; color: #374151; }
+.factorial-root .fx-pill--green { background: #D1FAE5; color: #065F46; }
+.factorial-root .fx-pill--red { background: #FEE2E2; color: #991B1B; }
+.factorial-root .fx-pill--amber { background: #FEF3C7; color: #92400E; }
+.factorial-root .fx-pill-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* Avatar */
+.factorial-root .fx-avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #E9D8FD; color: #553C9A; font-weight: 600; flex: none; }
+
+/* Buttons */
+.factorial-root .fx-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 9999px; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid transparent; transition: background .15s; }
+.factorial-root .fx-btn--primary { background: var(--fx-primary); color: #fff; }
+.factorial-root .fx-btn--primary:hover { background: var(--fx-primary-hover); }
+.factorial-root .fx-btn--secondary { background: #fff; color: var(--fx-text); border-color: var(--fx-border); }
+.factorial-root .fx-btn--secondary:hover { background: #F9FAFB; }
+.factorial-root .fx-btn--ghost { background: transparent; color: var(--fx-muted); }
+.factorial-root .fx-btn--ghost:hover { background: #F4F4F5; }
+.factorial-root .fx-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Balance bars */
+.factorial-root .fx-balance { display: flex; flex-direction: column; gap: 16px; }
+.factorial-root .fx-balrow-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+.factorial-root .fx-balrow-rem { color: var(--fx-muted); }
+.factorial-root .fx-bar { height: 8px; background: #F1F5F9; border-radius: 9999px; overflow: hidden; }
+.factorial-root .fx-bar-fill { height: 100%; background: var(--fx-primary); border-radius: 9999px; }
+.factorial-root .fx-balrow-sub { font-size: 11px; color: #94A3B8; margin-top: 4px; }
+
+/* Doc list */
+.factorial-root .fx-doclist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.factorial-root .fx-doc { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #F1F5F9; }
+.factorial-root .fx-doc:last-child { border-bottom: none; }
+.factorial-root .fx-doc-title { font-size: 14px; }
+
+/* Table */
+.factorial-root .fx-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--fx-border); border-radius: 14px; overflow: hidden; }
+.factorial-root .fx-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--fx-muted); padding: 12px 16px; background: #FAFAFB; border-bottom: 1px solid var(--fx-border); }
+.factorial-root .fx-table td { padding: 12px 16px; border-bottom: 1px solid #F1F5F9; font-size: 14px; vertical-align: middle; }
+.factorial-root .fx-table tr:last-child td { border-bottom: none; }
+.factorial-root .fx-table tbody tr { cursor: default; }
+.factorial-root .fx-table tbody tr.fx-row-link { cursor: pointer; }
+.factorial-root .fx-table tbody tr.fx-row-link:hover { background: #FFF9F4; }
+.factorial-root .fx-cell-emp { display: flex; align-items: center; gap: 10px; }
+.factorial-root .fx-cell-emp-name { font-weight: 500; }
+.factorial-root .fx-cell-emp-mail { font-size: 12px; color: var(--fx-muted); }
+
+/* Loading / empty */
+.factorial-root .fx-loading { display: flex; align-items: center; gap: 10px; color: var(--fx-muted); padding: 24px; font-size: 14px; }
+.factorial-root .fx-spinner { width: 18px; height: 18px; border: 2px solid #E5E7EB; border-top-color: var(--fx-primary); border-radius: 50%; animation: fx-spin .7s linear infinite; }
+@keyframes fx-spin { to { transform: rotate(360deg); } }
+.factorial-root .fx-empty { text-align: center; padding: 36px 16px; color: var(--fx-muted); }
+.factorial-root .fx-empty-emoji { font-size: 32px; }
+.factorial-root .fx-empty-title { font-size: 15px; font-weight: 600; color: var(--fx-text); margin-top: 8px; }
+.factorial-root .fx-empty-hint { font-size: 13px; margin-top: 4px; }
+
+/* Modal */
+.factorial-root .fx-modal-overlay, .fx-modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.fx-modal { background: #fff; border-radius: 16px; padding: 24px; width: 440px; max-width: calc(100vw - 32px); box-shadow: 0 20px 50px rgba(0,0,0,.2); color: #0F172A; font-family: 'Inter', system-ui, sans-serif; }
+.fx-modal h3 { font-size: 18px; font-weight: 600; margin: 0 0 16px; }
+.fx-field { margin-bottom: 14px; }
+.fx-field label { display: block; font-size: 13px; color: #475569; margin-bottom: 6px; }
+.fx-input, .fx-select, .fx-textarea { width: 100%; padding: 9px 12px; border: 1px solid #E5E7EB; border-radius: 8px; font-size: 14px; font-family: inherit; box-sizing: border-box; }
+.fx-textarea { min-height: 70px; resize: vertical; }
+.fx-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
