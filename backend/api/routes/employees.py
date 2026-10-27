@@ -1061,6 +1061,14 @@ async def dismiss_employee(
     emp = result.scalar_one_or_none()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
+    # Увольнение отключает вход — те же правила, что у сброса пароля: не себя,
+    # не суперадмина, только того, кто ниже по роли (было: любого, до 27.10.2026).
+    if emp.user_id and current_user.role != UserRole.superadmin:
+        if emp.user_id == current_user.id:
+            raise HTTPException(status_code=400, detail="Нельзя уволить самого себя")
+        from ..services.offboarding import cut_off_scope
+        if await cut_off_scope(db, org.id, emp.user_id, current_user.id) == "none":
+            raise HTTPException(status_code=403, detail="Нельзя уволить сотрудника с такой же или более высокой ролью")
 
     emp.is_active = False
     emp.dismissed_at = datetime.utcnow()

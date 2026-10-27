@@ -12,6 +12,9 @@
 Чего по-прежнему НЕ делает: не отзывает сами ресурсы и не удаляет членства.
 Отзыв — действие ответственного (кнопка «Отозвать»), а членства нужны при
 обратном найме: hire.py реактивирует ту же запись и возвращает вход.
+Исключения (cut_off_scope, 27.10.2026): человека, который состоит и в других
+организациях, не отключаем целиком — снимаем только участие в этой; суперадмина
+и роль не ниже, чем у увольняющего, не отключаем вовсе.
 
 Единая точка входа нужна потому, что увольнение в системе имеет ДВЕ двери:
   * DELETE /employees/{id} — ставит Employee.is_active = False;
@@ -26,8 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.database import (
     AccessRequest, AccessRequestStatus, ResourceCatalog,
-    ApiToken, DepartmentMember, Employee, OrgMember, OrgRole,
-    RefreshToken, SharedAccess, User,
+    ApiToken, Department, DepartmentMember, Employee, OrgMember, OrgRole,
+    RefreshToken, SharedAccess, User, UserRole,
 )
 
 logger = logging.getLogger("hr-analyzer.offboarding")
@@ -185,6 +188,57 @@ async def cut_off_access(db: AsyncSession, user_id: int) -> Dict[str, Any]:
     return result
 
 
+# Чем выше роль в организации, тем больше число (как в routes/employees.py).
+_ORG_ROLE_RANK = {OrgRole.member: 0, OrgRole.hr: 1, OrgRole.admin: 2, OrgRole.owner: 3}
+
+
+async def cut_off_scope(
+    db: AsyncSession, org_id: int, user_id: int, actor_id: Optional[int],
+) -> str:
+    """Насколько можно отрезать вход уволенному в этой организации.
+
+    ``account`` — погасить весь аккаунт; ``org_only`` — снять только участие в
+    этой организации (человек состоит и в других — гасить ему вход везде
+    нельзя); ``none`` — ничего не отключать: суперадмин или роль не ниже, чем у
+    того, кто увольняет. До 27.10.2026 увольнение (в том числе статусом на
+    доске «Штат») гасило ЛЮБОЙ аккаунт целиком — так можно было отключить
+    владельца, суперадмина или человека, работающего в другой организации.
+    """
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target is None:
+        return "none"
+    actor = (await db.execute(select(User).where(User.id == actor_id))).scalar_one_or_none() if actor_id else None
+    actor_is_super = bool(actor and actor.role == UserRole.superadmin)
+    if target.role == UserRole.superadmin and not actor_is_super:
+        return "none"
+    memberships = dict((await db.execute(
+        select(OrgMember.org_id, OrgMember.role).where(OrgMember.user_id == user_id)
+    )).all())
+    if not actor_is_super:
+        actor_role = (await db.execute(
+            select(OrgMember.role).where(OrgMember.user_id == actor_id, OrgMember.org_id == org_id)
+        )).scalar_one_or_none() if actor_id else None
+        target_role = memberships.get(org_id, OrgRole.member)
+        if actor_role is None or _ORG_ROLE_RANK.get(target_role, 0) >= _ORG_ROLE_RANK.get(actor_role, 0):
+            return "none"
+    if any(o != org_id for o in memberships):
+        return "org_only"
+    return "account"
+
+
+async def remove_org_membership(db: AsyncSession, org_id: int, user_id: int) -> None:
+    """Снять участие в одной организации (и в её отделах), не трогая аккаунт."""
+    for om in (await db.execute(
+        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+    )).scalars().all():
+        await db.delete(om)
+    for dm in (await db.execute(
+        select(DepartmentMember).join(Department, Department.id == DepartmentMember.department_id)
+        .where(DepartmentMember.user_id == user_id, Department.org_id == org_id)
+    )).scalars().all():
+        await db.delete(dm)
+
+
 async def run_offboarding(
     db: AsyncSession,
     org_id: int,
@@ -202,7 +256,20 @@ async def run_offboarding(
 
     # Сначала отрезаем вход, потом уведомления: если рассылка упадёт, доступ
     # всё равно уже закрыт — это важнее, чем письма.
-    checklist["cut_off"] = await cut_off_access(db, user_id)
+    scope = await cut_off_scope(db, org_id, user_id, actor_id)
+    if scope == "account":
+        checklist["cut_off"] = await cut_off_access(db, user_id)
+    elif scope == "org_only":
+        await remove_org_membership(db, org_id, user_id)
+        checklist["cut_off"] = {"org_membership_removed": True}
+    else:
+        checklist["cut_off"] = {"skipped": True}
+    checklist["cut_off_scope"] = scope
+    if scope != "account":
+        logger.warning(
+            "OFFBOARDING cut_off=%s: user=%s org=%s actor=%s — аккаунт целиком не отключён",
+            scope, user_id, org_id, actor_id,
+        )
 
     # Каждому ответственному — только его позиции, чтобы не раскрывать чужие
     by_responsible: Dict[int, List[Dict[str, Any]]] = {}
