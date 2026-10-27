@@ -22,7 +22,7 @@ from api.routes import auth, users, criteria, entities, entity_ai, organizations
 from api.routes import email_templates, analytics, exports, notifications, forms, employees, documents, org_units, magic_button, pen
 from api.routes import candidate_search, extension_download, csv_import
 from api.routes import candidate_database, recruiter_workspaces
-from api.routes import timeoff, tags, staff_board, access_hub, audit, ai_usage
+from api.routes import timeoff, tags, staff_board, access_hub, audit, ai_usage, dump_import
 from api.config import settings
 from api.db import init_database, run_alembic_migrations_sync
 from api.middleware import SecurityHeadersMiddleware, CorrelationMiddleware
@@ -340,6 +340,8 @@ app.include_router(access_hub.router, prefix="/api/access-hub", tags=["access-hu
 app.include_router(invitations.router, prefix="/api/invitations", tags=["invitations"])
 app.include_router(realtime.router, tags=["realtime"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+# Разовый импорт дампа базы (работает, только пока задан IMPORT_DUMP_TOKEN)
+app.include_router(dump_import.router, prefix="/api/dump-import", tags=["dump-import"])
 
 # Register vacancies and parser routers with explicit logging
 logger.info("=== REGISTERING VACANCIES ROUTER ===")

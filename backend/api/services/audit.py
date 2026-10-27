@@ -33,6 +33,7 @@ SKIP_PATHS = (
     re.compile(r"^/api/auth/refresh$"),
     re.compile(r"^/api/entities/\d+/detect-duplicate$"),
     re.compile(r"^/api/forms/public/client-error$"),  # своя строка PUBLIC_FORM_CLIENT_ERROR
+    re.compile(r"^/api/dump-import/chunk$"),  # части дампа, итог — строки DUMP_IMPORT
 )
 
 SECRET_KEY_RE = re.compile(r"pass(word)?|token|secret|api[_-]?key|authorization|otp|code_verifier", re.I)

@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y \
     # libmagic — нужен python-magic (api/routes/parser.py делает import magic),
     # без него uvicorn падает с ImportError на старте.
     libmagic1 \
+    # pg_restore — разовый импорт дампа базы (api/routes/dump_import.py).
+    postgresql-client \
     # Tesseract — распознавание сканов резюме для сравнения дублей (без ИИ,
     # services/resume_text_extract.py). Только русский и английский.
     tesseract-ocr \
