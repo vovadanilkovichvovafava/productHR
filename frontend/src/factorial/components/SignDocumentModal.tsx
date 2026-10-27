@@ -5,6 +5,7 @@ import type { SignedDoc } from '../api/types';
 import { FxSpinner, FxPill } from './ui';
 import { escapeHtml, signatureImgHtml } from '../lib/signatureHtml';
 import { backdropClose } from '@/utils/backdropClose';
+import { getErrorDetail } from '@/utils';
 
 const SIG_MARKER = '{{signature}}';
 
@@ -91,7 +92,8 @@ export default function SignDocumentModal({ docId, onClose }: { docId: number; o
       qc.invalidateQueries({ queryKey: ['fx', 'my-docs'] });
       qc.invalidateQueries({ queryKey: ['fx', 'me'] });
     },
-    onError: () => setErr('Не удалось сохранить подпись.'),
+    // Текст сервера («уже подписан», «некорректные данные подписи») — иначе непонятно, что делать.
+    onError: (error) => setErr(getErrorDetail(error, 'Не удалось сохранить подпись.')),
   });
 
   // Pointer events: одна схема для мыши, пальца и стилуса. Раньше были только
