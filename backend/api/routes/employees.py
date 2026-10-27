@@ -277,8 +277,26 @@ class LeaveRequestCreate(BaseModel):
     type: str  # vacation, sick, family_leave, bereavement
     start_date: datetime
     end_date: datetime
-    days: int
+    # Принимается для совместимости и ИГНОРИРУЕТСЯ: дни считает сервер по датам.
+    days: Optional[int] = None
     reason: Optional[str] = None
+
+
+_LEAVE_MAX_DAYS = 366
+
+
+def _leave_days(start: datetime, end: datetime) -> int:
+    """Календарные дни отпуска включительно — так же считает форма заявки.
+
+    Раньше число дней присылал клиент и сервер верил: месяц отпуска с days=0
+    списывался как ноль, а days=-30 после одобрения ДОБАВЛЯЛ остаток (до
+    27.10.2026)."""
+    days = (end.date() - start.date()).days + 1
+    if days < 1:
+        raise HTTPException(status_code=400, detail="Дата окончания раньше даты начала")
+    if days > _LEAVE_MAX_DAYS:
+        raise HTTPException(status_code=400, detail="Слишком длинный период — не больше года")
+    return days
 
 
 class LeaveRequestResponse(BaseModel):
@@ -1130,17 +1148,8 @@ async def get_leave_balance(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get leave balance for an employee."""
-    result = await db.execute(select(Employee).where(Employee.id == employee_id))
-    emp = result.scalar_one_or_none()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
-    # Access: self or admin
-    if emp.user_id != current_user.id:
-        org = await get_user_org(current_user, db)
-        if not org or not await _is_admin_or_owner(current_user, emp.org_id, db):
-            raise HTTPException(status_code=403, detail="Access denied")
+    """Get leave balance for an employee (сам, админ его организации, руководитель)."""
+    emp, _ = await _employee_for(employee_id, current_user, db, ("self", "admin", "manager"))
 
     now = datetime.utcnow()
     vac_total = _calculate_vacation_days(emp.department_start_date, now=now)
@@ -1188,31 +1197,25 @@ async def create_leave_request(
     current_user: User = Depends(get_current_user),
 ):
     """Request leave (employee self-service)."""
-    result = await db.execute(
-        select(Employee)
-        .options(selectinload(Employee.user))
-        .where(Employee.id == employee_id)
-    )
-    emp = result.scalar_one_or_none()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
-    # Only self or admin can create
-    if emp.user_id != current_user.id:
-        org = await get_user_org(current_user, db)
-        if not org or not await _is_admin_or_owner(current_user, emp.org_id, db):
-            raise HTTPException(status_code=403, detail="Access denied")
+    # Заявку подаёт сам сотрудник или админ его организации; чужой — 404.
+    await _employee_for(employee_id, current_user, db, ("self", "admin"))
+    emp = (await db.execute(
+        select(Employee).options(selectinload(Employee.user)).where(Employee.id == employee_id)
+    )).scalar_one()
+    if not emp.is_active:
+        raise HTTPException(status_code=400, detail="Сотрудник уволен")
 
     # Validate type
     if data.type not in ("vacation", "sick", "family_leave", "bereavement"):
         raise HTTPException(status_code=400, detail="Invalid leave type")
+    days = _leave_days(data.start_date, data.end_date)
 
     lr = LeaveRequest(
         employee_id=employee_id,
         type=data.type,
         start_date=data.start_date,
         end_date=data.end_date,
-        days=data.days,
+        days=days,
         reason=data.reason,
         status="pending",
     )
@@ -1249,10 +1252,13 @@ async def approve_leave_request(
     if not await _is_admin_or_owner(current_user, org.id, db):
         raise HTTPException(status_code=403, detail="Admin access required")
 
+    # Строки заявки и сотрудника блокируются: два одновременных «Одобрить» разных
+    # заявок проходили проверку остатка оба, а одной — дважды прибавляли счётчики.
     result = await db.execute(
         select(LeaveRequest)
         .join(Employee)
         .where(LeaveRequest.id == request_id, Employee.org_id == org.id)
+        .with_for_update()
     )
     lr = result.scalar_one_or_none()
     if not lr:
@@ -1261,8 +1267,14 @@ async def approve_leave_request(
         raise HTTPException(status_code=400, detail="Request is not pending")
 
     # Сотрудник нужен и для проверки лимита, и для обновления счётчиков (один запрос).
-    emp_result = await db.execute(select(Employee).where(Employee.id == lr.employee_id))
+    emp_result = await db.execute(
+        select(Employee).where(Employee.id == lr.employee_id).with_for_update()
+    )
     emp = emp_result.scalar_one_or_none()
+    if emp and emp.user_id == current_user.id:
+        raise HTTPException(status_code=403, detail="Свою заявку одобряет другой администратор")
+    # Дни — всегда по датам: в заявках, поданных до 27.10.2026, их прислал клиент.
+    lr.days = _leave_days(lr.start_date, lr.end_date)
 
     # Проверка остатка: одобрять отпуск можно, пока в текущем рабочем году есть
     # доступные накопленные дни (дробление по числу заявок НЕ ограничено).
@@ -1328,6 +1340,11 @@ async def reject_leave_request(
         raise HTTPException(status_code=404, detail="Leave request not found")
     if lr.status != "pending":
         raise HTTPException(status_code=400, detail="Request is not pending")
+    owner_user_id = (await db.execute(
+        select(Employee.user_id).where(Employee.id == lr.employee_id)
+    )).scalar_one_or_none()
+    if owner_user_id == current_user.id:
+        raise HTTPException(status_code=403, detail="Свою заявку рассматривает другой администратор")
 
     lr.status = "rejected"
     lr.approved_by = current_user.id
