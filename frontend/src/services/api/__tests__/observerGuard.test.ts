@@ -91,3 +91,25 @@ describe('Плашка — только на то, что человек наж�
     expect(toast.error).toHaveBeenCalledWith(OBSERVER_BLOCK_MESSAGE);
   });
 });
+
+describe('Личный кабинет наблюдателя-сотрудника', () => {
+  // Ментор — тоже сотрудник: свои данные, паспорт, заявку на отпуск и подпись
+  // своего документа он делает сам (сервер пускает только к его записи).
+  it.each([
+    '/employees/me',
+    '/employees/me/passport',
+    '/employees/12/leave-request',
+    '/api/documents/7/sign',
+  ])('%s — не режется', (url) => {
+    setObserverMode(true);
+    expect(isObserverBlocked('post', url)).toBe(false);
+  });
+
+  it.each(['/employees/12', '/employees/12/documents', '/employees/meeting', '/documents/generate'])(
+    '%s — режется',
+    (url) => {
+      setObserverMode(true);
+      expect(isObserverBlocked('post', url)).toBe(true);
+    },
+  );
+});

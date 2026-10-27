@@ -78,3 +78,22 @@ def test_whitelist_contents():
         "/api/blockers",
         "/api/notifications",
     }
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/employees/me", "/api/employees/me/passport", "/api/employees/12/leave-request", "/api/documents/7/sign"],
+)
+def test_own_cabinet_is_writable_for_observer(path):
+    # Ментор-наблюдатель — тоже сотрудник: свой кабинет он заполняет сам
+    # (ручки пускают его только к СВОЕЙ записи).
+    assert observer_check_needed("POST", path) is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/employees", "/api/employees/12", "/api/employees/12/documents", "/api/employees/meeting",
+     "/api/documents/generate", "/api/employees/leave-requests/3/approve"],
+)
+def test_other_employee_writes_stay_blocked(path):
+    assert observer_check_needed("POST", path) is True

@@ -311,6 +311,15 @@ export const OBSERVER_WRITABLE_PREFIXES = [
   '/notifications',
 ] as const;
 
+// Личный кабинет наблюдателя-сотрудника: свои данные и паспорт, своя заявка на
+// отпуск, подпись своего документа (id в середине пути — поэтому шаблоны).
+// Тот же список — OBSERVER_WRITABLE_PATTERNS в services/auth.py.
+export const OBSERVER_WRITABLE_PATTERNS: readonly RegExp[] = [
+  /^\/employees\/me(\/|$)/,
+  /^\/employees\/\d+\/leave-request$/,
+  /^\/documents\/\d+\/sign$/,
+];
+
 /** Сообщение, которое видит наблюдатель вместо молчаливого 403. */
 export const OBSERVER_BLOCK_MESSAGE =
   'Режим наблюдателя — только просмотр, изменения запрещены';
@@ -326,6 +335,7 @@ export const isObserverBlocked = (method?: string, url?: string): boolean => {
     .replace(/[?#].*$/, '')
     .replace(/^\/api(?=\/)/, '');
   const normalized = path.startsWith('/') ? path : `/${path}`;
+  if (OBSERVER_WRITABLE_PATTERNS.some((re) => re.test(normalized))) return false;
   return !OBSERVER_WRITABLE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 };
 

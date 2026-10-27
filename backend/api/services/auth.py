@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
+import re
 import secrets
 import hashlib
 from jose import JWTError, jwt
@@ -45,6 +46,18 @@ OBSERVER_WRITABLE_PREFIXES = (
 )
 
 
+# Личный кабинет наблюдателя-сотрудника (ментор — тоже сотрудник): свои данные,
+# свой паспорт, своя заявка на отпуск, подпись своего документа. В середине пути
+# id, поэтому шаблоны, а не префиксы. Ручки сами пускают его только к СВОЕЙ
+# записи (для персональных данных наблюдатель — посторонний, _employee_access).
+# До 27.10.2026 кнопки кабинета у него были, а запись резалась.
+OBSERVER_WRITABLE_PATTERNS = (
+    re.compile(r"^/api/employees/me(/|$)"),
+    re.compile(r"^/api/employees/\d+/leave-request$"),
+    re.compile(r"^/api/documents/\d+/sign$"),
+)
+
+
 def observer_check_needed(method: str, path: str) -> bool:
     """Нужно ли для этого запроса проверять флаг «Наблюдатель».
 
@@ -53,7 +66,10 @@ def observer_check_needed(method: str, path: str) -> bool:
     """
     if (method or "GET").upper() in ("GET", "HEAD", "OPTIONS"):
         return False
-    return not any((path or "").startswith(prefix) for prefix in OBSERVER_WRITABLE_PREFIXES)
+    path = path or ""
+    if any(p.match(path) for p in OBSERVER_WRITABLE_PATTERNS):
+        return False
+    return not any(path.startswith(prefix) for prefix in OBSERVER_WRITABLE_PREFIXES)
 
 
 def _truncate_password(password: str, max_bytes: int = 72) -> str:
