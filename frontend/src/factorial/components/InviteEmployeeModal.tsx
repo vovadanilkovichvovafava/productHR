@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { createInvitation } from '../api/invitations';
 import type { Invitation } from '../api/types';
 import { getErrorDetail } from '@/utils';
+import { backdropClose } from '@/utils/backdropClose';
 
 export default function InviteEmployeeModal({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState('');
@@ -25,7 +26,7 @@ export default function InviteEmployeeModal({ onClose }: { onClose: () => void }
   const copy = () => { navigator.clipboard?.writeText(link); };
 
   return (
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <form className="fx-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>Пригласить сотрудника</h3>
         {!link ? (

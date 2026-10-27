@@ -8,6 +8,7 @@ import { listTemplates, generateDoc } from '@/factorial/api/documents';
 import { listEmployees } from '@/factorial/api/employees';
 import type { DocTemplate } from '@/factorial/api/types';
 import { formatDateRu } from '@/factorial/lib/formatDate';
+import { backdropClose } from '@/utils/backdropClose';
 
 /** Модалка генерации документа из шаблона для выбранного сотрудника. */
 function GenerateModal({ template, onClose }: { template: DocTemplate; onClose: () => void }) {
@@ -24,7 +25,7 @@ function GenerateModal({ template, onClose }: { template: DocTemplate; onClose: 
   });
 
   return (
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <div className="fx-modal" onClick={(e) => e.stopPropagation()}>
         <h3>Сгенерировать: {template.name}</h3>
         {ok ? (

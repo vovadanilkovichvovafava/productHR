@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createTemplate, updateTemplate } from '../api/documents';
 import type { DocTemplate } from '../api/types';
+import { backdropClose } from '@/utils/backdropClose';
 
 const DEFAULT_CONTENT =
   'Настоящим {{name}}, должность {{position}}, отдел {{department}},\nподтверждает обязательство о неразглашении конфиденциальной информации.\n\nДата: {{date}}';
@@ -29,7 +30,7 @@ export default function TemplateEditorModal({ template, onClose }: { template: D
   };
 
   return (
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <form className="fx-modal" style={{ width: 560 }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{isEdit ? 'Редактировать шаблон' : 'Создать шаблон'}</h3>
         <div className="fx-field">

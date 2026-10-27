@@ -13,6 +13,8 @@ import LeaveBalanceCard from '@/factorial/components/cabinet/LeaveBalanceCard';
 import MyDocsMini from '@/factorial/components/cabinet/MyDocsMini';
 import EmployeeStatusCard from '@/factorial/components/cabinet/EmployeeStatusCard';
 import RequestLeaveModal from '@/factorial/components/RequestLeaveModal';
+import HrConfirm from '@/components/hr/HrConfirm';
+import { backdropClose } from '@/utils/backdropClose';
 
 const TITLE_ICON = (
   <div className="w-9 h-9 rounded-fx-lg bg-pink-100 flex items-center justify-center">
@@ -36,17 +38,52 @@ export default function ProfileOverviewPage() {
   const [requestOpen, setRequestOpen] = useState(false);
   // Сгенерированный временный пароль (показывается один раз в модалке).
   const [genPassword, setGenPassword] = useState<string | null>(null);
-  const [pwCopied, setPwCopied] = useState(false);
+  // 'ok' — скопирован, 'failed' — браузер не дал (нет прав/фокуса): пароль
+  // остаётся в поле, его копируют руками.
+  const [pwCopy, setPwCopy] = useState<'idle' | 'ok' | 'failed'>('idle');
+  // Новый пароль сразу отменяет прежний и выкидывает сотрудника отовсюду —
+  // поэтому сначала спрашиваем.
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const resetPw = useMutation({
     mutationFn: () => resetEmployeePassword(me!.id),
-    onSuccess: (r) => { setGenPassword(r.temporary_password); setPwCopied(false); },
-    onError: (e) => toast({ title: 'Ошибка', description: getErrorDetail(e, 'Не удалось сгенерировать пароль') }),
+    onSuccess: (r) => { setConfirmReset(false); setGenPassword(r.temporary_password); setPwCopy('idle'); },
+    onError: (e) => {
+      setConfirmReset(false);
+      toast({ title: 'Ошибка', description: getErrorDetail(e, 'Не удалось сгенерировать пароль') });
+    },
   });
 
-  const copy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast({ title: 'Скопировано', description: text });
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: 'Скопировано', description: text });
+    } catch {
+      toast({ title: 'Не удалось скопировать', description: `Браузер не дал доступ к буферу. Скопируйте вручную: ${text}` });
+    }
+  };
+
+  const copyPassword = async (text: string) => {
+    try {
+      if (!navigator.clipboard) throw new Error('no clipboard');
+      await navigator.clipboard.writeText(text);
+      setPwCopy('ok');
+    } catch {
+      setPwCopy('failed');
+    }
+  };
+
+  const exportCard = async () => {
+    if (!me) return;
+    setExporting(true);
+    try {
+      await downloadEmployeeTemplate({ id: me.id });
+    } catch (e) {
+      toast({ title: 'Ошибка', description: getErrorDetail(e, 'Не удалось выгрузить карточку сотрудника') });
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (isError) {
@@ -86,7 +123,7 @@ export default function ProfileOverviewPage() {
               <button
                 type="button"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-fx-xs font-medium border border-card-border-soft rounded-fx-lg hover:bg-sidebar-hover"
-                onClick={() => resetPw.mutate()}
+                onClick={() => setConfirmReset(true)}
                 disabled={!me || resetPw.isPending}
               >
                 <KeyRound className="w-3.5 h-3.5" />
@@ -96,16 +133,28 @@ export default function ProfileOverviewPage() {
             <button
               type="button"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-fx-xs font-medium border border-card-border-soft rounded-fx-lg hover:bg-sidebar-hover"
-              onClick={() => { if (me) void downloadEmployeeTemplate({ id: me.id }); }}
-              disabled={!me}
+              onClick={exportCard}
+              disabled={!me || exporting}
             >
               <Download className="w-3.5 h-3.5" />
-              Экспорт
+              {exporting ? 'Выгружаем…' : 'Экспорт'}
             </button>
           </div>
 
+          {confirmReset && (
+            <HrConfirm
+              title="Сгенерировать новый пароль?"
+              subtitle={`Сотрудник ${me?.user_name || ''} сможет войти только с новым паролем.`}
+              danger="Текущий пароль сотрудника перестанет действовать, и он будет разлогинен на всех устройствах."
+              confirmLabel="Сгенерировать"
+              busy={resetPw.isPending}
+              onCancel={() => setConfirmReset(false)}
+              onConfirm={() => resetPw.mutate()}
+            />
+          )}
+
           {genPassword && (
-            <div className="fx-modal-overlay" onClick={() => setGenPassword(null)}>
+            <div className="fx-modal-overlay" {...backdropClose(() => setGenPassword(null))}>
               <div className="fx-modal" onClick={(e) => e.stopPropagation()}>
                 <h3>Временный пароль для входа</h3>
                 <div className="fx-sub">
@@ -113,15 +162,29 @@ export default function ProfileOverviewPage() {
                   ({me?.user_email || '—'}). Прежний пароль (если был) больше не действует.
                 </div>
                 <div className="flex items-center gap-2" style={{ marginTop: 10 }}>
-                  <code className="fx-input" style={{ flex: 1, userSelect: 'all', fontSize: 15 }}>{genPassword}</code>
+                  <input
+                    readOnly
+                    className="fx-input"
+                    style={{ flex: 1, fontSize: 15, fontFamily: 'monospace' }}
+                    value={genPassword}
+                    onFocus={(e) => e.currentTarget.select()}
+                    aria-label="Временный пароль"
+                  />
                   <button
                     type="button"
                     className="fx-btn fx-btn--secondary"
-                    onClick={() => { navigator.clipboard?.writeText(genPassword); setPwCopied(true); }}
+                    title="Скопировать"
+                    onClick={() => copyPassword(genPassword)}
                   >
-                    {pwCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    {pwCopy === 'ok' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                   </button>
                 </div>
+                {pwCopy === 'ok' && <div className="fx-sub" style={{ marginTop: 6 }}>Пароль скопирован.</div>}
+                {pwCopy === 'failed' && (
+                  <div style={{ color: '#B91C1C', fontSize: 13, marginTop: 6 }}>
+                    Браузер не дал скопировать. Выделите пароль в поле и скопируйте вручную (Ctrl+C / ⌘C).
+                  </div>
+                )}
                 <div className="fx-modal-actions">
                   <button type="button" className="fx-btn fx-btn--primary" onClick={() => setGenPassword(null)}>Готово</button>
                 </div>

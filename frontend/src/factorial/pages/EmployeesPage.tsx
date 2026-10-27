@@ -15,6 +15,7 @@ import InviteEmployeeModal from '@/factorial/components/InviteEmployeeModal';
 import EmployeeEditModal from '@/factorial/components/EmployeeEditModal';
 import BulkEditEmployeesModal from '@/factorial/components/BulkEditEmployeesModal';
 import type { Employee } from '@/factorial/mocks/employees';
+import { backdropClose } from '@/utils/backdropClose';
 
 export default function EmployeesPage() {
   const navigate = useNavigate();
@@ -219,7 +220,7 @@ export default function EmployeesPage() {
       )}
 
       {moveOpen && (
-        <div className="fx-modal-overlay" onClick={() => setMoveOpen(false)}>
+        <div className="fx-modal-overlay" {...backdropClose(() => setMoveOpen(false))}>
           <div className="fx-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Переместить в отдел ({selected.size})</h3>
             <div className="fx-field">

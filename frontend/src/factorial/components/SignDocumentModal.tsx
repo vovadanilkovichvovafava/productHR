@@ -1,8 +1,9 @@
-import { useRef, useState, MouseEvent, ReactNode } from 'react';
+import { useRef, useState, PointerEvent, ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getDocument, signDocument } from '../api/documents';
 import type { SignedDoc } from '../api/types';
 import { FxSpinner, FxPill } from './ui';
+import { backdropClose } from '@/utils/backdropClose';
 
 const SIG_MARKER = '{{signature}}';
 
@@ -98,28 +99,47 @@ export default function SignDocumentModal({ docId, onClose }: { docId: number; o
     onError: () => setErr('Не удалось сохранить подпись.'),
   });
 
-  const at = (e: MouseEvent) => {
+  // Pointer events: одна схема для мыши, пальца и стилуса. Раньше были только
+  // onMouse*, и на телефоне расписаться было нельзя (touchAction:none гасил
+  // прокрутку, а мышиных событий при рисовании пальцем нет).
+  const at = (e: PointerEvent<HTMLCanvasElement>) => {
     const c = canvasRef.current!;
     const r = c.getBoundingClientRect();
     return { x: ((e.clientX - r.left) / r.width) * c.width, y: ((e.clientY - r.top) / r.height) * c.height };
   };
-  const down = (e: MouseEvent) => { drawing.current = true; const ctx = canvasRef.current!.getContext('2d')!; const p = at(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
-  const move = (e: MouseEvent) => {
+  const down = (e: PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    // Захват: линия продолжается, даже если палец/мышь вышли за край поля.
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* не поддерживается — рисуем без захвата */ }
+    drawing.current = true;
+    const ctx = canvasRef.current!.getContext('2d')!;
+    const p = at(e);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+  };
+  const move = (e: PointerEvent<HTMLCanvasElement>) => {
     if (!drawing.current) return;
+    e.preventDefault();
     const ctx = canvasRef.current!.getContext('2d')!;
     const p = at(e);
     ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0F172A';
     ctx.lineTo(p.x, p.y); ctx.stroke();
     setHasInk(true);
   };
-  const up = () => { drawing.current = false; };
+  const up = (e: PointerEvent<HTMLCanvasElement>) => {
+    drawing.current = false;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch { /* захвата не было */ }
+  };
   const clear = () => { const c = canvasRef.current!; c.getContext('2d')!.clearRect(0, 0, c.width, c.height); setHasInk(false); };
 
   const isSigned = doc?.status === 'signed';
   const hasMarker = !!doc?.content_rendered?.includes(SIG_MARKER);
 
   return (
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <div className="fx-modal" style={{ width: 600, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
         {isLoading || !doc ? <FxSpinner /> : (
           <>
@@ -141,7 +161,7 @@ export default function SignDocumentModal({ docId, onClose }: { docId: number; o
                 <div className="fx-sub" style={{ marginTop: 16, marginBottom: 6 }}>Распишитесь в поле ниже:</div>
                 <canvas ref={canvasRef} width={540} height={150}
                   style={{ border: '1px dashed #CBD5E1', borderRadius: 8, background: '#fff', width: '100%', height: 150, touchAction: 'none', cursor: 'crosshair' }}
-                  onMouseDown={down} onMouseMove={move} onMouseUp={up} onMouseLeave={up} />
+                  onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
               </>
             )}
 
