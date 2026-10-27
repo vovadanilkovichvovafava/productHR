@@ -1406,12 +1406,40 @@ class PassportUpload(BaseModel):
 
 
 def _passport_fernet():
+    """Шифр персональных файлов: пишет первым ключом, читает любым из списка.
+
+    Ключ был ``sha256(SECRET_KEY)``: смена секрета JWT делала все сканы и
+    документы нечитаемыми (500), а его утечка раскрывала и их. Теперь основной
+    ключ — PII_ENCRYPTION_KEY (если задан), а ключи от текущего и прежних
+    SECRET_KEY (PII_LEGACY_SECRETS) остаются для чтения старых файлов.
+    """
     import base64 as _b64
     import hashlib
-    from cryptography.fernet import Fernet
+    from cryptography.fernet import Fernet, MultiFernet
     from api.config import settings
-    key = _b64.urlsafe_b64encode(hashlib.sha256(settings.jwt_secret.encode()).digest())
-    return Fernet(key)
+
+    def from_secret(secret: str) -> Fernet:
+        return Fernet(_b64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest()))
+
+    keys = []
+    if settings.pii_encryption_key:
+        keys.append(Fernet(settings.pii_encryption_key.encode()))
+    keys.append(from_secret(settings.jwt_secret))
+    keys.extend(from_secret(x.strip()) for x in settings.pii_legacy_secrets.split(",") if x.strip())
+    return MultiFernet(keys)
+
+
+def _decrypt_pii(enc: bytes) -> bytes:
+    """Расшифровать файл; чужой ключ — понятная ошибка вместо 500."""
+    from cryptography.fernet import InvalidToken
+    try:
+        return _passport_fernet().decrypt(enc)
+    except InvalidToken:
+        logger.error("PII_DECRYPT failed: файл зашифрован ключом, которого нет в PII_ENCRYPTION_KEY/PII_LEGACY_SECRETS")
+        raise HTTPException(
+            status_code=409,
+            detail="Файл зашифрован другим ключом сервера — обратитесь к администратору платформы",
+        )
 
 
 def _passport_path(emp_id: int):
@@ -1525,7 +1553,7 @@ async def get_my_passport(
         enc = path.read_bytes() if path.exists() else None
     if not meta or enc is None:
         raise HTTPException(status_code=404, detail="Паспорт не загружен")
-    raw = _passport_fernet().decrypt(enc)
+    raw = _decrypt_pii(enc)
     return {
         "filename": meta.get("filename"),
         "content_type": meta.get("content_type"),
@@ -1552,7 +1580,7 @@ async def get_employee_passport(
         enc = path.read_bytes() if path.exists() else None
     if not meta or enc is None:
         raise HTTPException(status_code=404, detail="Паспорт не загружен")
-    raw = _passport_fernet().decrypt(enc)
+    raw = _decrypt_pii(enc)
     return {
         "filename": meta.get("filename"),
         "content_type": meta.get("content_type"),
@@ -1613,7 +1641,7 @@ async def download_employee_document(employee_id: int, doc_id: int, db: AsyncSes
         enc = p.read_bytes() if p.exists() else None
     if enc is None:
         raise HTTPException(status_code=410, detail="Файл недоступен (потерян при обновлении сервера)")
-    data = _passport_fernet().decrypt(enc)
+    data = _decrypt_pii(enc)
     logger.info("PII_ACCESS document: employee=%s doc=%s by user=%s (%s)", emp.id, doc.id, current_user.id, access)
     return {"filename": doc.filename, "content_type": doc.content_type, "data_base64": base64.b64encode(data).decode()}
 

@@ -37,6 +37,15 @@ SKIP_PATHS = (
 )
 
 SECRET_KEY_RE = re.compile(r"pass(word)?|token|secret|api[_-]?key|authorization|otp|code_verifier", re.I)
+# Персональные данные сотрудников: реквизиты (карта, счёт, кошелёк), паспорт,
+# адрес, экстренный контакт, дата рождения, ИНН/СНИЛС, сами файлы и подпись.
+# Журнал хранится год и читается админами HR — открытым текстом им там не место
+# (до 27.10.2026 payment_details и адрес лежали в audit_events как есть, а
+# паспорт маскировался лишь случайно — «pass» в «passport»).
+PII_KEY_RE = re.compile(
+    r"payment|passport|address|emergency|birth|data_base64|signature_data|(^|_)(inn|snils)($|_)",
+    re.I,
+)
 
 # (метод, шаблон пути) → действие по-русски. Первый совпавший — побеждает,
 # поэтому частные пути стоят выше общих. Не нашлось — «МЕТОД путь».
@@ -171,7 +180,7 @@ def _clean(value: Any, depth: int = 0) -> Any:
         return "…"
     if isinstance(value, dict):
         return {
-            str(k): ("***" if SECRET_KEY_RE.search(str(k)) else _clean(v, depth + 1))
+            str(k): ("***" if SECRET_KEY_RE.search(str(k)) or PII_KEY_RE.search(str(k)) else _clean(v, depth + 1))
             for k, v in value.items()
         }
     if isinstance(value, list):

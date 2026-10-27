@@ -16,6 +16,16 @@ class Settings(BaseSettings):
         alias="SECRET_KEY"
     )
     jwt_algorithm: str = "HS256"
+
+    # Ключ шифрования персональных файлов сотрудников (сканы паспортов,
+    # документы). Fernet-ключ: python -c "from cryptography.fernet import
+    # Fernet; print(Fernet.generate_key().decode())". Не задан — шифруем, как
+    # раньше, ключом от SECRET_KEY (тогда смена SECRET_KEY делает файлы
+    # нечитаемыми). Старые файлы читаются в любом случае.
+    pii_encryption_key: str = Field(default="", alias="PII_ENCRYPTION_KEY")
+    # Прежние SECRET_KEY через запятую — ТОЛЬКО чтобы читать файлы, зашифрованные
+    # ими (перенос базы с другого сервера, смена SECRET_KEY).
+    pii_legacy_secrets: str = Field(default="", alias="PII_LEGACY_SECRETS")
     jwt_expire_minutes: int = 60 * 24 * 7  # Legacy fallback - actual auth uses ACCESS_TOKEN_EXPIRE_MINUTES (15 min)
 
     # Telegram Bot Token and Username
