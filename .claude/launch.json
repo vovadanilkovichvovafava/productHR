@@ -11,7 +11,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "set -a && . ./dev.env && set +a && exec ./.venv/bin/python -m uvicorn main:app --reload --port 8000"],
+      "runtimeArgs": ["-c", "set -a && . ./.env && set +a && exec ./.venv/bin/python -m uvicorn main:app --reload --port 8000"],
       "port": 8000,
       "cwd": "backend"
     },
