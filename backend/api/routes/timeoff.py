@@ -1,4 +1,5 @@
 """Time-off / vacation request endpoints."""
+import html
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -6,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from ..models.database import TimeOffRequest, User, OrgMember, OrgRole, Employee, LeaveRequest, DepartmentMember, DeptRole, UserRole
+from ..models.database import TimeOffRequest, User, OrgMember, OrgRole, Employee, LeaveRequest, Department, DepartmentMember, DeptRole, UserRole
 from ..database import get_db
 from ..services.auth import get_current_user, get_user_org
 
@@ -62,6 +63,57 @@ async def _is_admin_or_owner(user: User, org_id: int, db: AsyncSession) -> bool:
         )
     )
     return result.scalar_one_or_none() is not None
+
+
+async def _review_target(request_id: int, user: User, db: AsyncSession) -> TimeOffRequest:
+    """Заявка, которую ``user`` вправе одобрить или отклонить.
+
+    До 27.10.2026 approve/reject не проверяли НИЧЕГО: любой залогиненный
+    одобрял свой отпуск или перебором id — заявки всех организаций. Правило:
+    решает superadmin, owner/admin организации заявки или лид/саб-админ отдела
+    этой организации, где состоит заявитель; свою заявку — никто; решение
+    принимается один раз (только из «pending»). Чужая организация — 404.
+    """
+    req = (await db.execute(
+        select(TimeOffRequest).where(TimeOffRequest.id == request_id).with_for_update()
+    )).scalar_one_or_none()
+    if not req:
+        raise HTTPException(404, "Request not found")
+
+    is_super = user.role == UserRole.superadmin
+    if not is_super:
+        member = (await db.execute(
+            select(OrgMember.role).where(
+                OrgMember.user_id == user.id, OrgMember.org_id == req.org_id
+            )
+        )).scalar_one_or_none()
+        if member is None:
+            raise HTTPException(404, "Request not found")
+
+    if req.user_id == user.id:
+        raise HTTPException(403, "Свою заявку одобряет руководитель или администратор")
+
+    if not is_super and not await _is_admin_or_owner(user, req.org_id, db):
+        lead_dept_ids = select(DepartmentMember.department_id).join(
+            Department, Department.id == DepartmentMember.department_id
+        ).where(
+            DepartmentMember.user_id == user.id,
+            DepartmentMember.role.in_([DeptRole.lead, DeptRole.sub_admin]),
+            Department.org_id == req.org_id,
+        )
+        shared = (await db.execute(
+            select(DepartmentMember.id).where(
+                DepartmentMember.user_id == req.user_id,
+                DepartmentMember.department_id.in_(lead_dept_ids),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if shared is None:
+            raise HTTPException(403, "Решать по заявке может руководитель отдела или администратор")
+
+    status = req.status if isinstance(req.status, str) else req.status.value
+    if status != "pending":
+        raise HTTPException(409, "По заявке уже принято решение")
+    return req
 
 
 # Нормализация типов из обеих систем в единый набор + рус. подпись
@@ -302,9 +354,7 @@ async def approve_timeoff(
     current_user: User = Depends(get_current_user),
 ):
     """Approve a time-off request."""
-    req = await db.get(TimeOffRequest, request_id)
-    if not req:
-        raise HTTPException(404, "Request not found")
+    req = await _review_target(request_id, current_user, db)
 
     req.status = "approved"
     req.reviewed_by = current_user.id
@@ -318,7 +368,7 @@ async def approve_timeoff(
             req.user_id,
             f"\u2705 <b>\u0417\u0430\u044f\u0432\u043a\u0430 \u043e\u0434\u043e\u0431\u0440\u0435\u043d\u0430!</b>\n\n"
             f"\U0001f4c5 {req.date_from.strftime('%d.%m')} \u2014 {req.date_to.strftime('%d.%m')}\n"
-            f"\u041e\u0434\u043e\u0431\u0440\u0438\u043b: {current_user.name}",
+            f"\u041e\u0434\u043e\u0431\u0440\u0438\u043b: {html.escape(current_user.name or '')}",
         )
     except Exception:
         pass  # Don't fail the API call if notification fails
@@ -334,9 +384,7 @@ async def reject_timeoff(
     current_user: User = Depends(get_current_user),
 ):
     """Reject a time-off request."""
-    req = await db.get(TimeOffRequest, request_id)
-    if not req:
-        raise HTTPException(404, "Request not found")
+    req = await _review_target(request_id, current_user, db)
 
     req.status = "rejected"
     req.reviewed_by = current_user.id
@@ -347,12 +395,14 @@ async def reject_timeoff(
     # Send Telegram notification
     try:
         from ..bot import send_telegram_notification
-        reason_text = f"\n\u041f\u0440\u0438\u0447\u0438\u043d\u0430: {reason}" if reason else ""
+        # Сообщение уходит с parse_mode=HTML: без экранирования причина могла
+        # нести свою ссылку от имени бота, а «<» молча ронял уведомление.
+        reason_text = f"\n\u041f\u0440\u0438\u0447\u0438\u043d\u0430: {html.escape(reason)}" if reason else ""
         await send_telegram_notification(
             req.user_id,
             f"\u274c <b>\u0417\u0430\u044f\u0432\u043a\u0430 \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0430</b>\n\n"
             f"\U0001f4c5 {req.date_from.strftime('%d.%m')} \u2014 {req.date_to.strftime('%d.%m')}\n"
-            f"\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u043b: {current_user.name}{reason_text}",
+            f"\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u043b: {html.escape(current_user.name or '')}{reason_text}",
         )
     except Exception:
         pass

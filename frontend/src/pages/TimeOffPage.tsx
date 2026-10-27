@@ -12,6 +12,9 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
+import toast from 'react-hot-toast';
+import { useAuthStore } from '@/stores/authStore';
+import { getErrorDetail } from '@/utils';
 import * as timeoffApi from '@/services/api/timeoff';
 import type { TimeOffRequest, TimeOffCalendarEntry } from '@/services/api/timeoff';
 
@@ -285,6 +288,7 @@ function RejectModal({
 // ============================================================
 
 export default function TimeOffPage() {
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const [requests, setRequests] = useState<TimeOffRequest[]>([]);
   const [calendarData, setCalendarData] = useState<TimeOffCalendarEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -330,8 +334,8 @@ export default function TimeOffPage() {
     try {
       await timeoffApi.approveTimeOff(id);
       await fetchRequests();
-    } catch {
-      // silently ignore
+    } catch (error) {
+      toast.error(getErrorDetail(error, 'Не удалось одобрить заявку'));
     } finally {
       setActionLoading(null);
     }
@@ -343,8 +347,8 @@ export default function TimeOffPage() {
     try {
       await timeoffApi.rejectTimeOff(id, reason || undefined);
       await fetchRequests();
-    } catch {
-      // silently ignore
+    } catch (error) {
+      toast.error(getErrorDetail(error, 'Не удалось отклонить заявку'));
     } finally {
       setActionLoading(null);
     }
@@ -462,7 +466,8 @@ export default function TimeOffPage() {
               {requests.map((req) => {
                 const TypeIcon = TYPE_ICONS[req.type] || HelpCircle;
                 const status = STATUS_STYLES[req.status];
-                const isActionable = req.status === 'pending';
+                // Свою заявку решает руководитель или админ — сервер ответит 403.
+                const isActionable = req.status === 'pending' && req.user_id !== currentUserId;
                 const isProcessing = actionLoading === req.id;
 
                 return (
