@@ -1,4 +1,5 @@
 """HR org-chart units — изолировано от рекрутинговых departments/прав."""
+import logging
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -7,7 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
 from api.models.database import OrgUnit, Employee, User, Organization
+from api.services.auth import get_current_user
 from .organizations import get_current_org, require_org_admin
+
+logger = logging.getLogger("hr-analyzer.org_units")
 
 router = APIRouter()
 
@@ -65,16 +69,21 @@ class OrgChartResponse(BaseModel):
 
 
 @router.get("", response_model=OrgChartResponse)
-async def get_org_chart(org: Organization = Depends(get_current_org), db: AsyncSession = Depends(get_db)):
-    from .employees import sync_org_employees, sync_org_departments
-    try:
-        await sync_org_employees(org.id, db)
-        await sync_org_departments(org.id, db)
-    except Exception:
+async def get_org_chart(
+    org: Organization = Depends(get_current_org),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from .employees import _is_admin_or_owner, sync_org_employees, sync_org_departments
+    # Синхронизация ПИШЕТ в базу — запускаем её только у админа. Раньше любой
+    # участник (и наблюдатель) своим просмотром создавал записи и юниты.
+    if await _is_admin_or_owner(current_user, org.id, db):
         try:
-            await db.rollback()
+            await sync_org_employees(org.id, db)
+            await sync_org_departments(org.id, db)
         except Exception:
-            pass
+            logger.exception("ORG_SYNC failed for org=%s", org.id)
+            await db.rollback()
     units = (await db.execute(
         select(OrgUnit).where(OrgUnit.org_id == org.id).order_by(OrgUnit.sort_order, OrgUnit.id)
     )).scalars().all()
@@ -169,6 +178,19 @@ async def delete_unit(unit_id: int, auth: tuple = Depends(require_org_admin), db
     )).scalar_one_or_none()
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found")
+    # Юнит с именем действующего департамента синхронизация создаст заново при
+    # следующем открытии оргсхемы (вместе с людьми) — удаление было бы мнимым.
+    from api.models.database import Department
+    twin = (await db.execute(
+        select(Department.id).where(
+            Department.org_id == org.id, Department.name == unit.name, Department.is_active == True  # noqa: E712
+        )
+    )).first()
+    if twin:
+        raise HTTPException(
+            status_code=409,
+            detail="Этот отдел ведётся в «Управление → Департаменты» — удалите или переименуйте его там",
+        )
     # детей поднимаем на уровень вверх (на parent удаляемого)
     children = (await db.execute(select(OrgUnit).where(OrgUnit.parent_id == unit_id))).scalars().all()
     for c in children:
@@ -180,6 +202,19 @@ async def delete_unit(unit_id: int, auth: tuple = Depends(require_org_admin), db
     await db.delete(unit)
     await db.commit()
     return {"success": True}
+
+
+async def _manager_creates_cycle(db: AsyncSession, org_id: int, employee_id: int, manager_id: int) -> bool:
+    """Станет ли employee своим же начальником, если назначить ему manager_id."""
+    rows = (await db.execute(select(Employee.id, Employee.manager_id).where(Employee.org_id == org_id))).all()
+    mp = {r[0]: r[1] for r in rows}
+    cur, seen = manager_id, set()
+    while cur is not None and cur not in seen:
+        if cur == employee_id:
+            return True
+        seen.add(cur)
+        cur = mp.get(cur)
+    return False
 
 
 @router.put("/assign/{employee_id}")
@@ -198,35 +233,42 @@ async def assign_employee(employee_id: int, data: AssignEmployee, auth: tuple = 
         if not unit:
             raise HTTPException(status_code=404, detail="Org unit not found")
     emp.org_unit_id = data.org_unit_id
-    # Write-through в реальные департаменты Энцеладуса (единый источник): перемещение в оргсхеме
-    # отражается в «Управление → Департаменты» (department_members + Employee.department_id) и
-    # ставит руководителем lead целевого отдела. Best-effort: ошибка не ломает основное назначение.
+    # Write-through в реальные департаменты (единый источник): перемещение в
+    # оргсхеме отражается в «Управление → Департаменты» (department_members +
+    # Employee.department_id) и ставит руководителем lead целевого отдела.
+    # До 27.10.2026 здесь же молча снимались роли lead/sub_admin (а с ними —
+    # права на приглашения и отпуска отдела), руководитель ставился без проверки
+    # на цикл, ручной руководитель стирался, а ошибки глотал голый except.
     from api.models.database import Department, DepartmentMember, DeptRole
-    try:
-        all_depts = (await db.execute(select(Department).where(Department.org_id == org.id))).scalars().all()
-        org_dept_ids = [d.id for d in all_depts]
-        target_dept = next((d for d in all_depts if unit is not None and d.name == unit.name and d.is_active), None)
-        emp.department_id = target_dept.id if target_dept else None
-        if org_dept_ids:
-            old_dm = (await db.execute(
-                select(DepartmentMember).where(DepartmentMember.user_id == emp.user_id, DepartmentMember.department_id.in_(org_dept_ids))
-            )).scalars().all()
-            for dm in old_dm:
+    all_depts = (await db.execute(select(Department).where(Department.org_id == org.id))).scalars().all()
+    org_dept_ids = [d.id for d in all_depts]
+    target_dept = next((d for d in all_depts if unit is not None and d.name == unit.name and d.is_active), None)
+    emp.department_id = target_dept.id if target_dept else None
+    if org_dept_ids:
+        memberships = (await db.execute(
+            select(DepartmentMember).where(
+                DepartmentMember.user_id == emp.user_id, DepartmentMember.department_id.in_(org_dept_ids)
+            )
+        )).scalars().all()
+        # Рядовое членство переезжает; руководящие роли — только явным действием.
+        for dm in memberships:
+            if dm.role == DeptRole.member and (target_dept is None or dm.department_id != target_dept.id):
                 await db.delete(dm)
-            if target_dept:
-                db.add(DepartmentMember(department_id=target_dept.id, user_id=emp.user_id, role=DeptRole.member))
-        new_mgr = None
-        if target_dept:
-            lead = (await db.execute(
-                select(DepartmentMember).where(DepartmentMember.department_id == target_dept.id, DepartmentMember.role == DeptRole.lead)
-            )).scalars().first()
-            if lead and lead.user_id != emp.user_id:
-                lead_emp = (await db.execute(select(Employee).where(Employee.user_id == lead.user_id, Employee.org_id == org.id))).scalar_one_or_none()
-                new_mgr = lead_emp.id if lead_emp else None
-        emp.manager_id = new_mgr
-    except Exception:
-        pass
-    await db.commit()
+        if target_dept and not any(dm.department_id == target_dept.id for dm in memberships):
+            db.add(DepartmentMember(department_id=target_dept.id, user_id=emp.user_id, role=DeptRole.member))
+    if target_dept:
+        lead = (await db.execute(
+            select(DepartmentMember).where(
+                DepartmentMember.department_id == target_dept.id, DepartmentMember.role == DeptRole.lead
+            )
+        )).scalars().first()
+        lead_emp = None
+        if lead and lead.user_id != emp.user_id:
+            lead_emp = (await db.execute(
+                select(Employee).where(Employee.user_id == lead.user_id, Employee.org_id == org.id)
+            )).scalar_one_or_none()
+        if lead_emp is not None and not await _manager_creates_cycle(db, org.id, emp.id, lead_emp.id):
+            emp.manager_id = lead_emp.id
     return {"success": True, "employee_id": employee_id, "org_unit_id": data.org_unit_id}
 
 
@@ -248,15 +290,8 @@ async def set_manager(employee_id: int, data: AssignManager, auth: tuple = Depen
         if not mgr:
             raise HTTPException(status_code=404, detail="Manager not found")
         # защита от циклов: идём вверх по цепочке руководителей от нового менеджера
-        rows2 = (await db.execute(select(Employee.id, Employee.manager_id).where(Employee.org_id == org.id))).all()
-        mp = {r[0]: r[1] for r in rows2}
-        cur = new_mgr
-        seen = set()
-        while cur is not None and cur not in seen:
-            if cur == employee_id:
-                raise HTTPException(status_code=400, detail="Cannot set manager to a subordinate (cycle)")
-            seen.add(cur)
-            cur = mp.get(cur)
+        if await _manager_creates_cycle(db, org.id, employee_id, new_mgr):
+            raise HTTPException(status_code=400, detail="Cannot set manager to a subordinate (cycle)")
     emp.manager_id = new_mgr
     await db.commit()
     return {"success": True, "employee_id": employee_id, "manager_id": new_mgr}

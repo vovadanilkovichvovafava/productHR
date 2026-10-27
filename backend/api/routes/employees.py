@@ -498,9 +498,12 @@ def _employee_to_response(emp: Employee) -> EmployeeResponse:
 
 async def sync_org_employees(org_id: int, db: AsyncSession) -> int:
     """Подтянуть всех участников организации («Управление») в HR/Factorial:
-    создаёт запись Employee для каждого org-member, у кого её ещё нет. Идемпотентно."""
+    создаёт запись Employee для каждого org-member, у кого её ещё нет. Идемпотентно.
+    Суперадмин платформы — не сотрудник клиента, ему запись не заводим."""
     member_ids = list((await db.execute(
-        select(OrgMember.user_id).where(OrgMember.org_id == org_id)
+        select(OrgMember.user_id)
+        .join(User, User.id == OrgMember.user_id)
+        .where(OrgMember.org_id == org_id, User.role != UserRole.superadmin)
     )).scalars().all())
     if not member_ids:
         return 0
@@ -544,12 +547,22 @@ async def sync_org_departments(org_id: int, db: AsyncSession) -> int:
             created += 1
         dept_to_unit[d.id] = u
     # вложенность отделов — только если у узла ещё нет родителя (не перетираем ручное)
+    # и только если это не замкнёт цикл: юнит, вручную положенный под своего
+    # «потомка», вместе с ним пропадал со схемы (до 27.10.2026).
+    parent_of = {u.id: u.parent_id for u in unit_by_name.values()}
     for d in depts:
         if d.parent_id and d.parent_id in dept_to_unit:
             u = dept_to_unit[d.id]
             parent_u = dept_to_unit[d.parent_id]
             if u.parent_id is None and parent_u.id != u.id:
+                cur, seen = parent_u.id, set()
+                while cur is not None and cur not in seen and cur != u.id:
+                    seen.add(cur)
+                    cur = parent_of.get(cur)
+                if cur == u.id:
+                    continue
                 u.parent_id = parent_u.id
+                parent_of[u.id] = parent_u.id
     # user_id -> department_id (первое членство)
     dept_ids = [d.id for d in depts]
     rows = (await db.execute(

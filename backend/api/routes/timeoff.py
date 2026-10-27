@@ -32,9 +32,12 @@ async def _scoped_user_ids(user: User, org_id: int, db: AsyncSession) -> list[in
         return None
 
     dept_ids_res = await db.execute(
-        select(DepartmentMember.department_id).where(
+        select(DepartmentMember.department_id)
+        .join(Department, Department.id == DepartmentMember.department_id)
+        .where(
             DepartmentMember.user_id == user.id,
             DepartmentMember.role.in_([DeptRole.lead, DeptRole.sub_admin]),
+            Department.org_id == org_id,  # лид в другой организации здесь не лид
         )
     )
     admin_dept_ids = [r for r in dept_ids_res.scalars().all()]
@@ -186,12 +189,12 @@ async def list_timeoff(
     current_user: User = Depends(get_current_user),
 ):
     """List time-off requests for the org."""
-    org_result = await db.execute(
-        select(OrgMember.org_id).where(OrgMember.user_id == current_user.id).limit(1)
-    )
-    org_id = org_result.scalar_one_or_none()
-    if not org_id:
+    # Организация — та же, что везде (по приоритету роли), а не случайная
+    # первая строка членства (.limit(1) без сортировки).
+    org = await get_user_org(current_user, db)
+    if not org:
         raise HTTPException(404, "No organization")
+    org_id = org.id
 
     query = select(TimeOffRequest).where(TimeOffRequest.org_id == org_id).order_by(TimeOffRequest.created_at.desc())
     if status:
@@ -239,12 +242,12 @@ async def timeoff_calendar(
     current_user: User = Depends(get_current_user),
 ):
     """Return approved/pending timeoffs for calendar view."""
-    org_result = await db.execute(
-        select(OrgMember.org_id).where(OrgMember.user_id == current_user.id).limit(1)
-    )
-    org_id = org_result.scalar_one_or_none()
-    if not org_id:
+    # Организация — та же, что везде (по приоритету роли), а не случайная
+    # первая строка членства (.limit(1) без сортировки).
+    org = await get_user_org(current_user, db)
+    if not org:
         raise HTTPException(404, "No organization")
+    org_id = org.id
 
     query = (
         select(TimeOffRequest)
@@ -252,6 +255,11 @@ async def timeoff_calendar(
         .where(TimeOffRequest.status.in_(["pending", "approved"]))
         .order_by(TimeOffRequest.date_from)
     )
+    # Тот же круг, что у списка: раньше календарь отдавал любому участнику все
+    # заявки организации с типом (в том числе «больничный»).
+    allowed = await _scoped_user_ids(current_user, org_id, db)
+    if allowed is not None:
+        query = query.where(TimeOffRequest.user_id.in_(allowed))
     result = await db.execute(query)
     requests = result.scalars().all()
 
