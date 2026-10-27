@@ -18,13 +18,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ...database import get_db
 from ...models.database import (
-    Entity, EntityStatus, Employee, User, UserRole, OrgMember, OrgRole,
+    Department, Entity, EntityStatus, Employee, User, UserRole, OrgMember, OrgRole,
     VacancyApplication, STATUS_SYNC_MAP,
 )
 from ...services.auth import get_current_user, get_user_org, hash_password
@@ -76,8 +76,17 @@ async def hire_entity(
     )).scalar_one_or_none()
     if not ent:
         raise HTTPException(status_code=404, detail="Кандидат не найден")
+    # Скоуп по воронкам — как у staff-status: чужой кандидат отвечает 404.
+    from ...services.vacancy_scope import ensure_entity_visible
+    await ensure_entity_visible(entity_id, current_user, db)
     if ent.status not in HIREABLE_STATUSES:
         raise HTTPException(status_code=400, detail="Кандидат не на стадии «Оффер принят» или «Практика»")
+    if data.department_id is not None:
+        dept_ok = (await db.execute(
+            select(Department.id).where(Department.id == data.department_id, Department.org_id == org.id)
+        )).scalar_one_or_none()
+        if dept_ok is None:
+            raise HTTPException(status_code=400, detail="Отдел не найден")
 
     email = (data.email or "").strip().lower()
     if not email:
@@ -85,9 +94,27 @@ async def hire_entity(
 
     tg = _first_tg(ent)
 
-    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    user = (await db.execute(
+        select(User).where(func.lower(User.email) == email).order_by(User.id)
+    )).scalars().first()
     user_existed = user is not None
-    if not user:
+    if user is not None:
+        # Существующий аккаунт привязываем, только если он УЖЕ в этой организации.
+        # Раньше любой участник орга вписывал чужой email — аккаунт молча
+        # добавлялся в организацию, и админ дальше выдавал ему пароль из
+        # «Сотрудников»: захват аккаунта по одному email (до 27.10.2026).
+        in_org = (await db.execute(
+            select(OrgMember.id).where(OrgMember.org_id == org.id, OrgMember.user_id == user.id)
+        )).scalar_one_or_none()
+        if in_org is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Аккаунт {email} уже есть, но не в вашей организации. "
+                    "Отправьте человеку приглашение — он примет его своим паролем."
+                ),
+            )
+    else:
         # Пароль-заглушка: длинный случайный, НИКОМУ не показывается и нигде не
         # сохраняется. Войти по нему нельзя — доступ выдаётся позже через
         # reset-password в Factorial. Так аккаунт существует (Employee.user_id
@@ -108,12 +135,17 @@ async def hire_entity(
     existing_emp = (await db.execute(
         select(Employee).where(Employee.user_id == user.id)
     )).scalar_one_or_none()
+    if existing_emp and existing_emp.org_id != org.id:
+        # Запись сотрудника другой организации не трогаем: раньше её
+        # «реактивировали» отсюда и включали аккаунт, который та организация
+        # отключила при увольнении.
+        raise HTTPException(status_code=409, detail="Этот человек оформлен в другой организации")
     if existing_emp and existing_emp.is_active:
         # Активный сотрудник с этим email уже есть. Если он привязан к ДРУГОМУ
         # кандидату — HR ошибся с почтой (дубль): называем, к кому она относится.
         if existing_emp.entity_id and existing_emp.entity_id != ent.id:
             other_name = (await db.execute(
-                select(Entity.name).where(Entity.id == existing_emp.entity_id)
+                select(Entity.name).where(Entity.id == existing_emp.entity_id, Entity.org_id == org.id)
             )).scalar_one_or_none()
             raise HTTPException(
                 status_code=409,
