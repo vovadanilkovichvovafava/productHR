@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createTemplate, updateTemplate } from '../api/documents';
 import type { DocTemplate } from '../api/types';
 import { backdropClose } from '@/utils/backdropClose';
+import { getErrorDetail } from '@/utils';
 
 const DEFAULT_CONTENT =
   'Настоящим {{name}}, должность {{position}}, отдел {{department}},\nподтверждает обязательство о неразглашении конфиденциальной информации.\n\nДата: {{date}}';
@@ -19,7 +20,7 @@ export default function TemplateEditorModal({ template, onClose }: { template: D
   const m = useMutation({
     mutationFn: () => (isEdit ? updateTemplate(template!.id, { name, content }) : createTemplate({ name, content })),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fx', 'templates'] }); onClose(); },
-    onError: () => setErr('Не удалось сохранить шаблон.'),
+    onError: (e) => setErr(getErrorDetail(e, 'Не удалось сохранить шаблон.')),
   });
 
   const submit = (e: FormEvent) => {

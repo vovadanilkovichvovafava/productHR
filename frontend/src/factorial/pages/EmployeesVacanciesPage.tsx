@@ -6,6 +6,7 @@ import TableTemplate from '@/factorial/templates/TableTemplate';
 import { getVacancies, createVacancy } from '@/services/api/vacancies';
 import type { Vacancy, VacancyStatus } from '@/types';
 import { backdropClose } from '@/utils/backdropClose';
+import { getErrorDetail } from '@/utils';
 
 const NAV = [
   { label: 'Сотрудники', href: '/factorial/employees', end: true },
@@ -37,7 +38,7 @@ function CreateVacancyModal({ onClose }: { onClose: () => void }) {
         status: f.status as VacancyStatus,
       }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fx', 'vacancies'] }); onClose(); },
-    onError: () => setErr('Не удалось создать вакансию (нужны права администратора).'),
+    onError: (e) => setErr(getErrorDetail(e, 'Не удалось создать вакансию.')),
   });
 
   const submit = (e: FormEvent) => {
