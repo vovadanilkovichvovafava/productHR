@@ -7,6 +7,8 @@ Endpoints:
 - Sign document with canvas signature (base64 PNG)
 - List documents for employee
 """
+import base64
+import binascii
 import logging
 import re
 from datetime import datetime
@@ -91,6 +93,29 @@ async def _is_admin_or_owner(user: User, org_id: int, db: AsyncSession) -> bool:
         )
     )
     return result.scalar_one_or_none() is not None
+
+
+# Подпись — PNG с холста (обе формы подписи шлют toDataURL('image/png')).
+# Раньше проверялось только startswith("data:image/"), и в строку подписи
+# можно было дописать `" onerror="…` — при «Скачать PDF» у HR это выполнялось
+# в его сессии (хранимый XSS, до 27.10.2026). Размер тоже не ограничивался.
+_SIGNATURE_RE = re.compile(r"^data:image/png;base64,([A-Za-z0-9+/]+={0,2})$")
+_SIGNATURE_MAX_CHARS = 400_000  # ~300 КБ PNG — подпись с холста весит десятки КБ
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _validate_signature(data: str) -> None:
+    if not data or len(data) > _SIGNATURE_MAX_CHARS:
+        raise HTTPException(400, "Некорректные данные подписи")
+    m = _SIGNATURE_RE.match(data)
+    if not m:
+        raise HTTPException(400, "Некорректные данные подписи")
+    try:
+        raw = base64.b64decode(m.group(1), validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, "Некорректные данные подписи")
+    if not raw.startswith(_PNG_MAGIC):
+        raise HTTPException(400, "Некорректные данные подписи")
 
 
 def _render_template(content: str, employee: Employee, user: User) -> str:
@@ -401,6 +426,7 @@ async def sign_document(
         select(SignedDocument)
         .options(selectinload(SignedDocument.employee).selectinload(Employee.user))
         .where(SignedDocument.id == doc_id)
+        .with_for_update()  # два одновременных «Подписать» не перепишут подпись
     )
     doc = result.scalar_one_or_none()
     if not doc:
@@ -413,9 +439,7 @@ async def sign_document(
     if doc.status == "signed":
         raise HTTPException(400, "Документ уже подписан")
 
-    # Validate signature data
-    if not payload.signature_data or not payload.signature_data.startswith("data:image/"):
-        raise HTTPException(400, "Некорректные данные подписи")
+    _validate_signature(payload.signature_data)
 
     # Get client IP
     client_ip = request.client.host if request.client else None
@@ -441,8 +465,12 @@ async def sign_document(
             doc.employee.contract_signed = True
             doc.employee.contract_signed_at = datetime.utcnow()
 
+    # Имя берём ДО коммита: refresh сбрасывает связь employee, и её ленивая
+    # загрузка в async давала MissingGreenlet — подпись сохранялась, а сотрудник
+    # получал 500 и «Не удалось сохранить подпись».
+    employee_name = doc.employee.user.name if doc.employee and doc.employee.user else None
     await db.commit()
-    await db.refresh(doc)
+    await db.refresh(doc, attribute_names=["signature_data", "signed_at", "signer_ip", "status"])
 
     return SignedDocResponse(
         id=doc.id,
@@ -455,7 +483,7 @@ async def sign_document(
         signer_ip=doc.signer_ip,
         status=doc.status,
         created_at=doc.created_at,
-        employee_name=doc.employee.user.name if doc.employee and doc.employee.user else None,
+        employee_name=employee_name,
     )
 
 

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getDocument, signDocument } from '../api/documents';
 import type { SignedDoc } from '../api/types';
 import { FxSpinner, FxPill } from './ui';
+import { escapeHtml, signatureImgHtml } from '../lib/signatureHtml';
 
 const SIG_MARKER = '{{signature}}';
 
@@ -33,15 +34,9 @@ function renderWithSignature(content: string, sig: string | null): ReactNode {
   return out;
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 // Собрать самодостаточный HTML подписанного документа (подпись встроена как base64).
 function buildSignedHtml(doc: SignedDoc): string {
-  const sigImg = doc.signature_data
-    ? `<img src="${doc.signature_data}" style="height:54px;vertical-align:middle;margin:0 6px"/>`
-    : '____________________';
+  const sigImg = signatureImgHtml(doc.signature_data);
   let raw = doc.content_rendered || '';
   if (!raw.includes(SIG_MARKER)) raw = `${raw}\n\nПодпись: ${SIG_MARKER}`;
   const body = escapeHtml(raw).split(SIG_MARKER).join(sigImg);
