@@ -23,7 +23,7 @@ from ..models.database import (
     User, UserRole, Organization, OrgMember, OrgRole,
     Department, DepartmentMember, DeptRole, Invitation, Employee
 )
-from ..services.auth import get_current_user, hash_password, create_access_token
+from ..services.auth import get_current_user, hash_password, verify_password, create_access_token
 from .organizations import get_current_org, require_org_admin
 from ..config import settings
 
@@ -356,11 +356,30 @@ async def accept_invitation(
         if invitation.expires_at and datetime.utcnow() > invitation.expires_at:
             raise HTTPException(status_code=400, detail="Invitation expired")
 
+        # Приглашение на конкретный адрес принимается только этим адресом. Раньше
+        # email из формы не сверялся: по любой ссылке можно было «принять» её на
+        # чужой адрес.
+        if invitation.email and invitation.email.strip().lower() != data.email.strip().lower():
+            raise HTTPException(
+                status_code=400,
+                detail="Приглашение выписано на другой email",
+            )
+
         # Check if email already exists
         result = await db.execute(select(User).where(User.email == data.email))
         existing_user = result.scalar_one_or_none()
 
         if existing_user:
+            # Существующий аккаунт — только с его паролем. Без этой проверки ответ
+            # отдавал токен входа и ссылку привязки Telegram от ЧУЖОГО аккаунта
+            # любому, у кого есть ссылка приглашения (захват аккаунта).
+            if not existing_user.password_hash or not verify_password(
+                data.password, existing_user.password_hash
+            ):
+                raise HTTPException(
+                    status_code=401,
+                    detail="Этот email уже зарегистрирован — введите пароль от своего аккаунта",
+                )
             # Check if already a member of this org
             result = await db.execute(
                 select(OrgMember).where(
@@ -445,7 +464,11 @@ async def accept_invitation(
     await db.commit()
 
     # Generate JWT token
-    access_token = create_access_token({"sub": str(new_user.id)})
+    # token_version в токене — иначе смена пароля не отзывала бы этот токен.
+    access_token = create_access_token({
+        "sub": str(new_user.id),
+        "token_version": new_user.token_version or 0,
+    })
 
     # Deep link с одноразовым токеном (см. handle_bind_token в bot.py)
     telegram_bot_username = (settings.telegram_bot_username or "enceladus_mst_bot").lstrip("@")

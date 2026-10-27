@@ -936,7 +936,8 @@ class TestAcceptInvitation:
             json={
                 "email": regular_user.email,
                 "name": regular_user.name,
-                "password": "anypassword"
+                # Существующий аккаунт принимает приглашение только своим паролем
+                "password": "User123"
             }
         )
 
@@ -1160,7 +1161,7 @@ class TestAcceptInvitation:
             json={
                 "email": admin_user.email,
                 "name": "Test",
-                "password": "password"
+                "password": "Admin123"
             }
         )
 
