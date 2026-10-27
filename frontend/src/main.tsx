@@ -5,6 +5,8 @@ import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import { useAuthStore } from './stores/authStore';
+import { bindQueryCacheToUser } from './utils/queryCacheAuth';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -18,6 +20,9 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Выход, имперсонация, смена аккаунта — кэш прежнего пользователя стирается.
+bindQueryCacheToUser(queryClient, useAuthStore);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -49,13 +49,14 @@ import KudosFormPage from './pages/forms/KudosFormPage';
  */
 export default function FactorialModule() {
   const user = useAuthStore((s) => s.user);
-  // «Сотрудники» и «Документы» — только HR/админ/рекрутёр. Обычный сотрудник (member)
-  // их не видит и не может открыть по URL: дефолтная посадка и guard ведут в «Личный кабинет».
+  // «Сотрудники» и «Документы» — только суперадмин и админы организации
+  // (owner/admin): так же решает сервер. Рекрутёр (hr) и сотрудник (member)
+  // попадают в «Личный кабинет»; до 27.10.2026 hr пускали сюда, и он видел
+  // пустые экраны с 403 от сервера.
   const canManage =
     user?.role === 'superadmin' ||
     user?.org_role === 'owner' ||
-    user?.org_role === 'admin' ||
-    user?.org_role === 'hr';
+    user?.org_role === 'admin';
   const home = canManage ? '/factorial/employees' : '/factorial/profile';
   const guard = (el: ReactElement): ReactElement =>
     canManage ? el : <Navigate to="/factorial/profile" replace />;

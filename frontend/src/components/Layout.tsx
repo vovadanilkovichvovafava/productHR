@@ -751,9 +751,10 @@ export default function Layout() {
     user?.role === "superadmin" ||
     user?.org_role === "owner" ||
     user?.org_role === "admin";
-  // Factorial «Сотрудники»/«Документы» — админ (owner/admin) + hr-рекрутёр.
-  // Обычный сотрудник (member) видит лишь «Отпуска» и «Личный кабинет».
-  const canManageFactorialPeople = isHrSidebarAdmin || user?.org_role === "hr";
+  // «Управление» → «Сотрудники»/«Документы» — только owner/admin/superadmin,
+  // как на сервере (и в FactorialModule). Рекрутёр (hr) и сотрудник (member)
+  // видят лишь «Отпуска» и «Личный кабинет».
+  const canManageFactorialPeople = isHrSidebarAdmin;
   const sidebarSearchParams = new URLSearchParams(location.search);
   const sidebarSelectedVacancyId = sidebarSearchParams.get("v");
   const isClosedFunnelsView =
@@ -946,7 +947,7 @@ export default function Layout() {
               </div>
 
               {isFactorial && (
-                <nav className="hf-hr-nav" aria-label="Factorial navigation">
+                <nav className="hf-hr-nav" aria-label="Управление">
                   <div className="hf-hr-nav-list">
                     {canManageFactorialPeople && (
                       <>
