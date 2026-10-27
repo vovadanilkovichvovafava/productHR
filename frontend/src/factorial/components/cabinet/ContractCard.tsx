@@ -1,13 +1,13 @@
-import { useQuery } from '@tanstack/react-query';
-import { getMyProfile } from '@/factorial/api/employees';
+import type { Employee } from '@/factorial/api/types';
 import { formatDateRu, formatTenure } from '@/factorial/lib/formatDate';
 import DetailRow from './DetailRow';
 
-/** Карточка договора над списком документов («Соглашения»),
- *  по образцу «Информация о соглашении» в Factorial. Данные — из Employee. */
-export default function ContractCard() {
-  const { data: me, isError } = useQuery({ queryKey: ['fx', 'me'], queryFn: getMyProfile, retry: false });
-  if (isError || !me) return null; // нет карточки сотрудника — показываем только список документов
+/** Карточка договора над списком документов («Соглашения»). Данные — из
+ *  Employee того, чьи документы открыты: свой профиль или сотрудник в виде HR.
+ *  До 27.10.2026 карточка сама грузила `/employees/me`, и HR в карточке
+ *  сотрудника видел СВОЙ договор. */
+export default function ContractCard({ employee: me }: { employee?: Employee | null }) {
+  if (!me) return null; // нет карточки сотрудника — показываем только список документов
 
   const startRaw = me.department_start_date || me.practice_start_date || me.created_at || null;
   const start = startRaw ? `${formatDateRu(startRaw)} (${formatTenure(startRaw)} назад)` : '—';

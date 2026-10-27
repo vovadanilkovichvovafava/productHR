@@ -10,6 +10,7 @@ import { formatDateRu } from '@/factorial/lib/formatDate';
 import { buildProfileTabs } from '@/factorial/lib/routes';
 import { useProfileEmployee } from '@/factorial/lib/useProfileEmployee';
 import ContractCard from '@/factorial/components/cabinet/ContractCard';
+import { useAuthStore } from '@/stores/authStore';
 
 interface DocRow {
   id: number;
@@ -21,7 +22,11 @@ interface DocRow {
 }
 
 export default function MyDocumentsPage() {
-  const { data: me, byId, employeeId } = useProfileEmployee();
+  const { data: me, isError: profileError, byId, employeeId } = useProfileEmployee();
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  // Подписывает только сам сотрудник (сервер отвечает 403 всем остальным).
+  // В виде HR это документы другого человека — кнопки «Подписать» у них нет.
+  const ownDocs = !byId || (me != null && me.user_id === currentUserId);
   const base = byId ? `/factorial/employees/${employeeId}` : '/factorial/profile';
 
   // Реальные документы — текущего пользователя или конкретного сотрудника (HR-вид).
@@ -57,15 +62,21 @@ export default function MyDocumentsPage() {
     {
       id: 'action',
       header: '',
-      cell: ({ row }) => (
-        <button
-          type="button"
-          onClick={() => setSignId(row.original.id)}
-          className="px-3 py-1.5 rounded-fx-lg text-fx-sm font-medium border border-border bg-white hover:bg-sidebar-hover"
-        >
-          {row.original.status === 'signed' ? 'Открыть' : 'Подписать'}
-        </button>
-      ),
+      cell: ({ row }) => {
+        const signed = row.original.status === 'signed';
+        if (!signed && !ownDocs) {
+          return <span className="text-fx-xs text-text-muted">Ждёт подписи сотрудника</span>;
+        }
+        return (
+          <button
+            type="button"
+            onClick={() => setSignId(row.original.id)}
+            className="px-3 py-1.5 rounded-fx-lg text-fx-sm font-medium border border-border bg-white hover:bg-sidebar-hover"
+          >
+            {signed ? 'Открыть' : 'Подписать'}
+          </button>
+        );
+      },
       size: 120,
     },
   ];
@@ -85,11 +96,11 @@ export default function MyDocumentsPage() {
         }
         title={byId ? (me?.user_name || 'Профиль') : 'Профиль'}
         secondaryNav={buildProfileTabs(base)}
-        beforeToolbar={<ContractCard />}
+        beforeToolbar={<ContractCard employee={profileError ? null : me} />}
         toolbar={{ searchKey: 'name', searchPlaceholder: 'Поиск документа...' }}
         columns={columns}
         data={rows}
-        emptyState={{ emoji: '📄', heading: 'Документов пока нет', description: 'Здесь появятся документы, отправленные вам на подпись.' }}
+        emptyState={{ emoji: '📄', heading: 'Документов пока нет', description: byId ? 'Здесь появятся документы, отправленные сотруднику на подпись.' : 'Здесь появятся документы, отправленные вам на подпись.' }}
       />
       {signId != null && <SignDocumentModal docId={signId} onClose={() => setSignId(null)} />}
     </>

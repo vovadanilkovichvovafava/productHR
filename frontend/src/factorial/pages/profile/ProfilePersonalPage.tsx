@@ -28,7 +28,7 @@ export default function ProfilePersonalPage() {
     '—';
   const methodLabel: Record<string, string> = { card: 'Карта', crypto: 'Криптокошелёк', bank: 'Банковский счёт', other: 'Другое' };
   const payMethod = e.payment_method ? (methodLabel[String(e.payment_method)] || String(e.payment_method)) : '—';
-  const passportMeta = e.passport as { filename?: string; uploaded_at?: string } | undefined;
+  const passportMeta = e.passport as { filename?: string; uploaded_at?: string; content_type?: string } | undefined;
 
   return (
     <ProfileTemplate
@@ -64,7 +64,9 @@ export default function ProfilePersonalPage() {
               <DetailRow label="Telegram" value={str(me?.telegram_username)} />
               <DetailRow label="Способ выплаты" value={payMethod} />
               <DetailRow label="Реквизиты" value={str(e.payment_details)} />
-              <p className="text-fx-xs text-text-muted mt-3">Данные можете заполнить вы или HR. Ниже можно загрузить скан паспорта.</p>
+              <p className="text-fx-xs text-text-muted mt-3">
+                {byId ? 'Данные заполняет сотрудник или HR.' : 'Данные можете заполнить вы или HR. Ниже можно загрузить скан паспорта.'}
+              </p>
             </article>
             <article className="bg-card-translucent border border-card-border-soft rounded-card shadow-card p-5">
               <h2 className="font-semibold mb-2">Контакт для экстренной связи</h2>
@@ -72,7 +74,7 @@ export default function ProfilePersonalPage() {
               <DetailRow label="Телефон" value={str(e.emergency_contact_phone)} />
               <p className="text-fx-xs text-text-muted mt-3">Можете заполнить вы или HR (кнопка «Изменить»).</p>
             </article>
-            <PassportCard passport={passportMeta} />
+            <PassportCard passport={passportMeta} employeeId={byId ? employeeId : undefined} />
             {editOpen && <EmployeeEditModal {...(byId ? { employeeId } : { selfMode: true })} section="personal" onClose={() => setEditOpen(false)} onSaved={() => setEditOpen(false)} />}
           </>
         )
