@@ -19,7 +19,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1  # Fixed version for passlib compatibility
 
 # Telegram
-aiogram==3.24.0
+aiogram==3.31.0
 
 # AI
 anthropic==0.76.0
