@@ -22,7 +22,7 @@ type HrSettingsItem = {
 
 const HR_SETTINGS_ORG_ITEMS: HrSettingsItem[] = [
   {
-    title: "Факториал",
+    title: "Управление",
     description: "Сотрудники, документы и личный кабинет",
     icon: Users,
     color: "text-[var(--hf-status-indigo)]",

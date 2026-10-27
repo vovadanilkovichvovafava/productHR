@@ -2,8 +2,19 @@ import { useState, useEffect, FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getEmployee, updateEmployee, getMyProfile, updateMyProfile, listEmployees, getEmployeePassport } from '../api/employees';
+import type { Employee } from '../api/types';
 import DatePickerFactorial from './DatePickerFactorial';
 import { formatPhone } from '../lib/phone';
+import { changedFields, dateFieldToServer } from '../lib/employeePatch';
+import { backdropClose } from '@/utils/backdropClose';
+import { getErrorDetail } from '@/utils';
+
+const TOP_FIELDS = ['position', 'phone', 'telegram_username', 'department_start_date'] as const;
+const EXTRA_FIELDS = [
+  'last_name', 'first_name', 'middle_name', 'full_name', 'birth_date',
+  'passport_number', 'passport_issued_by', 'passport_issued', 'address',
+  'payment_method', 'payment_details', 'emergency_contact_name', 'emergency_contact_phone',
+] as const;
 
 // Подсказка для поля «Реквизиты» меняется под выбранный способ выплаты.
 const PAY_PLACEHOLDER: Record<string, string> = {
@@ -38,6 +49,8 @@ export default function EmployeeEditModal({
   const positions = Array.from(new Set(allEmps.map((e) => (e.position || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru'));
 
   const [form, setForm] = useState<Record<string, string>>({});
+  // Значения на момент открытия: по ним видно, что человек поменял.
+  const [initial, setInitial] = useState<Record<string, string>>({});
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -45,9 +58,11 @@ export default function EmployeeEditModal({
     const e = (emp.extra_data || {}) as Record<string, unknown>;
     const s = (v: unknown) => (v == null ? '' : String(v));
     const d = (v: unknown) => (v ? String(v).slice(0, 10) : '');
-    setForm({
+    // Значения из базы показываем как есть: маска телефона — только на ввод,
+    // иначе номер +375… при открытии окна превращался в «+7 (…)».
+    const loaded = {
       position: s(emp.position),
-      phone: formatPhone(s(emp.phone)),
+      phone: s(emp.phone),
       telegram_username: s(emp.telegram_username),
       department_start_date: d(emp.department_start_date),
       last_name: s(e.last_name),
@@ -62,8 +77,10 @@ export default function EmployeeEditModal({
       payment_method: s(e.payment_method),
       payment_details: s(e.payment_details),
       emergency_contact_name: s(e.emergency_contact_name),
-      emergency_contact_phone: formatPhone(s(e.emergency_contact_phone)),
-    });
+      emergency_contact_phone: s(e.emergency_contact_phone),
+    };
+    setForm(loaded);
+    setInitial(loaded);
   }, [emp]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -85,32 +102,14 @@ export default function EmployeeEditModal({
   };
 
   const save = useMutation({
-    mutationFn: () => {
-      const baseExtra = (emp?.extra_data || {}) as Record<string, unknown>;
-      const u = (v: string) => (v.trim() ? v.trim() : undefined);
-      const extra: Record<string, unknown> = {
-        ...baseExtra,
-        last_name: u(form.last_name),
-        first_name: u(form.first_name),
-        middle_name: u(form.middle_name),
-        full_name: u(form.full_name),
-        birth_date: u(form.birth_date),
-        passport_number: u(form.passport_number),
-        passport_issued_by: u(form.passport_issued_by),
-        passport_issued: u(form.passport_issued),
-        address: u(form.address),
-        payment_method: u(form.payment_method),
-        payment_details: u(form.payment_details),
-        emergency_contact_name: u(form.emergency_contact_name),
-        emergency_contact_phone: u(form.emergency_contact_phone),
-      };
-      const body = {
-        position: form.position.trim() || null,
-        phone: form.phone.trim() || null,
-        telegram_username: form.telegram_username.trim() || null,
-        department_start_date: form.department_start_date ? `${form.department_start_date}T00:00:00` : null,
-        extra_data: extra,
-      };
+    mutationFn: async () => {
+      // Только изменённое; очищенное — null (сервер мёржит extra_data по ключам).
+      const top = changedFields(initial, form, TOP_FIELDS);
+      const extra = changedFields(initial, form, EXTRA_FIELDS);
+      const body: Partial<Employee> = { ...top } as Partial<Employee>;
+      if ('department_start_date' in top) body.department_start_date = dateFieldToServer(top.department_start_date);
+      if (Object.keys(extra).length) body.extra_data = extra;
+      if (!Object.keys(body).length) return null;
       return selfMode ? updateMyProfile(body) : updateEmployee(employeeId!, body);
     },
     onSuccess: () => {
@@ -118,7 +117,7 @@ export default function EmployeeEditModal({
       onSaved?.();
       onClose();
     },
-    onError: () => setErr('Не удалось сохранить. Попробуйте ещё раз.'),
+    onError: (e) => setErr(getErrorDetail(e, 'Не удалось сохранить. Попробуйте ещё раз.')),
   });
 
   const submit = (e: FormEvent) => {
@@ -141,7 +140,7 @@ export default function EmployeeEditModal({
 
   return createPortal(
     <div className="factorial-root" style={{ height: 'auto', background: 'transparent' }}>
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <form className="fx-modal" style={{ width: 560, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{title}</h3>
         {isLoading || !emp ? (

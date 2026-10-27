@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { updateEmployee, listEmployees } from '../api/employees';
 import { formatPhone } from '../lib/phone';
+import { changedFields, dateFieldToServer } from '../lib/employeePatch';
+import { backdropClose } from '@/utils/backdropClose';
+import { getErrorDetail } from '@/utils';
 import type { Employee } from '../api/types';
 
 type Row = { last_name: string; first_name: string; position: string; department_start_date: string; phone: string };
@@ -32,29 +35,44 @@ export default function BulkEditEmployeesModal({
         first_name: s(ex.first_name),
         position: s(e.position),
         department_start_date: e.department_start_date ? String(e.department_start_date).slice(0, 10) : '',
-        phone: formatPhone(s(e.phone)),
+        // Как в базе: маска телефона — только на ввод (иначе +375… → «+7 (…)»).
+        phone: s(e.phone),
       };
     });
     return m;
   };
-  const [edits, setEdits] = useState<Record<number, Row>>(buildInit);
+  const [initial] = useState<Record<number, Row>>(buildInit);
+  const [edits, setEdits] = useState<Record<number, Row>>(() => ({ ...initial }));
   const [err, setErr] = useState('');
   const setCell = (id: number, field: keyof Row, val: string) =>
     setEdits((s) => ({ ...s, [id]: { ...s[id], [field]: val } }));
 
   const save = useMutation({
     mutationFn: async () => {
+      // Шлём только изменённые ячейки; очищенная — null. Нетронутые строки не
+      // отправляются вовсе (раньше каждая строка перезаписывала все поля и всю
+      // старую extra_data сотрудника).
+      const failed: string[] = [];
+      let lastError: unknown = null;
       for (const e of employees) {
-        const ed = edits[e.id];
-        const baseExtra = (e.extra_data || {}) as Record<string, unknown>;
-        const u = (v: string) => (v.trim() ? v.trim() : undefined);
-        const extra = { ...baseExtra, last_name: u(ed.last_name), first_name: u(ed.first_name) };
-        await updateEmployee(e.id, {
-          position: ed.position.trim() || null,
-          phone: ed.phone.trim() || null,
-          department_start_date: ed.department_start_date ? `${ed.department_start_date}T00:00:00` : null,
-          extra_data: extra,
-        });
+        const top = changedFields(initial[e.id], edits[e.id], ['position', 'phone', 'department_start_date']);
+        const extra = changedFields(initial[e.id], edits[e.id], ['last_name', 'first_name']);
+        const body: Partial<Employee> = { ...top } as Partial<Employee>;
+        if ('department_start_date' in top) body.department_start_date = dateFieldToServer(top.department_start_date);
+        if (Object.keys(extra).length) body.extra_data = extra;
+        if (!Object.keys(body).length) continue;
+        try {
+          await updateEmployee(e.id, body);
+        } catch (err) {
+          failed.push(e.user_name || `#${e.id}`);
+          lastError = err;
+        }
+      }
+      if (failed.length) {
+        qc.invalidateQueries({ queryKey: ['fx'] });
+        throw new Error(
+          `Не сохранено (${failed.length}): ${failed.join(', ')}. ${getErrorDetail(lastError, '')}`.trim(),
+        );
       }
     },
     onSuccess: () => {
@@ -62,7 +80,7 @@ export default function BulkEditEmployeesModal({
       onSaved?.();
       onClose();
     },
-    onError: () => setErr('Не удалось сохранить часть строк. Проверьте данные и попробуйте ещё раз.'),
+    onError: (e) => setErr(e instanceof Error && e.message ? e.message : 'Не удалось сохранить часть строк. Проверьте данные и попробуйте ещё раз.'),
   });
 
   const textCell = (id: number, field: keyof Row, type = 'text') => (
@@ -77,7 +95,7 @@ export default function BulkEditEmployeesModal({
 
   return createPortal(
     <div className="factorial-root" style={{ height: 'auto', background: 'transparent' }}>
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <div
         className="fx-modal"
         style={{ width: 'min(980px, 96vw)', maxHeight: '90vh', overflow: 'auto' }}

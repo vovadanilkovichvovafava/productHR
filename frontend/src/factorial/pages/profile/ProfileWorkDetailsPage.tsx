@@ -3,7 +3,7 @@ import { User, Pencil } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import ProfileTemplate from '@/factorial/templates/ProfileTemplate';
 import { getCurrentOrganization } from '@/services/api/auth';
-import { formatDateRu, formatTenure } from '@/factorial/lib/formatDate';
+import { formatDateRu, formatStartWithTenure } from '@/factorial/lib/formatDate';
 import { buildProfileTabs } from '@/factorial/lib/routes';
 import { useProfileEmployee } from '@/factorial/lib/useProfileEmployee';
 import DetailRow from '@/factorial/components/cabinet/DetailRow';
@@ -22,7 +22,7 @@ export default function ProfileWorkDetailsPage() {
   const [editOpen, setEditOpen] = useState(false);
 
   const startRaw = me?.department_start_date || me?.practice_start_date || me?.created_at || null;
-  const start = startRaw ? `${formatDateRu(startRaw)} (${formatTenure(startRaw)} назад)` : '—';
+  const start = startRaw ? formatStartWithTenure(startRaw) : '—';
   const fmt = (d?: string | null) => (d ? formatDateRu(d) : '—');
   const sign = (ok?: boolean, at?: string | null) =>
     ok ? `Подписан${at ? ' · ' + formatDateRu(at) : ''}` : 'Не подписан';

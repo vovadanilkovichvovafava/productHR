@@ -8,6 +8,8 @@ import { listTemplates, generateDoc } from '@/factorial/api/documents';
 import { listEmployees } from '@/factorial/api/employees';
 import type { DocTemplate } from '@/factorial/api/types';
 import { formatDateRu } from '@/factorial/lib/formatDate';
+import { backdropClose } from '@/utils/backdropClose';
+import { getErrorDetail } from '@/utils';
 
 /** Модалка генерации документа из шаблона для выбранного сотрудника. */
 function GenerateModal({ template, onClose }: { template: DocTemplate; onClose: () => void }) {
@@ -20,11 +22,11 @@ function GenerateModal({ template, onClose }: { template: DocTemplate; onClose: 
   const m = useMutation({
     mutationFn: () => generateDoc(template.id, Number(empId)),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fx'] }); setOk(true); },
-    onError: () => setErr('Не удалось сгенерировать документ (нужны права администратора).'),
+    onError: (e) => setErr(getErrorDetail(e, 'Не удалось сгенерировать документ.')),
   });
 
   return (
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <div className="fx-modal" onClick={(e) => e.stopPropagation()}>
         <h3>Сгенерировать: {template.name}</h3>
         {ok ? (

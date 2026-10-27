@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import TableTemplate from '@/factorial/templates/TableTemplate';
 import { getVacancies, createVacancy } from '@/services/api/vacancies';
 import type { Vacancy, VacancyStatus } from '@/types';
+import { backdropClose } from '@/utils/backdropClose';
+import { getErrorDetail } from '@/utils';
 
 const NAV = [
   { label: 'Сотрудники', href: '/factorial/employees', end: true },
@@ -36,7 +38,7 @@ function CreateVacancyModal({ onClose }: { onClose: () => void }) {
         status: f.status as VacancyStatus,
       }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fx', 'vacancies'] }); onClose(); },
-    onError: () => setErr('Не удалось создать вакансию (нужны права администратора).'),
+    onError: (e) => setErr(getErrorDetail(e, 'Не удалось создать вакансию.')),
   });
 
   const submit = (e: FormEvent) => {
@@ -47,7 +49,7 @@ function CreateVacancyModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fx-modal-overlay" onClick={onClose}>
+    <div className="fx-modal-overlay" {...backdropClose(onClose)}>
       <form className="fx-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>Новая вакансия</h3>
         <div className="fx-field"><label>Название*</label><input className="fx-input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Frontend-разработчик" /></div>

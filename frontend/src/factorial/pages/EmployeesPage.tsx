@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Users, Trash2, FolderInput, Download, Pencil } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -14,7 +14,23 @@ import { formatHiredAgo } from '@/factorial/lib/formatDate';
 import InviteEmployeeModal from '@/factorial/components/InviteEmployeeModal';
 import EmployeeEditModal from '@/factorial/components/EmployeeEditModal';
 import BulkEditEmployeesModal from '@/factorial/components/BulkEditEmployeesModal';
-import type { Employee } from '@/factorial/mocks/employees';
+import { backdropClose } from '@/utils/backdropClose';
+import HrConfirm from '@/components/hr/HrConfirm';
+import { getErrorDetail } from '@/utils';
+import { matchesSearch, allVisibleSelected, toggleAllVisible } from '@/factorial/lib/tableSelection';
+
+// Строка таблицы сотрудников.
+interface EmployeeRow {
+  id: number;
+  fullName: string;
+  position: string;
+  location: string;
+  hiredAt: string;
+  accessStatus: 'active' | 'inactive';
+  contractStatus: 'completed' | 'in_progress';
+}
+
+const SEARCH_KEY = 'fullName';
 
 export default function EmployeesPage() {
   const navigate = useNavigate();
@@ -25,8 +41,12 @@ export default function EmployeesPage() {
   const [moveUnit, setMoveUnit] = useState('');
   const [editId, setEditId] = useState<number | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [confirmDismiss, setConfirmDismiss] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
 
-  const { data: rows = [] } = useQuery({ queryKey: ['fx', 'employees', 'table'], queryFn: () => listEmployees(true) });
+  const { data: rowsData, isLoading, isError, error } = useQuery({ queryKey: ['fx', 'employees', 'table'], queryFn: () => listEmployees(true) });
+  const rows = useMemo(() => rowsData ?? [], [rowsData]);
   const { data: chart } = useQuery({ queryKey: ['fx', 'org-chart'], queryFn: getOrgChart });
   const people = chart?.people ?? [];
   const units = chart?.units ?? [];
@@ -37,21 +57,27 @@ export default function EmployeesPage() {
     const manager = p.manager_id ? (people.find((x) => x.id === p.manager_id)?.user_name || '—') : '—';
     return { dept, manager };
   };
-  const employees: Employee[] = rows.map((e) => ({
+  // useMemo: новый массив на каждый рендер сбрасывал бы таблицу на первую
+  // страницу (autoResetPageIndex у TanStack срабатывает на смену data).
+  const employees: EmployeeRow[] = useMemo(() => rows.map((e) => ({
     id: e.id,
     fullName: e.user_name || '—',
     position: e.position || '',
-    location: e.department_name || 'MSTech L.L.C-FZ',
+    location: e.department_name || '',
     hiredAt: e.department_start_date || e.practice_start_date || e.created_at || '',
     accessStatus: e.is_active ? 'active' : 'inactive',
     contractStatus: e.contract_signed ? 'completed' : 'in_progress',
-  }));
+  })), [rows]);
 
-  // Выделение строк (по id, сохраняется между страницами/поиском)
+  // Выделение строк (по id, сохраняется между страницами/поиском).
+  // «Выбрать всех» — только найденные поиском (тем же отбором, что и таблица).
   const toggle = (id: number) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const allIds = employees.map((e) => e.id);
-  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(allIds));
+  const visibleIds = useMemo(
+    () => employees.filter((e) => matchesSearch(e, SEARCH_KEY, search)).map((e) => e.id),
+    [employees, search],
+  );
+  const allSelected = allVisibleSelected(selected, visibleIds);
+  const toggleAll = () => setSelected((s) => toggleAllVisible(s, visibleIds));
   const clear = () => setSelected(new Set());
 
   const refresh = () => {
@@ -68,11 +94,11 @@ export default function EmployeesPage() {
       return { total: ids.length, failed: res.filter((r) => r.status === 'rejected').length };
     },
     onSuccess: ({ total, failed }) => {
-      refresh(); clear();
+      refresh(); clear(); setConfirmDismiss(false);
       if (failed) toast.error(`Уволено ${total - failed} из ${total}, ошибок: ${failed}`);
       else toast.success(`Уволено: ${total}`);
     },
-    onError: () => toast.error('Не удалось уволить выбранных'),
+    onError: (e) => { setConfirmDismiss(false); toast.error(getErrorDetail(e, 'Не удалось уволить выбранных')); },
   });
   const moveM = useMutation({
     mutationFn: async () => {
@@ -86,14 +112,23 @@ export default function EmployeesPage() {
       if (failed) toast.error(`Перемещено ${total - failed} из ${total}, ошибок: ${failed}`);
       else toast.success(`Перемещено: ${total}`);
     },
-    onError: () => toast.error('Не удалось переместить выбранных'),
+    onError: (e) => toast.error(getErrorDetail(e, 'Не удалось переместить выбранных')),
   });
 
   const onDismiss = () => {
     if (!selected.size) return;
-    if (window.confirm(`Уволить выбранных (${selected.size})? Станут неактивными, данные не удаляются.`)) dismissM.mutate();
+    setConfirmDismiss(true);
   };
-  const onExportAll = () => { void downloadEmployeeTemplate({ filled: true }); };
+  const onExportAll = async () => {
+    setExportingAll(true);
+    try {
+      await downloadEmployeeTemplate({ filled: true });
+    } catch (e) {
+      toast.error(getErrorDetail(e, 'Не удалось выгрузить сотрудников'));
+    } finally {
+      setExportingAll(false);
+    }
+  };
 
   const onExport = () => {
     const sel = employees.filter((e) => selected.has(e.id));
@@ -111,7 +146,7 @@ export default function EmployeesPage() {
     XLSX.writeFile(wb, 'employees-selected.xlsx');
   };
 
-  const columns: ColumnDef<Employee, any>[] = [
+  const columns: ColumnDef<EmployeeRow, any>[] = [
     {
       id: 'select',
       enableSorting: false,
@@ -143,7 +178,7 @@ export default function EmployeesPage() {
     { accessorKey: 'position', header: 'Должность', cell: ({ getValue }) => (getValue() as string) || '' },
     { id: 'dept', header: 'Отдел', accessorFn: (r) => metaOf(r.id).dept },
     { id: 'manager', header: 'Руководитель', accessorFn: (r) => metaOf(r.id).manager },
-    { accessorKey: 'location', header: 'Место работы' },
+    { accessorKey: 'location', header: 'Место работы', cell: ({ getValue }) => (getValue() as string) || '—' },
     { accessorKey: 'hiredAt', header: 'Нанят', cell: ({ getValue }) => { const v = getValue() as string; return v ? formatHiredAgo(v) : '—'; } },
     {
       accessorKey: 'accessStatus',
@@ -153,7 +188,10 @@ export default function EmployeesPage() {
     {
       accessorKey: 'contractStatus',
       header: 'Статус контракта',
-      cell: () => <StatusPill label="В процессе" variant="success" dot />,
+      cell: ({ getValue }) =>
+        getValue() === 'completed'
+          ? <StatusPill label="Подписан" variant="success" dot />
+          : <StatusPill label="Не подписан" variant="warning" dot />,
     },
   ];
 
@@ -172,25 +210,18 @@ export default function EmployeesPage() {
           { label: 'Команды', href: '/factorial/employees/teams' },
           { label: 'Оргсхема', href: '/factorial/employees/org-chart' },
         ]}
-        beforeToolbar={
-          <div className="grid grid-cols-2 gap-3 max-w-md">
-            <MiniCard label="0 ожидает принятия" />
-            <MiniCard label="0 не приглашен" />
-          </div>
-        }
         toolbar={{
-          searchKey: 'fullName',
+          searchKey: SEARCH_KEY,
           searchPlaceholder: 'Поиск сотрудника...',
-          filterAction: () => alert('Demo mode — фильтры'),
-          exportAction: () => navigate('/factorial/employees/export'),
           moreActions: (
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-fx-lg border border-border bg-white hover:bg-sidebar-hover text-fx-sm"
                 onClick={onExportAll}
+                disabled={exportingAll}
               >
-                Экспорт
+                {exportingAll ? 'Выгружаем…' : 'Экспорт'}
               </button>
               <button
                 type="button"
@@ -206,7 +237,25 @@ export default function EmployeesPage() {
         columns={columns}
         data={employees}
         pageSize={20}
+        search={search}
+        onSearchChange={setSearch}
+        loading={isLoading}
+        error={isError ? `Не удалось загрузить сотрудников: ${getErrorDetail(error, 'ошибка сервера')}` : undefined}
       />
+
+      {confirmDismiss && (
+        <HrConfirm
+          title={`Уволить выбранных (${selected.size})?`}
+          subtitle="Сотрудники станут неактивными, данные не удаляются."
+          danger={selected.size > visibleIds.filter((id) => selected.has(id)).length
+            ? 'Среди выбранных есть сотрудники, скрытые текущим поиском.'
+            : undefined}
+          confirmLabel="Уволить"
+          busy={dismissM.isPending}
+          onCancel={() => setConfirmDismiss(false)}
+          onConfirm={() => dismissM.mutate()}
+        />
+      )}
 
       {invite && <InviteEmployeeModal onClose={() => setInvite(false)} />}
       {editId != null && <EmployeeEditModal employeeId={editId} onClose={() => setEditId(null)} onSaved={refresh} />}
@@ -219,7 +268,7 @@ export default function EmployeesPage() {
       )}
 
       {moveOpen && (
-        <div className="fx-modal-overlay" onClick={() => setMoveOpen(false)}>
+        <div className="fx-modal-overlay" {...backdropClose(() => setMoveOpen(false))}>
           <div className="fx-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Переместить в отдел ({selected.size})</h3>
             <div className="fx-field">
@@ -260,14 +309,5 @@ export default function EmployeesPage() {
         </div>
       )}
     </>
-  );
-}
-
-function MiniCard({ label }: { label: string }) {
-  return (
-    <div className="bg-white rounded-fx-lg border border-border px-4 py-3 flex items-center justify-between">
-      <span className="text-fx-sm">{label}</span>
-      <button type="button" className="p-1 rounded hover:bg-sidebar-hover text-text-muted">⚙</button>
-    </div>
   );
 }

@@ -1,8 +1,7 @@
 import { ReactNode } from 'react';
-import { X, Bell } from 'lucide-react';
+import { X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/factorial/components/ui/button';
-import { useAIDrawerStore } from '@/factorial/stores/useAIDrawerStore';
 
 interface FactorialFormPageProps {
   /** Visual variant. 'card' = centered white card with floating icon plaque (for /tasks/new, /employees/new etc).
@@ -50,31 +49,14 @@ export default function FactorialFormPage({
   onSubmit,
 }: FactorialFormPageProps) {
   const navigate = useNavigate();
-  const aiOpen = useAIDrawerStore((s) => s.open);
-  const toggleAI = useAIDrawerStore((s) => s.toggle);
   const handleClose = () => {
     if (cancelHref) navigate(cancelHref);
     else navigate(-1);
   };
 
-  // Top-right actions (Bell + orange-O Опе), always visible on form pages
-  const headerActions = (
-    <div className="flex items-center gap-3">
-      <button type="button" className="p-2 rounded-fx-lg hover:bg-sidebar-hover" title="Уведомления" aria-label="Уведомления">
-        <Bell className="w-4 h-4 text-text-muted" />
-      </button>
-      {!aiOpen && (
-        <button
-          type="button"
-          onClick={toggleAI}
-          className="w-8 h-8 rounded-full hover:scale-105 transition-transform"
-          style={{ background: 'conic-gradient(from 180deg, #F5A51C, #E61A42, #F5A51C)' }}
-          title="Открыть Опе"
-          aria-label="Открыть Опе"
-        />
-      )}
-    </div>
-  );
+  // Справа в шапке формы ничего нет: «Уведомления» не работали, а «Открыть
+  // Опе» открывала несмонтированный чат (убраны 27.10.2026).
+  const headerActions = null;
 
   // PLAIN VARIANT — for /dashboard/* forms (kudos, event, post)
   if (variant === 'plain') {

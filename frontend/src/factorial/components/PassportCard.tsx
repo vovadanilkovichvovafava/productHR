@@ -1,12 +1,31 @@
 import { useRef, useState, ChangeEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { uploadMyPassport, getMyPassport } from '../api/employees';
+import { uploadMyPassport, getMyPassport, getEmployeePassport } from '../api/employees';
+import { openBase64File, canViewInline } from '../lib/fileOpen';
+import { getErrorDetail } from '@/utils';
 import { FxCard, FxButton, FxPill } from './ui';
 
-export default function PassportCard({ passport }: { passport?: { filename?: string; uploaded_at?: string } }) {
+/**
+ * Скан паспорта.
+ *
+ * Без `employeeId` — свой паспорт (личный кабинет): просмотр и загрузка.
+ * С `employeeId` — HR смотрит карточку сотрудника: только статус и
+ * «Просмотреть»/«Скачать» ЕГО скана. До 27.10.2026 карточка всегда ходила в
+ * `/employees/me/passport`: HR в карточке сотрудника видел СВОЙ паспорт, а
+ * «Загрузить» заменял скан самого HR.
+ */
+export default function PassportCard({
+  passport,
+  employeeId,
+}: {
+  passport?: { filename?: string; uploaded_at?: string; content_type?: string };
+  employeeId?: number;
+}) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const foreign = employeeId !== undefined;
 
   const upload = useMutation({
     mutationFn: async (file: File) => {
@@ -20,49 +39,58 @@ export default function PassportCard({ passport }: { passport?: { filename?: str
       return uploadMyPassport(file.name, file.type || 'application/octet-stream', base64);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['fx', 'me'] }),
-    onError: () => setErr('Не удалось загрузить файл.'),
+    onError: (e) => setErr(getErrorDetail(e, 'Не удалось загрузить файл.')),
   });
 
   const onPick = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
+    e.target.value = '';
     if (f) { setErr(''); upload.mutate(f); }
   };
 
-  const view = async () => {
+  const open = async (download: boolean) => {
     setErr('');
+    setBusy(true);
     try {
-      const d = await getMyPassport();
-      const w = window.open();
-      if (!w) return;
-      if ((d.content_type || '').startsWith('image/')) {
-        w.document.write(`<title>${d.filename || 'Паспорт'}</title><img src="data:${d.content_type};base64,${d.data_base64}" style="max-width:100%" />`);
-      } else {
-        const a = w.document.createElement('a');
-        a.href = `data:${d.content_type};base64,${d.data_base64}`;
-        a.download = d.filename || 'passport';
-        a.textContent = 'Скачать ' + (d.filename || 'файл');
-        w.document.body.appendChild(a);
-      }
-    } catch {
-      setErr('Не удалось открыть файл.');
+      const d = foreign ? await getEmployeePassport(employeeId!) : await getMyPassport();
+      openBase64File(d, { download, fallbackName: 'passport' });
+    } catch (e) {
+      setErr(getErrorDetail(e, 'Не удалось открыть файл.'));
+    } finally {
+      setBusy(false);
     }
   };
 
+  // Тип файла известен заранее не всегда: тогда «Просмотреть» сам решит
+  // (картинка/PDF — во вкладке, прочее — скачается).
+  const viewable = !passport?.content_type || canViewInline(passport.content_type);
+
   return (
     <FxCard title="Паспорт" action={passport?.filename ? <FxPill tone="green" dot>Загружен</FxPill> : <FxPill tone="amber">Не загружен</FxPill>}>
-      <div className="fx-sub">Файл шифруется и доступен только вам.</div>
+      <div className="fx-sub">
+        {foreign
+          ? 'Скан видят сотрудник и HR-администраторы. Загружает его сам сотрудник.'
+          : 'Скан видите вы и HR-администраторы.'}
+      </div>
       {passport?.filename && (
         <div className="fx-doc" style={{ marginTop: 8 }}>
           <span className="fx-doc-title">{passport.filename}</span>
-          <button className="fx-btn fx-btn--ghost" onClick={view}>Просмотреть</button>
+          {viewable && (
+            <button className="fx-btn fx-btn--ghost" onClick={() => open(false)} disabled={busy}>Просмотреть</button>
+          )}
+          <button className="fx-btn fx-btn--ghost" onClick={() => open(true)} disabled={busy}>Скачать</button>
         </div>
       )}
-      <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={onPick} />
-      <div style={{ marginTop: 12 }}>
-        <FxButton variant="secondary" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
-          {upload.isPending ? 'Загрузка…' : passport?.filename ? 'Заменить файл' : 'Загрузить паспорт'}
-        </FxButton>
-      </div>
+      {!foreign && (
+        <>
+          <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={onPick} />
+          <div style={{ marginTop: 12 }}>
+            <FxButton variant="secondary" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
+              {upload.isPending ? 'Загрузка…' : passport?.filename ? 'Заменить файл' : 'Загрузить паспорт'}
+            </FxButton>
+          </div>
+        </>
+      )}
       {err && <div style={{ color: '#B91C1C', fontSize: 13, marginTop: 8 }}>{err}</div>}
     </FxCard>
   );
