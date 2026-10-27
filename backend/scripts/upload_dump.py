@@ -24,7 +24,8 @@ RETRIES = 5
 
 
 def call(url: str, token: str, method: str, path: str, data: bytes = None, json_body=None, timeout: int = 300):
-    headers = {"X-Import-Token": token}
+    # Подпись Python-urllib Cloudflare перед Saturn отбивает 403 ещё до бэкенда.
+    headers = {"X-Import-Token": token, "User-Agent": "productHR-dump-upload/1.0"}
     if json_body is not None:
         data = json.dumps(json_body).encode()
         headers["Content-Type"] = "application/json"
