@@ -390,12 +390,14 @@ async def get_document(
     if not doc:
         raise HTTPException(404, "Документ не найден")
 
-    # Check access: employee themselves or admin
+    # Читает сам сотрудник или админ ОРГАНИЗАЦИИ ДОКУМЕНТА. Раньше проверялось
+    # «админ своей организации», и админ любого клиента перебором id читал
+    # чужие договоры с паспортом, ИНН и адресом (до 27.10.2026). Чужое — 404.
     is_own = doc.employee and doc.employee.user_id == user.id
-    if not is_own:
-        org = await get_user_org(user, db)
-        if not org or not await _is_admin_or_owner(user, org.id, db):
-            raise HTTPException(403, "Нет доступа к этому документу")
+    if not is_own and not (
+        doc.employee and await _is_admin_or_owner(user, doc.employee.org_id, db)
+    ):
+        raise HTTPException(404, "Документ не найден")
 
     return SignedDocResponse(
         id=doc.id,
