@@ -10,6 +10,8 @@ import DetailRow from '@/factorial/components/cabinet/DetailRow';
 import { getCurrentOrganization } from '@/services/api/auth';
 import { getMyProfile } from '@/factorial/api/employees';
 import { getOrgChart, setManager, assignEmployee, type OrgUnitNode, type PersonNode } from '@/factorial/api/orgUnits';
+import toast from 'react-hot-toast';
+import { getErrorDetail } from '@/utils';
 
 const NAV = [
   { label: 'Сотрудники', href: '/factorial/employees', end: true },
@@ -67,13 +69,13 @@ const CSS = `
 export default function EmployeesOrgChartPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { data, isLoading } = useQuery({ queryKey: ['fx', 'org-chart'], queryFn: getOrgChart });
+  const { data, isLoading, isError, error } = useQuery({ queryKey: ['fx', 'org-chart'], queryFn: getOrgChart });
   const { data: org } = useQuery({ queryKey: ['fx', 'org-current'], queryFn: getCurrentOrganization, retry: false });
   const { data: me } = useQuery({ queryKey: ['fx', 'me'], queryFn: getMyProfile, retry: false });
   const orgName = org?.name || 'Организация';
   const refresh = () => qc.invalidateQueries({ queryKey: ['fx', 'org-chart'] });
-  const mManager = useMutation({ mutationFn: (v: { id: number; manager: number | null }) => setManager(v.id, v.manager), onSuccess: refresh, onError: () => {} });
-  const mAssign = useMutation({ mutationFn: (v: { id: number; unit: number | null }) => assignEmployee(v.id, v.unit), onSuccess: refresh, onError: () => {} });
+  const mManager = useMutation({ mutationFn: (v: { id: number; manager: number | null }) => setManager(v.id, v.manager), onSuccess: refresh, onError: (e) => { refresh(); toast.error(getErrorDetail(e, 'Не удалось сменить руководителя')); } });
+  const mAssign = useMutation({ mutationFn: (v: { id: number; unit: number | null }) => assignEmployee(v.id, v.unit), onSuccess: refresh, onError: (e) => { refresh(); toast.error(getErrorDetail(e, 'Не удалось перенести сотрудника в отдел')); } });
 
   const units: OrgUnitNode[] = data?.units ?? [];
   const people: PersonNode[] = data?.people ?? [];
@@ -348,6 +350,10 @@ export default function EmployeesOrgChartPage() {
           onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}>
           {isLoading ? (
             <div className="absolute inset-0 flex items-center justify-center text-fx-sm text-text-muted">Загрузка…</div>
+          ) : isError ? (
+            <div className="absolute inset-0 flex items-center justify-center text-fx-sm" style={{ color: '#B91C1C' }}>
+              Не удалось загрузить оргсхему: {getErrorDetail(error, 'ошибка сервера')}
+            </div>
           ) : people.length === 0 && units.length === 0 ? (
             <div className="absolute inset-0 flex items-center justify-center text-fx-sm text-text-muted">Пока нет ни отделов, ни сотрудников.</div>
           ) : (

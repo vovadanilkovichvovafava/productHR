@@ -69,8 +69,8 @@ export default function PassportCard({
     <FxCard title="Паспорт" action={passport?.filename ? <FxPill tone="green" dot>Загружен</FxPill> : <FxPill tone="amber">Не загружен</FxPill>}>
       <div className="fx-sub">
         {foreign
-          ? 'Скан видят сотрудник, HR и его непосредственный руководитель. Загружает его сам сотрудник.'
-          : 'Скан видите вы, HR и ваш непосредственный руководитель.'}
+          ? 'Скан видят сотрудник и HR-администраторы. Загружает его сам сотрудник.'
+          : 'Скан видите вы и HR-администраторы.'}
       </div>
       {passport?.filename && (
         <div className="fx-doc" style={{ marginTop: 8 }}>

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Copy, User, Download, KeyRound, Check } from 'lucide-react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { toast } from '@/factorial/components/ui/toast';
+// react-hot-toast смонтирован в main.tsx; Toaster из factorial/components/ui
+// не смонтирован нигде — его тосты (в т.ч. ошибки) не показывались вовсе.
+import toast from 'react-hot-toast';
 import { getErrorDetail } from '@/utils';
 import ProfileTemplate from '@/factorial/templates/ProfileTemplate';
 import { getLeaveBalance, downloadEmployeeTemplate, resetEmployeePassword } from '@/factorial/api/employees';
@@ -51,16 +53,16 @@ export default function ProfileOverviewPage() {
     onSuccess: (r) => { setConfirmReset(false); setGenPassword(r.temporary_password); setPwCopy('idle'); },
     onError: (e) => {
       setConfirmReset(false);
-      toast({ title: 'Ошибка', description: getErrorDetail(e, 'Не удалось сгенерировать пароль') });
+      toast.error(getErrorDetail(e, 'Не удалось сгенерировать пароль'));
     },
   });
 
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      toast({ title: 'Скопировано', description: text });
+      toast.success(`Скопировано: ${text}`);
     } catch {
-      toast({ title: 'Не удалось скопировать', description: `Браузер не дал доступ к буферу. Скопируйте вручную: ${text}` });
+      toast.error(`Браузер не дал скопировать. Скопируйте вручную: ${text}`);
     }
   };
 
@@ -80,7 +82,7 @@ export default function ProfileOverviewPage() {
     try {
       await downloadEmployeeTemplate({ id: me.id });
     } catch (e) {
-      toast({ title: 'Ошибка', description: getErrorDetail(e, 'Не удалось выгрузить карточку сотрудника') });
+      toast.error(getErrorDetail(e, 'Не удалось выгрузить карточку сотрудника'));
     } finally {
       setExporting(false);
     }
