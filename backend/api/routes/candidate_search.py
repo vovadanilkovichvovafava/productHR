@@ -42,6 +42,7 @@ from api.models.database import (
     STATUS_SYNC_MAP,
 )
 from api.services.auth import get_current_user, get_user_org, has_full_database_access
+from api.utils.csv_safe import csv_safe
 from api.services.shadow_filter import get_isolated_creator_ids
 from api.services.hr_stages import (
     BOARD_STATUSES, OTHER_STATUS, STATUS_LABELS, board_column, statuses_in_column,
@@ -558,7 +559,7 @@ async def bulk_action(
         writer = csv.writer(output)
         writer.writerow(["ID", "Name", "Email", "Phone", "Status", "Position", "Company", "Tags", "Created At"])
         for entity in entities:
-            writer.writerow([
+            writer.writerow([csv_safe(v) for v in (
                 entity.id,
                 entity.name,
                 entity.email or "",
@@ -568,7 +569,7 @@ async def bulk_action(
                 entity.company or "",
                 ", ".join(entity.tags or []),
                 entity.created_at.isoformat() if entity.created_at else "",
-            ])
+            )])
         output.seek(0)
         return StreamingResponse(
             iter([output.getvalue()]),

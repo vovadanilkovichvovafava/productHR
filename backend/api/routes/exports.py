@@ -24,16 +24,14 @@ from ..models.database import (
     DepartmentMember, DeptRole
 )
 from ..services.auth import get_current_user, get_user_org
+from ..utils.csv_safe import csv_safe
 
 router = APIRouter()
 
 
 def _escape_csv_value(value) -> str:
-    """Safely convert a value to CSV-safe string."""
-    if value is None:
-        return ""
-    s = str(value)
-    return s
+    """Значение для CSV с защитой от инъекции формул (раньше не экранировало ничего)."""
+    return csv_safe(value)
 
 
 def _make_csv_response(rows: list[list[str]], headers: list[str], filename_prefix: str) -> StreamingResponse:

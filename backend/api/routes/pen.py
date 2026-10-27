@@ -28,6 +28,7 @@ from api.models.database import (
     User, Organization, OrgMember, OrgRole,
 )
 from api.services.auth import get_current_user, get_user_org
+from api.utils.csv_safe import csv_safe
 
 logger = logging.getLogger("hr-analyzer.pen")
 
@@ -486,7 +487,7 @@ async def export_salary_sheet_csv(
 
     for b in bonuses:
         entity_name = b.entity.name if b.entity else f"ID:{b.entity_id}" if b.entity_id else "N/A"
-        writer.writerow([
+        writer.writerow([csv_safe(v) for v in (
             recruiter_names.get(b.recruiter_id, f"User #{b.recruiter_id}"),
             entity_name,
             b.direction,
@@ -494,7 +495,7 @@ async def export_salary_sheet_csv(
             b.amount,
             "Да" if b.is_paid else "Нет",
             b.notes or "",
-        ])
+        )])
 
     output.seek(0)
     return StreamingResponse(
