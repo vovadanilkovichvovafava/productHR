@@ -117,3 +117,21 @@ def test_vacancy_merge_report_is_not_logged_as_merge():
     assert describe("POST", "/api/vacancies/1/merge-from/19", "dry_run=true").startswith("Посмотрел отчёт")
     assert describe("POST", "/api/vacancies/1/merge-from/19").startswith("Посмотрел отчёт")
     assert describe("POST", "/api/vacancies/1/merge-from/19", "dry_run=false") == "Слил вакансию-дубль"
+
+
+def test_management_actions_have_russian_labels():
+    """Действия «Управления» в журнале — по-русски, не «МЕТОД путь» (28.10.2026)."""
+    cases = {
+        ("POST", "/api/employees/me/passport"): "Загрузил свой скан паспорта",
+        ("PUT", "/api/employees/me"): "Изменил свой профиль сотрудника",
+        ("PUT", "/api/employees/7"): "Изменил карточку сотрудника",
+        ("DELETE", "/api/employees/7"): "Уволил сотрудника",
+        ("PUT", "/api/employees/leave-requests/3/approve"): "Одобрил заявку на отпуск",
+        ("POST", "/api/documents/12/sign"): "Подписал документ",
+        ("POST", "/api/invitations"): "Создал приглашение",
+        ("POST", "/api/invitations/accept/abcDEF_123"): "Принял приглашение",
+        ("PUT", "/api/org-units/assign/4"): "Оргсхема: перевёл сотрудника в отдел",
+        ("POST", "/api/org-units"): "Оргсхема: отдел",
+    }
+    for (method, path), label in cases.items():
+        assert describe(method, path) == label, (method, path)
