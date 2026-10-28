@@ -3,9 +3,12 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /frontend
 
-# Copy only package.json first (npm install will create fresh lock file for alpine)
-# This avoids rollup native module mismatch issues between glibc and musl
-COPY frontend/package.json ./
+# package-lock.json — обязательно (28.10.2026). Без него npm брал свежие версии
+# по «^» (vitest 4.1 при vite 5), падал на разрешении peer-зависимостей
+# («Cannot read properties of null (reading 'edgesOut')») — образ не собирался.
+# Нативные сборки rollup под musl в lock-файле есть (все 22 платформы), так же
+# собирает frontend/Dockerfile — его Saturn и использует.
+COPY frontend/package.json frontend/package-lock.json ./
 # SheetJS ставится из архива в vendor/ (исправленных версий xlsx в npm нет)
 COPY frontend/vendor ./vendor
 RUN npm install
