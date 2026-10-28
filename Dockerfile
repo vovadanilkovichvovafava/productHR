@@ -6,6 +6,8 @@ WORKDIR /frontend
 # Copy only package.json first (npm install will create fresh lock file for alpine)
 # This avoids rollup native module mismatch issues between glibc and musl
 COPY frontend/package.json ./
+# SheetJS ставится из архива в vendor/ (исправленных версий xlsx в npm нет)
+COPY frontend/vendor ./vendor
 RUN npm install
 
 COPY frontend/ ./

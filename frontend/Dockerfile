@@ -2,8 +2,10 @@ FROM node:20-alpine as builder
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files (+ vendor/: SheetJS ставится из архива — исправленных
+# версий xlsx в npm нет, см. vendor/README.md)
 COPY package.json package-lock.json* ./
+COPY vendor ./vendor
 
 # Install dependencies
 RUN npm install
