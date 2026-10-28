@@ -56,3 +56,13 @@ async def test_colleague_gets_404(
     resp = await client.get(f"/api/documents/{doc.id}", headers=_h(second_user))
 
     assert resp.status_code == 404
+
+
+async def test_templates_are_for_admins(
+    client, db_session, organization, org_owner, org_member, admin_user, second_user,
+):
+    member = await client.get("/api/documents/templates", headers=_h(second_user))
+    owner = await client.get("/api/documents/templates", headers=_h(admin_user))
+
+    assert member.status_code == 403
+    assert owner.status_code == 200

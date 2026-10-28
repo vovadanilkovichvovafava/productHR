@@ -170,6 +170,10 @@ async def list_templates(
     org = await get_user_org(user, db)
     if not org:
         raise HTTPException(404, "Организация не найдена")
+    # Шаблоны (тексты договоров, в т.ч. выключенные черновики) нужны только тем,
+    # кто создаёт документы, — админам. Раньше их читал любой участник орга.
+    if not await _is_admin_or_owner(user, org.id, db):
+        raise HTTPException(403, "Шаблоны документов доступны администраторам")
 
     result = await db.execute(
         select(DocumentTemplate)
