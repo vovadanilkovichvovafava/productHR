@@ -96,3 +96,21 @@ async def test_signing_flags_by_word(client, db_session, organization, org_membe
     await db_session.refresh(emp)
     assert bool(emp.nda_signed) is nda
     assert bool(emp.contract_signed) is contract
+
+
+def test_frontend_template_variables_match_server():
+    """Окно шаблона перечисляет и проверяет переменные по списку во фронте
+    (factorial/lib/templateVariables.ts) — он должен совпадать с тем, что
+    подставляет сервер, иначе HR увидит ложное «неизвестная переменная»."""
+    import re
+    from pathlib import Path
+    from types import SimpleNamespace
+    from api.routes.documents import _render_template
+
+    ts = (Path(__file__).resolve().parents[2] / "frontend/src/factorial/lib/templateVariables.ts").read_text()
+    front = set(re.findall(r"'([a-z_]+)'", ts))
+    emp = SimpleNamespace(position="", department=None, phone="", telegram_username="", extra_data={})
+    user = SimpleNamespace(name="", email="")
+    probe = " ".join("{{%s}}" % v for v in front)
+    left = set(re.findall(r"\{\{([a-z_]+)\}\}", _render_template(probe, emp, user)))
+    assert left == {"signature"}, f"сервер не знает: {left - {'signature'}}"
