@@ -20,7 +20,6 @@ import EmployeesPage from './pages/EmployeesPage';
 import EmployeesImportPage from './pages/EmployeesImportPage';
 import EmployeesOrgChartPage from './pages/EmployeesOrgChartPage';
 import EmployeesTeamsPage from './pages/EmployeesTeamsPage';
-import EmployeesVacanciesPage from './pages/EmployeesVacanciesPage';
 import FilesPage from './pages/FilesPage';
 import NotFoundPage from './pages/NotFoundPage';
 import AddEmployeeFormPage from './pages/forms/AddEmployeeFormPage';
@@ -71,7 +70,8 @@ export default function FactorialModule() {
         <Route path="employees/import" element={guard(<EmployeesImportPage />)} />
         <Route path="employees/teams" element={guard(<EmployeesTeamsPage />)} />
         <Route path="employees/org-chart" element={guard(<EmployeesOrgChartPage />)} />
-        <Route path="employees/vacancies" element={guard(<EmployeesVacanciesPage />)} />
+        {/* Вакансии ведутся в HR-разделе (общая форма вакансии); старый адрес — туда. */}
+        <Route path="employees/vacancies" element={<Navigate to="/vacancies" replace />} />
         {/* Карточка сотрудника по ID (6 вкладок) */}
         <Route path="employees/:id" element={guard(<ProfileOverviewPage />)} />
         <Route path="employees/:id/work-details" element={guard(<ProfileWorkDetailsPage />)} />

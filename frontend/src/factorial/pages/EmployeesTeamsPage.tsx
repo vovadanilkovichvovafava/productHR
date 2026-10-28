@@ -1,5 +1,6 @@
 import { Users } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import PageHeader from '@/factorial/components/PageHeader';
 import SecondaryNav from '@/factorial/components/SecondaryNav';
 import UserAvatar from '@/factorial/components/UserAvatar';
@@ -30,7 +31,9 @@ export default function EmployeesTeamsPage() {
           <div className="text-fx-sm text-text-muted">Загрузка…</div>
         ) : units.length === 0 ? (
           <div className="text-fx-sm text-text-muted">
-            Команд пока нет — создайте отделы в разделе «Оргсхема», и они появятся здесь.
+            Команд пока нет. Отделы заводятся в разделе{' '}
+            <Link to="/departments" className="text-primary hover:underline">«Департаменты»</Link>
+            {' '}— после этого они появятся здесь и на оргсхеме.
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -8,6 +8,7 @@ import { formatPhone } from '../lib/phone';
 import { changedFields, dateFieldToServer } from '../lib/employeePatch';
 import { backdropClose } from '@/utils/backdropClose';
 import { getErrorDetail } from '@/utils';
+import { openBase64File } from '@/factorial/lib/fileOpen';
 
 const TOP_FIELDS = ['position', 'phone', 'telegram_username', 'department_start_date'] as const;
 const EXTRA_FIELDS = [
@@ -85,19 +86,13 @@ export default function EmployeeEditModal({
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  // HR/руководитель: скачать скан паспорта сотрудника (бэкенд проверяет доступ).
+  // HR-админ: скачать скан паспорта сотрудника (бэкенд проверяет доступ).
   const downloadPassport = async () => {
     if (!employeeId) return;
     try {
-      const p = await getEmployeePassport(employeeId);
-      const a = document.createElement('a');
-      a.href = `data:${p.content_type || 'application/octet-stream'};base64,${p.data_base64}`;
-      a.download = p.filename || 'passport';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch {
-      setErr('Не удалось скачать паспорт (нет доступа или файл не загружен).');
+      openBase64File(await getEmployeePassport(employeeId), { download: true, fallbackName: 'passport' });
+    } catch (e) {
+      setErr(getErrorDetail(e, 'Не удалось скачать паспорт (нет доступа или файл не загружен).'));
     }
   };
 
