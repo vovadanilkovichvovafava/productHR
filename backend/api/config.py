@@ -105,6 +105,24 @@ class Settings(BaseSettings):
         alias="COMMUNICATION_API_KEY"
     )
 
+    @field_validator("pii_encryption_key")
+    @classmethod
+    def _check_pii_key(cls, v: str) -> str:
+        # Ключ вставляют руками в панель хостинга: лишние пробелы и кавычки
+        # срезаем, а неверный формат роняем сразу при старте — иначе ошибка
+        # всплыла бы 500-й на первой же загрузке паспорта.
+        v = (v or "").strip().strip('"').strip("'").strip()
+        if v:
+            from cryptography.fernet import Fernet
+            try:
+                Fernet(v.encode())
+            except Exception:
+                raise ValueError(
+                    "PII_ENCRYPTION_KEY: неверный формат — нужен Fernet-ключ "
+                    "(44 символа base64, на конце «=»), см. .env.example"
+                )
+        return v
+
     @field_validator("prometheus_base_url")
     @classmethod
     def _ensure_prometheus_scheme(cls, v: str) -> str:

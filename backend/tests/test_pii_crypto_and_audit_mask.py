@@ -67,3 +67,16 @@ def test_audit_masks_bulk_import_rows():
 
     assert body[0]["payment_details"] == "***"
     assert body[0]["email"] == "a@b.c"
+
+
+def test_pii_key_format_checked_at_startup():
+    from pydantic import ValidationError
+    from api.config import Settings
+
+    good = Fernet.generate_key().decode()
+    base = {"SECRET_KEY": "x" * 32, "SUPERADMIN_EMAIL": "a@b.c", "SUPERADMIN_PASSWORD": "p"}
+
+    assert Settings(**base, PII_ENCRYPTION_KEY=f' "{good}" \n').pii_encryption_key == good
+    assert Settings(**base, PII_ENCRYPTION_KEY="").pii_encryption_key == ""
+    with pytest.raises(ValidationError, match="PII_ENCRYPTION_KEY"):
+        Settings(**base, PII_ENCRYPTION_KEY="a" * 64)  # hex-секрет вместо Fernet-ключа
