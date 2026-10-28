@@ -71,7 +71,7 @@ async def require_invitation_access(
     if is_dept_lead:
         return user, org, org_role, is_dept_lead, user_dept_ids
 
-    raise HTTPException(status_code=403, detail="Admin or department lead access required")
+    raise HTTPException(status_code=403, detail="Приглашать могут администраторы и руководители отделов")
 
 
 # Schemas
@@ -152,7 +152,7 @@ async def create_invitation(
 
     # Only owner can create owner/admin invites
     if invite_org_role in ("owner", "admin") and role != "owner":
-        raise HTTPException(status_code=403, detail="Only owner can create owner/admin invitations")
+        raise HTTPException(status_code=403, detail="Приглашение владельца или администратора создаёт только владелец")
     # Роль рекрутёра (доступ к кандидатам и воронкам) выдают только owner/admin.
     # Лид отдела с ролью «сотрудник» раньше приглашал с org_role=hr и сам
     # принимал приглашение на второй адрес — получал HR-доступ (до 27.10.2026).
@@ -196,7 +196,7 @@ async def create_invitation(
                 )
             )
             if result.scalar_one_or_none():
-                raise HTTPException(status_code=400, detail="User is already a member of this organization")
+                raise HTTPException(status_code=400, detail="Этот человек уже состоит в организации")
 
     # Non-owners can only invite to their own departments
     if role != "owner" and data.department_ids:
@@ -213,7 +213,7 @@ async def create_invitation(
         if not data.department_ids:
             raise HTTPException(
                 status_code=400,
-                detail="Department leads must specify at least one department for the invitation"
+                detail="Руководитель отдела должен выбрать хотя бы один отдел"
             )
 
     # Generate token
@@ -380,15 +380,15 @@ async def accept_invitation(
         invitation = result.scalar_one_or_none()
 
         if not invitation:
-            raise HTTPException(status_code=404, detail="Invitation not found")
+            raise HTTPException(status_code=404, detail="Приглашение не найдено")
 
         # Check if already used
         if invitation.used_at:
-            raise HTTPException(status_code=400, detail="Invitation already used")
+            raise HTTPException(status_code=400, detail="Приглашение уже использовано")
 
         # Check if expired
         if invitation.expires_at and datetime.utcnow() > invitation.expires_at:
-            raise HTTPException(status_code=400, detail="Invitation expired")
+            raise HTTPException(status_code=400, detail="Срок приглашения истёк — попросите новое")
 
         # Приглашение на конкретный адрес принимается только этим адресом. Раньше
         # email из формы не сверялся: по любой ссылке можно было «принять» её на
@@ -422,7 +422,7 @@ async def accept_invitation(
                 )
             )
             if result.scalar_one_or_none():
-                raise HTTPException(status_code=400, detail="You are already a member of this organization")
+                raise HTTPException(status_code=400, detail="Вы уже состоите в этой организации — просто войдите")
 
             # Add existing user to org
             new_user = existing_user
@@ -541,11 +541,11 @@ async def revoke_invitation(
     invitation = result.scalar_one_or_none()
 
     if not invitation:
-        raise HTTPException(status_code=404, detail="Invitation not found")
+        raise HTTPException(status_code=404, detail="Приглашение не найдено")
 
     # Admin can only revoke their own invitations
     if role != "owner" and invitation.invited_by_id != user.id:
-        raise HTTPException(status_code=403, detail="You can only revoke your own invitations")
+        raise HTTPException(status_code=403, detail="Отозвать можно только своё приглашение")
 
     await db.delete(invitation)
     await db.commit()

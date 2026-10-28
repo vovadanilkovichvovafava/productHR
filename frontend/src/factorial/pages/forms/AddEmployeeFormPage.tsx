@@ -8,7 +8,7 @@ import FormSection from '@/factorial/components/FormSection';
 import FormField from '@/factorial/components/FormField';
 import { createInvitation } from '@/factorial/api/invitations';
 import type { Invitation } from '@/factorial/api/types';
-import { getErrorDetail } from '@/utils';
+import { inviteErrorText } from '@/factorial/lib/inviteError';
 
 // Добавление НОВОГО сотрудника = приглашение (реальный бэк /invitations).
 // Прямое создание Employee невозможно без существующего user_id, а пароль/регистрацию
@@ -30,14 +30,7 @@ export default function AddEmployeeFormPage() {
       setErr('');
       setLink(window.location.origin + inv.invitation_url);
     },
-    onError: (e: unknown) => {
-      const d = getErrorDetail(e, '');
-      setErr(
-        /already a member/i.test(d)
-          ? 'Этот email уже зарегистрирован в организации — введите другой или оставьте поле пустым.'
-          : d || 'Не удалось создать приглашение. Попробуйте ещё раз.',
-      );
-    },
+    onError: (e: unknown) => setErr(inviteErrorText(e, 'Не удалось создать приглашение. Попробуйте ещё раз.')),
   });
 
   const submit = () => {

@@ -64,7 +64,7 @@ class TestInvitationRaceCondition:
         # Second accept should fail with 400 (already used)
         response2 = await client.post(f"/api/invitations/accept/{token}", json=accept_data)
         assert response2.status_code == 400
-        assert "already used" in response2.json()["detail"].lower()
+        assert "уже использовано" in response2.json()["detail"].lower()
 
         # Verify only one membership was created
         result = await db_session.execute(

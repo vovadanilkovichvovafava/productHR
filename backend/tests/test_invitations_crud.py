@@ -171,7 +171,7 @@ class TestCreateInvitation:
         )
 
         assert response.status_code == 403
-        assert "Only owner can create owner/admin invitations" in response.json()["detail"]
+        assert "создаёт только владелец" in response.json()["detail"]
 
     async def test_admin_cannot_create_owner_invitation(
         self,
@@ -293,7 +293,7 @@ class TestCreateInvitation:
         )
 
         assert response.status_code == 400
-        assert "already a member" in response.json()["detail"]
+        assert "уже состоит" in response.json()["detail"]
 
     async def test_create_invitation_no_expiration(
         self,
@@ -486,7 +486,7 @@ class TestCreateInvitation:
         )
 
         assert response.status_code == 400
-        assert "department" in response.json()["detail"].lower()
+        assert "отдел" in response.json()["detail"].lower()
 
 
 class TestListInvitations:
@@ -1076,7 +1076,7 @@ class TestAcceptInvitation:
         )
 
         assert response.status_code == 404
-        assert "not found" in response.json()["detail"]
+        assert "не найдено" in response.json()["detail"]
 
     async def test_accept_already_used_invitation(
         self,
@@ -1107,7 +1107,7 @@ class TestAcceptInvitation:
         )
 
         assert response.status_code == 400
-        assert "already used" in response.json()["detail"]
+        assert "уже использовано" in response.json()["detail"]
 
     async def test_accept_expired_invitation(
         self,
@@ -1136,7 +1136,7 @@ class TestAcceptInvitation:
         )
 
         assert response.status_code == 400
-        assert "expired" in response.json()["detail"]
+        assert "истёк" in response.json()["detail"]
 
     async def test_accept_invitation_user_already_member(
         self,
@@ -1166,7 +1166,7 @@ class TestAcceptInvitation:
         )
 
         assert response.status_code == 400
-        assert "already a member" in response.json()["detail"]
+        assert "уже состоит" in response.json()["detail"]
 
     async def test_accept_invitation_creates_telegram_url(
         self,
@@ -1356,7 +1356,7 @@ class TestRevokeInvitation:
         )
 
         assert response.status_code == 403
-        assert "You can only revoke your own invitations" in response.json()["detail"]
+        assert "только своё приглашение" in response.json()["detail"]
 
     async def test_revoke_nonexistent_invitation(
         self,
@@ -1375,7 +1375,7 @@ class TestRevokeInvitation:
         )
 
         assert response.status_code == 404
-        assert "not found" in response.json()["detail"]
+        assert "не найдено" in response.json()["detail"]
 
     async def test_revoke_invitation_from_different_org(
         self,
