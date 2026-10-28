@@ -5,6 +5,8 @@
  * For HRD/admin (/employees): employee list, reminders, leave request management
  */
 import { backdropClose } from '@/utils/backdropClose';
+import toast from 'react-hot-toast';
+import { getErrorDetail } from '@/utils';
 import { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useUrlTab } from '@/hooks/useUrlTab';
@@ -589,8 +591,8 @@ function AdminEmployeesView() {
       setEmployees(emps);
       setReminders(rems);
       setLeaveRequests(lrs);
-    } catch {
-      // silently ignore
+    } catch (e) {
+      toast.error(getErrorDetail(e, 'Не удалось загрузить сотрудников'));
     } finally {
       setLoading(false);
     }
@@ -602,8 +604,8 @@ function AdminEmployeesView() {
     try {
       await employeesApi.approveLeaveRequest(id);
       load();
-    } catch {
-      // silently ignore
+    } catch (e) {
+      toast.error(getErrorDetail(e, 'Не удалось одобрить заявку'));
     }
   };
 
@@ -611,8 +613,8 @@ function AdminEmployeesView() {
     try {
       await employeesApi.rejectLeaveRequest(id);
       load();
-    } catch {
-      // silently ignore
+    } catch (e) {
+      toast.error(getErrorDetail(e, 'Не удалось отклонить заявку'));
     }
   };
 

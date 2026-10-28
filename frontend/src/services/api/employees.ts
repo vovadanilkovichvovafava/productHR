@@ -129,7 +129,7 @@ export async function getMyEmployeeProfile(): Promise<EmployeeData> {
 }
 
 export async function getEmployee(id: number): Promise<EmployeeData> {
-  const { data } = await api.get(`/api/employees/${id}`);
+  const { data } = await api.get(`/employees/${id}`);
   return data;
 }
 
@@ -139,22 +139,22 @@ export async function createEmployee(payload: EmployeeCreate): Promise<EmployeeD
 }
 
 export async function updateEmployee(id: number, payload: EmployeeUpdate): Promise<EmployeeData> {
-  const { data } = await api.put(`/api/employees/${id}`, payload);
+  const { data } = await api.put(`/employees/${id}`, payload);
   return data;
 }
 
 export async function dismissEmployee(id: number, reason?: string): Promise<{ ok: boolean }> {
-  const { data } = await api.delete(`/api/employees/${id}`, { params: { reason } });
+  const { data } = await api.delete(`/employees/${id}`, { params: { reason } });
   return data;
 }
 
 export async function getLeaveBalance(employeeId: number): Promise<LeaveBalance> {
-  const { data } = await api.get(`/api/employees/${employeeId}/leave-balance`);
+  const { data } = await api.get(`/employees/${employeeId}/leave-balance`);
   return data;
 }
 
 export async function createLeaveRequest(employeeId: number, payload: LeaveRequestCreate): Promise<LeaveRequestData> {
-  const { data } = await api.post(`/api/employees/${employeeId}/leave-request`, payload);
+  const { data } = await api.post(`/employees/${employeeId}/leave-request`, payload);
   return data;
 }
 
@@ -166,12 +166,12 @@ export async function getAllLeaveRequests(statusFilter?: string): Promise<LeaveR
 }
 
 export async function approveLeaveRequest(requestId: number): Promise<{ ok: boolean }> {
-  const { data } = await api.put(`/api/employees/leave-requests/${requestId}/approve`);
+  const { data } = await api.put(`/employees/leave-requests/${requestId}/approve`);
   return data;
 }
 
 export async function rejectLeaveRequest(requestId: number): Promise<{ ok: boolean }> {
-  const { data } = await api.put(`/api/employees/leave-requests/${requestId}/reject`);
+  const { data } = await api.put(`/employees/leave-requests/${requestId}/reject`);
   return data;
 }
 
