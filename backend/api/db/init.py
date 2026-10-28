@@ -589,6 +589,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Audit purge failed (non-critical): {e}")
 
+    # Лимиты больничных/семейных: старое умолчание записи 10/3 → 7/2, как
+    # показывал кабинет (27.10.2026, services/leave_limits.py). Одноразово.
+    try:
+        from ..services.leave_limits import align_leave_limits_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await align_leave_limits_once(session)
+    except Exception as e:
+        logger.warning(f"Leave limits align failed (non-critical): {e}")
+
     # Заявки людей, которых доска «Штат» перевела в отдел, не сдвинув заявку
     # с «Практики» (20.10.2026, services/board_stage_sync.py). Одноразово.
     try:

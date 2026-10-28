@@ -25,6 +25,7 @@ from api.models.database import (
     DepartmentMember, OrgUnit, OrgMember, OrgRole, Notification, EmployeeDocument, UserRole,
 )
 from api.services.auth import get_current_user, get_user_org, hash_password, revoke_all_user_tokens
+from api.services.leave_limits import family_total, limit_for, sick_total
 
 logger = logging.getLogger("hr-analyzer.employees")
 
@@ -242,9 +243,9 @@ class EmployeeResponse(BaseModel):
     one_year_date: Optional[datetime] = None
     vacation_days_total: int = 0
     vacation_days_used: int = 0
-    sick_days_total: int = 10
+    sick_days_total: int = 7
     sick_days_used: int = 0
-    family_leave_days_total: int = 3
+    family_leave_days_total: int = 2
     family_leave_days_used: int = 0
     nda_signed: bool = False
     nda_signed_at: Optional[datetime] = None
@@ -474,9 +475,9 @@ def _employee_to_response(emp: Employee) -> EmployeeResponse:
         one_year_date=emp.one_year_date,
         vacation_days_total=emp.vacation_days_total or 0,
         vacation_days_used=emp.vacation_days_used or 0,
-        sick_days_total=emp.sick_days_total or 10,
+        sick_days_total=sick_total(emp),
         sick_days_used=emp.sick_days_used or 0,
-        family_leave_days_total=emp.family_leave_days_total or 3,
+        family_leave_days_total=family_total(emp),
         family_leave_days_used=emp.family_leave_days_used or 0,
         nda_signed=emp.nda_signed or False,
         nda_signed_at=emp.nda_signed_at,
@@ -1245,15 +1246,16 @@ async def get_leave_balance(
             if t in used:
                 used[t] += (d or 0)
 
-    sick_total = 7
-    fl_total = 2
+    # Лимиты — из записи сотрудника (HR правит в карточке), умолчание 7 / 2.
+    sick_total_days = sick_total(emp)
+    fl_total = family_total(emp)
     return LeaveBalanceResponse(
         vacation_total=vac_total,
         vacation_used=used["vacation"],
         vacation_remaining=max(0, vac_total - used["vacation"]),
-        sick_total=sick_total,
+        sick_total=sick_total_days,
         sick_used=used["sick"],
-        sick_remaining=max(0, sick_total - used["sick"]),
+        sick_remaining=max(0, sick_total_days - used["sick"]),
         family_leave_total=fl_total,
         family_leave_used=used["family_leave"],
         family_leave_remaining=max(0, fl_total - used["family_leave"]),
@@ -1343,6 +1345,7 @@ async def create_leave_request(
 @router.put("/leave-requests/{request_id}/approve")
 async def approve_leave_request(
     request_id: int,
+    force: bool = Query(False, description="Одобрить сверх лимита больничных/семейных"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1400,6 +1403,30 @@ async def approve_leave_request(
                     status_code=400,
                     detail=f"Недостаточно дней отпуска: доступно {available}",
                 )
+
+    # Больничные и семейные: сверх лимита записи сотрудника — предупреждение
+    # (409 + X-Leave-Over-Limit), повтор с force=true одобряет (решение
+    # владельца 27.10.2026: «предупреждать, но одобрить можно»).
+    limit = limit_for(emp, lr.type) if emp else None
+    if limit is not None and not force:
+        now = datetime.utcnow()
+        cstart = _cycle_start(emp.department_start_date, now=now)
+        q = select(func.coalesce(func.sum(LeaveRequest.days), 0)).where(
+            LeaveRequest.employee_id == lr.employee_id,
+            LeaveRequest.type == lr.type,
+            LeaveRequest.status == "approved",
+        )
+        if cstart:
+            q = q.where(LeaveRequest.start_date >= cstart, LeaveRequest.start_date < cstart + relativedelta(months=12))
+        used = (await db.execute(q)).scalar() or 0
+        if used + lr.days > limit:
+            kind = "больничных" if lr.type == "sick" else "семейных дней"
+            raise HTTPException(
+                status_code=409,
+                detail=(f"Сверх лимита {kind}: в этом рабочем году использовано {used} из {limit}, "
+                        f"в заявке {lr.days}. Одобрить всё равно?"),
+                headers={"X-Leave-Over-Limit": "1"},
+            )
 
     lr.status = "approved"
     lr.approved_by = current_user.id

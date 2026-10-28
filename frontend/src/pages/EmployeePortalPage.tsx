@@ -6,6 +6,7 @@
  */
 import { backdropClose } from '@/utils/backdropClose';
 import toast from 'react-hot-toast';
+import HrConfirm from '@/components/hr/HrConfirm';
 import { getErrorDetail } from '@/utils';
 import { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -600,11 +601,20 @@ function AdminEmployeesView() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleApprove = async (id: number) => {
+  // Сверх лимита больничных/семейных сервер не отказывает, а спрашивает.
+  const [overLimit, setOverLimit] = useState<{ id: number; message: string } | null>(null);
+
+  const handleApprove = async (id: number, force = false) => {
     try {
-      await employeesApi.approveLeaveRequest(id);
+      await employeesApi.approveLeaveRequest(id, force);
+      setOverLimit(null);
       load();
     } catch (e) {
+      if (!force && employeesApi.isLeaveOverLimit(e)) {
+        setOverLimit({ id, message: getErrorDetail(e, 'Сверх лимита. Одобрить всё равно?') });
+        return;
+      }
+      setOverLimit(null);
       toast.error(getErrorDetail(e, 'Не удалось одобрить заявку'));
     }
   };
@@ -628,6 +638,15 @@ function AdminEmployeesView() {
 
   return (
     <div className="space-y-6">
+      {overLimit && (
+        <HrConfirm
+          title="Одобрить сверх лимита?"
+          subtitle={overLimit.message}
+          confirmLabel="Одобрить"
+          onCancel={() => setOverLimit(null)}
+          onConfirm={() => handleApprove(overLimit.id, true)}
+        />
+      )}
       {/* Reminders banner */}
       {reminders.length > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4">

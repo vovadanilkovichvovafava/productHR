@@ -1746,9 +1746,10 @@ class Employee(Base):
     # Leave counters
     vacation_days_total = Column(Integer, default=0)         # accumulated vacation days
     vacation_days_used = Column(Integer, default=0)
-    sick_days_total = Column(Integer, default=10)            # 10 per year
+    # Лимиты на рабочий год; умолчание — services/leave_limits.py (7 / 2), HR правит в карточке
+    sick_days_total = Column(Integer, default=7)
     sick_days_used = Column(Integer, default=0)
-    family_leave_days_total = Column(Integer, default=3)
+    family_leave_days_total = Column(Integer, default=2)
     family_leave_days_used = Column(Integer, default=0)
 
     # Contract

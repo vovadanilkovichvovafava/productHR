@@ -165,9 +165,19 @@ export async function getAllLeaveRequests(statusFilter?: string): Promise<LeaveR
   return data;
 }
 
-export async function approveLeaveRequest(requestId: number): Promise<{ ok: boolean }> {
-  const { data } = await api.put(`/employees/leave-requests/${requestId}/approve`);
+// force — одобрить сверх лимита больничных/семейных (сервер без него отвечает
+// 409 с заголовком X-Leave-Over-Limit и текстом «Одобрить всё равно?»).
+export async function approveLeaveRequest(requestId: number, force = false): Promise<{ ok: boolean }> {
+  const { data } = await api.put(`/employees/leave-requests/${requestId}/approve`, null, {
+    params: force ? { force: true } : undefined,
+  });
   return data;
+}
+
+/** Ответ «сверх лимита — одобрить всё равно?» на одобрение заявки. */
+export function isLeaveOverLimit(error: unknown): boolean {
+  const res = (error as { response?: { status?: number; headers?: Record<string, string> } })?.response;
+  return res?.status === 409 && res.headers?.['x-leave-over-limit'] === '1';
 }
 
 export async function rejectLeaveRequest(requestId: number): Promise<{ ok: boolean }> {
