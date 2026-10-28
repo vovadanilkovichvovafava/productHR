@@ -33,9 +33,17 @@ def client_ip(request: Request) -> str:
     """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        # Первый адрес присылает сам клиент — его подделывают, чтобы обойти
+        # лимит или записать чужой IP под подписью документа. Если известно,
+        # сколько адресов справа дописали наши прокси (TRUSTED_PROXY_HOPS),
+        # берём адрес перед ними — его клиент подделать не может.
+        from .config import settings
+        hops = max(0, int(getattr(settings, "trusted_proxy_hops", 0) or 0))
+        if hops and len(parts) >= hops:
+            return parts[-hops]
+        if parts:
+            return parts[0]
     real_ip = request.headers.get("x-real-ip")
     if real_ip:
         return real_ip.strip()

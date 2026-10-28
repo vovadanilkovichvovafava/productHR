@@ -82,23 +82,9 @@ def _get_device_name(request: Request) -> str:
 
 
 def _get_client_ip(request: Request) -> str:
-    """Get the client's real IP address, handling proxies."""
-    # Check X-Forwarded-For header (set by proxies/load balancers)
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        # Get the first IP in the chain (original client)
-        return forwarded_for.split(",")[0].strip()
-
-    # Check X-Real-IP header
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip
-
-    # Fall back to direct connection IP
-    if request.client:
-        return request.client.host
-
-    return "unknown"
+    """Адрес клиента — одно правило с лимитами (limiter.client_ip, TRUSTED_PROXY_HOPS)."""
+    from ..limiter import client_ip
+    return client_ip(request)
 
 
 @router.post("/login", response_model=TokenResponse)

@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     # раньше, ключом от SECRET_KEY (тогда смена SECRET_KEY делает файлы
     # нечитаемыми). Старые файлы читаются в любом случае.
     pii_encryption_key: str = Field(default="", alias="PII_ENCRYPTION_KEY")
+    # Сколько адресов СПРАВА в X-Forwarded-For дописали наши прокси (прокси
+    # Saturn, nginx фронта). 0 — брать первый адрес, как раньше; но первый
+    # присылает сам клиент и может подделать. N > 0 — адрес клиента N-й справа.
+    # Как выбрать N — по строке DOC_SIGN ip_chain в логе (CLAUDE.md, «Деплой»).
+    trusted_proxy_hops: int = Field(default=0, alias="TRUSTED_PROXY_HOPS")
+
     # Прежние SECRET_KEY через запятую — ТОЛЬКО чтобы читать файлы, зашифрованные
     # ими (перенос базы с другого сервера, смена SECRET_KEY).
     pii_legacy_secrets: str = Field(default="", alias="PII_LEGACY_SECRETS")

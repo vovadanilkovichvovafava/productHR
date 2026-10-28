@@ -69,3 +69,23 @@ async def test_login_has_no_attempt_limit(client):
     for _ in range(30):
         r = await client.post("/api/auth/login", json=body, headers={"X-Forwarded-For": "4.4.4.4"})
         assert r.status_code != 429
+
+
+def test_client_ip_trusted_proxy_hops(monkeypatch):
+    """Первый адрес X-Forwarded-For подделывается клиентом; при известном числе
+    наших прокси (TRUSTED_PROXY_HOPS) берём адрес перед ними (27.10.2026)."""
+    from types import SimpleNamespace
+
+    from api.config import settings
+    from api.limiter import client_ip
+
+    req = SimpleNamespace(
+        headers={"x-forwarded-for": "6.6.6.6, 203.0.113.7, 10.0.0.2, 10.0.0.3"},
+        client=SimpleNamespace(host="10.0.0.9"),
+    )
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 0)
+    assert client_ip(req) == "6.6.6.6"  # как раньше
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 3)
+    assert client_ip(req) == "203.0.113.7"
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 9)  # цепочка короче — первый
+    assert client_ip(req) == "6.6.6.6"

@@ -452,11 +452,16 @@ async def sign_document(
 
     _validate_signature(payload.signature_data)
 
-    # Get client IP
-    client_ip = request.client.host if request.client else None
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
+    # Адрес — по общему правилу (limiter.client_ip, TRUSTED_PROXY_HOPS): первый
+    # адрес X-Forwarded-For присылает сам клиент и подставляет любой. Полная
+    # цепочка — в лог, по ней выбирают TRUSTED_PROXY_HOPS.
+    from ..limiter import client_ip as _client_ip
+    client_ip = _client_ip(request)[:50]
+    logger.info(
+        "DOC_SIGN doc=%s employee=%s user=%s ip=%s ip_chain=%r peer=%s",
+        doc.id, doc.employee_id, user.id, client_ip,
+        request.headers.get("x-forwarded-for"), request.client.host if request.client else None,
+    )
 
     doc.signature_data = payload.signature_data
     doc.signed_at = datetime.utcnow()
