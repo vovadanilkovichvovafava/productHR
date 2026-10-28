@@ -457,10 +457,15 @@ async def sign_document(
     # цепочка — в лог, по ней выбирают TRUSTED_PROXY_HOPS.
     from ..limiter import client_ip as _client_ip
     client_ip = _client_ip(request)[:50]
+    # Заголовки, в которых прокси могут нести настоящий адрес: в New HR (Saturn +
+    # Cloudflare) X-Forwarded-For доходит с одним внутренним адресом прокси
+    # (28.10.2026), и по этой строке выбирают, откуда брать адрес клиента.
     logger.info(
-        "DOC_SIGN doc=%s employee=%s user=%s ip=%s ip_chain=%r peer=%s",
+        "DOC_SIGN doc=%s employee=%s user=%s ip=%s ip_chain=%r peer=%s real_ip=%r cf=%r true_client=%r forwarded=%r",
         doc.id, doc.employee_id, user.id, client_ip,
         request.headers.get("x-forwarded-for"), request.client.host if request.client else None,
+        request.headers.get("x-real-ip"), request.headers.get("cf-connecting-ip"),
+        request.headers.get("true-client-ip"), request.headers.get("forwarded"),
     )
 
     doc.signature_data = payload.signature_data
