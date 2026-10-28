@@ -273,6 +273,7 @@ async def assign_employee(employee_id: int, data: AssignEmployee, auth: tuple = 
             )).scalar_one_or_none()
         if lead_emp is not None and not await _manager_creates_cycle(db, org.id, emp.id, lead_emp.id):
             emp.manager_id = lead_emp.id
+    await db.commit()
     return {"success": True, "employee_id": employee_id, "org_unit_id": data.org_unit_id}
 
 

@@ -129,3 +129,27 @@ async def test_sync_rollback_does_not_break_views(
 
     assert chart.status_code == 200, chart.text
     assert listing.status_code == 200, listing.text
+
+
+async def test_assign_is_committed(
+    client, db_session, organization, org_owner, org_member, admin_user, second_user,
+):
+    """Перенос в оргсхеме сохраняется в базе (27.10.2026 при переписывании
+    пропал commit: ответ 200, а отдел не записывался). В тестах приложение и
+    фикстуры делят сессию, поэтому проверяем после rollback — несохранённое
+    исчезнет."""
+    emp = Employee(user_id=second_user.id, org_id=organization.id, is_active=True)
+    unit = OrgUnit(org_id=organization.id, name="Маркетинг")
+    db_session.add_all([emp, unit])
+    await db_session.commit()
+    emp_id, unit_id, headers, org_id = emp.id, unit.id, _h(admin_user), organization.id
+
+    resp = await client.put(f"/api/org-units/assign/{emp_id}", json={"org_unit_id": unit_id},
+                            headers=headers, params={"org_id": org_id})
+    assert resp.status_code == 200, resp.text
+
+    await db_session.rollback()
+    saved = (await db_session.execute(
+        select(Employee.org_unit_id).where(Employee.id == emp_id)
+    )).scalar_one()
+    assert saved == unit_id
