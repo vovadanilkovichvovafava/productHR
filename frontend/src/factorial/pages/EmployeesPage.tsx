@@ -154,7 +154,7 @@ export default function EmployeesPage() {
         <input type="checkbox" className="rounded border-border" checked={allSelected} onChange={toggleAll} onClick={(e) => e.stopPropagation()} aria-label="Выбрать всех" />
       ),
       cell: ({ row }) => (
-        <input type="checkbox" className="rounded border-border" checked={selected.has(row.original.id)} onChange={() => toggle(row.original.id)} onClick={(e) => e.stopPropagation()} />
+        <input type="checkbox" className="rounded border-border" checked={selected.has(row.original.id)} onChange={() => toggle(row.original.id)} onClick={(e) => e.stopPropagation()} aria-label={`Выбрать: ${row.original.fullName}`} />
       ),
       size: 32,
     },

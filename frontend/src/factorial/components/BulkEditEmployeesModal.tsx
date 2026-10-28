@@ -103,7 +103,7 @@ export default function BulkEditEmployeesModal({
       >
         <h3>Массовое редактирование ({employees.length})</h3>
         <p className="fx-sub" style={{ marginBottom: 10 }}>
-          Отдел меняется отдельно — кнопкой «Переместить» (write-through в «Управление»).
+          Отдел меняется отдельно — кнопкой «Переместить» на панели внизу.
         </p>
         <div style={{ overflowX: 'auto' }}>
           <table className="w-full text-fx-sm" style={{ borderCollapse: 'collapse' }}>
@@ -124,18 +124,15 @@ export default function BulkEditEmployeesModal({
                   <td className="px-1 py-1">{textCell(e.id, 'last_name')}</td>
                   <td className="px-1 py-1">{textCell(e.id, 'first_name')}</td>
                   <td className="px-1 py-1">
-                    <select
-                      className="fx-select"
+                    {/* Поле с подсказками: закрытый список не давал задать новую должность. */}
+                    <input
+                      aria-label={`Должность — ${e.user_name || ''}`}
+                      className="fx-input"
                       style={{ padding: '6px 8px', minWidth: 150 }}
+                      list="fx-bulk-positions"
                       value={edits[e.id].position}
                       onChange={(ev) => setCell(e.id, 'position', ev.target.value)}
-                    >
-                      <option value="">— Не выбрана —</option>
-                      {positions.map((p) => (<option key={p} value={p}>{p}</option>))}
-                      {edits[e.id].position && !positions.includes(edits[e.id].position) && (
-                        <option value={edits[e.id].position}>{edits[e.id].position}</option>
-                      )}
-                    </select>
+                    />
                   </td>
                   <td className="px-1 py-1">{textCell(e.id, 'department_start_date', 'date')}</td>
                   <td className="px-1 py-1">
@@ -152,6 +149,9 @@ export default function BulkEditEmployeesModal({
               ))}
             </tbody>
           </table>
+          <datalist id="fx-bulk-positions">
+            {positions.map((p) => (<option key={p} value={p} />))}
+          </datalist>
         </div>
         {err && <div style={{ color: '#B91C1C', fontSize: 13, marginTop: 8 }}>{err}</div>}
         <div className="fx-modal-actions">

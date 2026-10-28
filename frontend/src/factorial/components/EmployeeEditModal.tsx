@@ -146,11 +146,20 @@ export default function EmployeeEditModal({
               <>
                 <div className="fx-field">
                   <label>Должность</label>
-                  <select className="fx-select" value={form.position} onChange={(e) => set('position', e.target.value)}>
-                    <option value="">— Не выбрана —</option>
-                    {positions.map((p) => (<option key={p} value={p}>{p}</option>))}
-                    {form.position && !positions.includes(form.position) && <option value={form.position}>{form.position}</option>}
-                  </select>
+                  {/* Поле с подсказками, а не закрытый список: список брался из должностей,
+                      уже записанных у сотрудников, и в новой организации задать
+                      первую должность было нельзя вовсе (28.10.2026). */}
+                  <input
+                    aria-label="Должность"
+                    className="fx-input"
+                    list="fx-positions"
+                    value={form.position}
+                    onChange={(e) => set('position', e.target.value)}
+                    placeholder="Выберите или впишите должность"
+                  />
+                  <datalist id="fx-positions">
+                    {positions.map((p) => (<option key={p} value={p} />))}
+                  </datalist>
                 </div>
                 <div className="fx-field">
                   <label>Дата начала работы</label>
@@ -162,18 +171,18 @@ export default function EmployeeEditModal({
             {showPersonal && (
               <>
                 <div className="fx-field" style={{ display: 'flex', gap: 12 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}><label>Фамилия</label><input className="fx-input" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} /></div>
-                  <div style={{ flex: 1, minWidth: 0 }}><label>Имя</label><input className="fx-input" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} /></div>
-                  <div style={{ flex: 1, minWidth: 0 }}><label>Отчество</label><input className="fx-input" value={form.middle_name} onChange={(e) => set('middle_name', e.target.value)} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}><label>Фамилия</label><input aria-label="Фамилия" className="fx-input" value={form.last_name} onChange={(e) => set('last_name', e.target.value)} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}><label>Имя</label><input aria-label="Имя" className="fx-input" value={form.first_name} onChange={(e) => set('first_name', e.target.value)} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}><label>Отчество</label><input aria-label="Отчество" className="fx-input" value={form.middle_name} onChange={(e) => set('middle_name', e.target.value)} /></div>
                 </div>
                 <div className="fx-field" style={{ display: 'flex', gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <label>Телефон</label>
-                    <input className="fx-input" value={form.phone} onChange={(e) => set('phone', formatPhone(e.target.value))} placeholder="+7 (___) ___-__-__" inputMode="tel" />
+                    <input aria-label="Телефон" className="fx-input" value={form.phone} onChange={(e) => set('phone', formatPhone(e.target.value))} placeholder="+7 (___) ___-__-__" inputMode="tel" />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <label>Telegram</label>
-                    <input className="fx-input" value={form.telegram_username} onChange={(e) => set('telegram_username', e.target.value)} />
+                    <input aria-label="Telegram" className="fx-input" value={form.telegram_username} onChange={(e) => set('telegram_username', e.target.value)} />
                   </div>
                 </div>
 
@@ -188,17 +197,17 @@ export default function EmployeeEditModal({
                   <>
                     <div className="fx-field" style={{ display: 'flex', gap: 12 }}>
                       <div style={{ flex: 1, minWidth: 0 }}><label>Дата рождения</label><DatePickerFactorial value={form.birth_date} onChange={(v) => set('birth_date', v)} /></div>
-                      <div style={{ flex: 1, minWidth: 0 }}><label>Паспорт №</label><input className="fx-input" value={form.passport_number} onChange={(e) => set('passport_number', e.target.value)} /></div>
+                      <div style={{ flex: 1, minWidth: 0 }}><label>Паспорт №</label><input aria-label="Паспорт №" className="fx-input" value={form.passport_number} onChange={(e) => set('passport_number', e.target.value)} /></div>
                     </div>
                     <div className="fx-field" style={{ display: 'flex', gap: 12 }}>
-                      <div style={{ flex: 2, minWidth: 0 }}><label>Кем выдан</label><input className="fx-input" value={form.passport_issued_by} onChange={(e) => set('passport_issued_by', e.target.value)} /></div>
+                      <div style={{ flex: 2, minWidth: 0 }}><label>Кем выдан</label><input aria-label="Кем выдан" className="fx-input" value={form.passport_issued_by} onChange={(e) => set('passport_issued_by', e.target.value)} /></div>
                       <div style={{ flex: 1, minWidth: 0 }}><label>Дата выдачи</label><DatePickerFactorial value={form.passport_issued} onChange={(v) => set('passport_issued', v)} /></div>
                     </div>
-                    <div className="fx-field"><label>Адрес</label><input className="fx-input" value={form.address} onChange={(e) => set('address', e.target.value)} /></div>
+                    <div className="fx-field"><label>Адрес</label><input aria-label="Адрес" className="fx-input" value={form.address} onChange={(e) => set('address', e.target.value)} /></div>
                     <div className="fx-field" style={{ display: 'flex', gap: 12 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <label>Способ выплаты</label>
-                        <select className="fx-select" value={form.payment_method} onChange={(e) => set('payment_method', e.target.value)}>
+                        <select aria-label="Способ выплаты" className="fx-select" value={form.payment_method} onChange={(e) => set('payment_method', e.target.value)}>
                           <option value="">— Не выбран —</option>
                           <option value="card">Карта</option>
                           <option value="crypto">Криптокошелёк</option>
@@ -208,12 +217,12 @@ export default function EmployeeEditModal({
                       </div>
                       <div style={{ flex: 2, minWidth: 0 }}>
                         <label>Реквизиты</label>
-                        <input className="fx-input" value={form.payment_details} onChange={(e) => set('payment_details', e.target.value)} placeholder={PAY_PLACEHOLDER[form.payment_method] || 'Номер карты / адрес кошелька / реквизиты счёта'} />
+                        <input aria-label="Реквизиты" className="fx-input" value={form.payment_details} onChange={(e) => set('payment_details', e.target.value)} placeholder={PAY_PLACEHOLDER[form.payment_method] || 'Номер карты / адрес кошелька / реквизиты счёта'} />
                       </div>
                     </div>
                     <div className="fx-field" style={{ display: 'flex', gap: 12 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}><label>Экстренный контакт — имя</label><input className="fx-input" value={form.emergency_contact_name} onChange={(e) => set('emergency_contact_name', e.target.value)} /></div>
-                      <div style={{ flex: 1, minWidth: 0 }}><label>Экстренный контакт — телефон</label><input className="fx-input" value={form.emergency_contact_phone} onChange={(e) => set('emergency_contact_phone', formatPhone(e.target.value))} inputMode="tel" /></div>
+                      <div style={{ flex: 1, minWidth: 0 }}><label>Экстренный контакт — имя</label><input aria-label="Экстренный контакт — имя" className="fx-input" value={form.emergency_contact_name} onChange={(e) => set('emergency_contact_name', e.target.value)} /></div>
+                      <div style={{ flex: 1, minWidth: 0 }}><label>Экстренный контакт — телефон</label><input aria-label="Экстренный контакт — телефон" className="fx-input" value={form.emergency_contact_phone} onChange={(e) => set('emergency_contact_phone', formatPhone(e.target.value))} inputMode="tel" /></div>
                     </div>
                   </>
                 )}
