@@ -75,21 +75,25 @@ async def get_org_chart(
     current_user: User = Depends(get_current_user),
 ):
     from .employees import _is_admin_or_owner, sync_org_employees, sync_org_departments
+    # Номер — до синхронизации: её откат (две вкладки синхронизируют разом →
+    # IntegrityError → rollback) просрочивает объекты сессии, и org.id после
+    # него грузился лениво — MissingGreenlet и 500.
+    org_id = org.id
     # Синхронизация ПИШЕТ в базу — запускаем её только у админа. Раньше любой
     # участник (и наблюдатель) своим просмотром создавал записи и юниты.
-    if await _is_admin_or_owner(current_user, org.id, db):
+    if await _is_admin_or_owner(current_user, org_id, db):
         try:
-            await sync_org_employees(org.id, db)
-            await sync_org_departments(org.id, db)
+            await sync_org_employees(org_id, db)
+            await sync_org_departments(org_id, db)
         except Exception:
-            logger.exception("ORG_SYNC failed for org=%s", org.id)
+            logger.exception("ORG_SYNC failed for org=%s", org_id)
             await db.rollback()
     units = (await db.execute(
-        select(OrgUnit).where(OrgUnit.org_id == org.id).order_by(OrgUnit.sort_order, OrgUnit.id)
+        select(OrgUnit).where(OrgUnit.org_id == org_id).order_by(OrgUnit.sort_order, OrgUnit.id)
     )).scalars().all()
     rows = (await db.execute(
         select(Employee, User).join(User, Employee.user_id == User.id)
-        .where(Employee.org_id == org.id, Employee.is_active == True)  # noqa: E712
+        .where(Employee.org_id == org_id, Employee.is_active == True)  # noqa: E712
     )).all()
     by_unit: dict = {}
     unassigned: List[EmployeeMini] = []

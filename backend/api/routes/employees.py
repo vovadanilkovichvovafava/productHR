@@ -521,6 +521,8 @@ async def sync_org_employees(org_id: int, db: AsyncSession) -> int:
         try:
             await db.commit()
         except Exception:
+            # Обычно — соседний запрос уже завёл эти записи (unique user_id).
+            logger.info("EMPLOYEE_SYNC: записи уже заведены параллельным запросом (org=%s)", org_id)
             await db.rollback()
     return created
 
@@ -610,19 +612,20 @@ async def list_employees(
 
     # Наблюдатель (сторонний отдел с флагом поверх прав админа) видит список
     # без паспорта, адреса и реквизитов и своим просмотром ничего не пишет.
-    observer = await _is_observer(current_user, org.id, db)
+    org_id = org.id  # до синхронизации: её rollback просрочивает org (см. org_units)
+    observer = await _is_observer(current_user, org_id, db)
     if not observer:
         try:
-            await sync_org_employees(org.id, db)
-            await sync_org_departments(org.id, db)
+            await sync_org_employees(org_id, db)
+            await sync_org_departments(org_id, db)
         except Exception:
-            logger.exception("EMPLOYEE_SYNC failed for org=%s", org.id)
+            logger.exception("EMPLOYEE_SYNC failed for org=%s", org_id)
             await db.rollback()
 
     query = (
         select(Employee)
         .options(selectinload(Employee.user), selectinload(Employee.department))
-        .where(Employee.org_id == org.id)
+        .where(Employee.org_id == org_id)
     )
     if active_only:
         query = query.where(Employee.is_active == True)

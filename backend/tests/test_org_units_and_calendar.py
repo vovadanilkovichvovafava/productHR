@@ -107,3 +107,25 @@ async def test_calendar_is_scoped(
 
     assert resp.status_code == 200
     assert len(resp.json()) == 1  # только своя заявка, чужого больничного не видно
+
+
+async def test_sync_rollback_does_not_break_views(
+    client, db_session, organization, org_owner, admin_user, monkeypatch,
+):
+    """Две вкладки синхронизируют разом → IntegrityError → rollback, который
+    просрочивает объекты сессии; org.id после него грузился лениво → 500."""
+    import api.routes.employees as employees_routes
+
+    async def conflicting_sync(org_id, db):
+        await db.rollback()  # как после IntegrityError у параллельного запроса
+        return 1
+
+    monkeypatch.setattr(employees_routes, "sync_org_employees", conflicting_sync)
+    # В тестах приложение и фикстуры делят одну сессию: откат просрочит и их.
+    headers, org_id = _h(admin_user), organization.id
+
+    chart = await client.get("/api/org-units", headers=headers, params={"org_id": org_id})
+    listing = await client.get("/api/employees", headers=headers)
+
+    assert chart.status_code == 200, chart.text
+    assert listing.status_code == 200, listing.text
