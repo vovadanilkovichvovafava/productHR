@@ -72,3 +72,44 @@ async def test_chunks_assemble_and_restore_starts(client, enabled):
 async def test_chunk_before_start_rejected(client, enabled):
     r = await client.put("/api/dump-import/chunk?offset=0", content=b"x", headers={"X-Import-Token": TOKEN})
     assert r.status_code == 409
+
+
+async def test_delta_defaults_to_dry_run(client, monkeypatch, enabled):
+    """Пакет изменений (30.10.2026): без явного dry_run=false ничего не коммитится."""
+    import asyncio
+    import gzip
+    import json
+
+    from api.services import hr_delta
+
+    seen = []
+
+    def fake_apply(dsn, bundle, dry_run):
+        seen.append((bundle, dry_run))
+        return {"dry_run": dry_run, "steps": []}
+
+    monkeypatch.setattr(hr_delta, "apply_delta", fake_apply)
+    monkeypatch.setattr(dump_import, "get_sync_database_url", lambda: "postgresql://x/y")
+    h = {"X-Import-Token": TOKEN}
+    payload = gzip.compress(json.dumps({"version": 1, "steps": []}).encode())
+    for dry in (None, False):
+        assert (await client.post("/api/dump-import/start", headers=h)).status_code == 200
+        assert (await client.put("/api/dump-import/chunk?offset=0", content=payload, headers=h)).status_code == 200
+        body = {"size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        if dry is not None:
+            body["dry_run"] = dry
+        r = await client.post("/api/dump-import/finish-delta", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            st = (await client.get("/api/dump-import/status", headers=h)).json()
+            if st["stage"] != "applying":
+                break
+        assert st["stage"] == ("delta_checked" if dry is None else "delta_applied"), st
+    assert [d for _, d in seen] == [True, False]
+
+
+async def test_delta_closed_without_token(client, monkeypatch):
+    monkeypatch.delenv("IMPORT_DUMP_TOKEN", raising=False)
+    r = await client.post("/api/dump-import/finish-delta", json={"size": 1, "sha256": "0" * 64})
+    assert r.status_code == 404

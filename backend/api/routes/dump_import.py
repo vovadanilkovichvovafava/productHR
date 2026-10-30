@@ -70,7 +70,7 @@ def _public_state() -> dict:
 async def start_upload(request: Request):
     """Начать заново: стереть принятые части и прошлый итог."""
     _check_token(request)
-    if _state["stage"] == "restoring":
+    if _state["stage"] in ("restoring", "applying"):
         raise HTTPException(status_code=409, detail="Восстановление уже идёт")
     work = _work_dir()
     work.mkdir(parents=True, exist_ok=True)
@@ -187,6 +187,51 @@ async def finish_upload(request: Request, body: FinishBody):
     _state.update(stage="restoring", started_at=time.time())
     logger.warning("DUMP_IMPORT restore: %s байт, хеш сошёлся, запускаю pg_restore --clean", size)
     asyncio.create_task(_run_restore(path))
+    return _public_state()
+
+
+class FinishDeltaBody(FinishBody):
+    dry_run: bool = True
+
+
+async def _run_delta(path: Path, dry_run: bool) -> None:
+    """Пакет изменений (gzip JSON) → services/hr_delta.apply_delta одной транзакцией."""
+    import gzip
+    import json
+
+    from ..services.hr_delta import apply_delta
+
+    def work() -> dict:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            bundle = json.load(f)
+        return apply_delta(get_sync_database_url(), bundle, dry_run)
+
+    try:
+        report = await asyncio.to_thread(work)
+        _state.update(stage="delta_checked" if dry_run else "delta_applied", report=report, returncode=0)
+    except Exception as e:
+        logger.exception("HR_DELTA failed")
+        _state.update(stage="failed", returncode=-1, stderr_tail=[f"{type(e).__name__}: {e}"[:2000]])
+    _state["finished_at"] = time.time()
+    path.unlink(missing_ok=True)
+    logger.warning("HR_DELTA %s", _state["stage"])
+
+
+@router.post("/finish-delta")
+async def finish_delta(request: Request, body: FinishDeltaBody):
+    """Пакет изменений из Энцеладуса вместо дампа (30.10.2026). По умолчанию dry_run."""
+    _check_token(request)
+    if _state["stage"] != "receiving":
+        raise HTTPException(status_code=409, detail=f"Сейчас этап «{_state['stage']}»")
+    path = _dump_path()
+    if not path.exists() or path.stat().st_size != body.size:
+        raise HTTPException(status_code=400, detail="Размер не совпал или части не получены")
+    digest = await asyncio.to_thread(_file_sha256, path)
+    if digest != body.sha256.lower():
+        raise HTTPException(status_code=400, detail="Хеш не совпал — файл собран с ошибкой, начните заново")
+    _state.update(stage="applying", started_at=time.time(), report=None)
+    logger.warning("HR_DELTA start: %s байт, dry_run=%s", body.size, body.dry_run)
+    asyncio.create_task(_run_delta(path, body.dry_run))
     return _public_state()
 
 

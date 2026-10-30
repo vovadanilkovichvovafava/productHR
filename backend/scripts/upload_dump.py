@@ -6,6 +6,10 @@
     python3 upload_dump.py --url https://<бэкенд> --dump ~/Downloads/x.dump \\
         --token-file ~/Downloads/newhr-import-token.txt
 
+С --delta вместо дампа уходит пакет изменений (gzip JSON, см.
+api/services/hr_delta.py): по умолчанию это проверка с откатом (dry_run), с
+--apply — применение. Отчёт по шагам печатается в конце.
+
 Токен — то же значение, что в переменной IMPORT_DUMP_TOKEN у бэкенда. Части
 по 20 МБ (ниже лимита Cloudflare в 100 МБ на запрос), каждая с повтором и
 сверкой хеша. Восстановление ЗАМЕНЯЕТ базу бэкенда содержимым дампа.
@@ -42,6 +46,8 @@ def main() -> int:
     ap.add_argument("--dump", required=True)
     ap.add_argument("--token-file", required=True)
     ap.add_argument("--chunk-mb", type=int, default=CHUNK // (1024 * 1024))
+    ap.add_argument("--delta", action="store_true", help="пакет изменений вместо дампа")
+    ap.add_argument("--apply", action="store_true", help="с --delta: применить, а не только проверить")
     args = ap.parse_args()
 
     token = open(os.path.expanduser(args.token_file)).read().strip()
@@ -79,8 +85,12 @@ def main() -> int:
             print(f"\rОтправлено {offset * 100 // size}% ({offset / 1024 / 1024:.0f} МБ, {speed:.1f} МБ/с)", end="", flush=True)
     print("\nВсё отправлено, сервер сверяет хеш и запускает восстановление…", flush=True)
 
+    finish = "/finish-delta" if args.delta else "/finish"
+    body = {"size": size, "sha256": digest}
+    if args.delta:
+        body["dry_run"] = not args.apply
     try:
-        call(args.url, token, "POST", "/finish", json_body={"size": size, "sha256": digest})
+        call(args.url, token, "POST", finish, json_body=body)
     except urllib.error.HTTPError as e:
         print(f"Сервер отказал: {e.code} {e.read().decode(errors='replace')}", file=sys.stderr)
         return 1
@@ -92,13 +102,15 @@ def main() -> int:
         except urllib.error.URLError as e:
             print(f"  (статус не получен: {e}, жду)", flush=True)
             continue
-        if st["stage"] == "restoring":
+        if st["stage"] in ("restoring", "applying"):
             print(f"  восстанавливается… строк с ошибками пока: {st['errors']}", flush=True)
             continue
         print(f"Итог: {st['stage']}, код {st['returncode']}, строк с ошибками {st['errors']}")
         for line in st.get("stderr_tail") or []:
             print("   ", line)
-        return 0 if st["stage"] in ("done", "done_with_errors") else 2
+        if st.get("report"):
+            print(json.dumps(st["report"], ensure_ascii=False, indent=1))
+        return 0 if st["stage"] in ("done", "done_with_errors", "delta_checked", "delta_applied") else 2
 
 
 if __name__ == "__main__":
