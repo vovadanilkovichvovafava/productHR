@@ -37,10 +37,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Актуальный прод-сервер один и тот же для всех. У старых пользователей в
   // chrome.storage мог остаться прежний адрес и «залипал» в поле входа —
   // поэтому всегда подставляем канонический сервер, кроме локальной разработки.
-  // Канонический домен — enceladus.site (тот же бэк, что старый saturn.ac-сабдомен;
-  // старый оставлен в host_permissions как фолбэк для уже залогиненных).
-  // 24.09.2026: DNS починили, вернули канон (с 10.09 временно был saturn.ac).
-  const DEFAULT_SERVER_URL = 'https://enceladus.site';
+  // Канонический домен — staffwise.club (30.10.2026: HR вынесен из Enceladus,
+  // своя база и свой вход; токен enceladus.site здесь недействителен).
+  // Технический адрес Saturn оставлен в host_permissions для уже залогиненных.
+  const DEFAULT_SERVER_URL = 'https://staffwise.club';
   const storedServer = stored.serverUrl || '';
   const isLocalDev = /localhost|127\.0\.0\.1/.test(storedServer);
   serverUrl = isLocalDev ? storedServer : DEFAULT_SERVER_URL;

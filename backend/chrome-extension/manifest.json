@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Enceladus Magic Button",
-  "version": "1.9.2",
+  "version": "2.0.0",
   "description": "Добавляйте кандидатов в Enceladus одним кликом",
   "permissions": ["activeTab", "storage", "scripting", "cookies", "alarms"],
   "host_permissions": [
@@ -11,9 +11,8 @@
     "https://*.rabota.by/*",
     "https://career.habr.com/*",
     "https://www.linkedin.com/*",
-    "https://*.railway.app/*",
-    "https://enceladus.site/*",
-    "https://*.enceladus.site/*",
+    "https://staffwise.club/*",
+    "https://*.staffwise.club/*",
     "https://*.saturn.ac/*",
     "http://localhost:8000/*"
   ],
