@@ -21,7 +21,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from ..models.database import Entity
 from .similarity import (
     generate_name_variants, _name_word_variants, fold_yo,
-    transliterate_ru_to_en, transliterate_en_to_ru,
+    transliterate_ru_to_en, transliterate_en_to_ru, TRANSLIT_RU_EN_PASSPORT,
 )
 
 # Доступно ли расширение pg_trgm (нужно для оператора %> и word_similarity).
@@ -206,6 +206,8 @@ def _translit_ilike_patterns(q: str) -> List[str]:
     for t in list(terms):
         if re.search(r"[а-яёА-ЯЁ]", t):
             terms.add(transliterate_ru_to_en(t))
+            # как в загранпаспорте: «зюзин» → «ziuzin», «арсений» → «arsenii»
+            terms.add(transliterate_ru_to_en(t, TRANSLIT_RU_EN_PASSPORT))
         if re.search(r"[a-zA-Z]", t):
             terms.add(transliterate_en_to_ru(t))
     sw = switch_layout(q)  # раскладка: «bdfy» → «иван»

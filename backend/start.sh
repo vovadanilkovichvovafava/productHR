@@ -948,17 +948,20 @@ async def ensure_shadow_columns():
     # Плюс пересчёт строк с Ё: build_search_name теперь кладёт в блоб ещё и свёрнутую
     # форму («дёмин»→«демин»), а у старых записей её нет. Пересчёт идемпотентен, а
     # имён с Ё — единицы, так что гонять это на каждом старте дёшево.
+    # С 03.11.2026 сверяются ВСЕ строки: блоб меняется вместе с правилами
+    # (паспортная транслитерация «Arsenii Ziuzin» = «Арсений Зюзин»), а строки,
+    # залитые в обход ORM (дамп, дозаливка), листенер не видел. Пишутся только
+    # разошедшиеся — на ~8 тыс. кандидатов это доли секунды.
     async with engine.begin() as sn_conn:
         from api.services.search_index import build_search_name as _bsn
         sn_rows = (await sn_conn.execute(text(
-            \"SELECT id, name, position, company, tags FROM entities \"
-            \"WHERE search_name IS NULL \"
-            \"   OR name ILIKE '%ё%' OR position ILIKE '%ё%' OR company ILIKE '%ё%'\"
+            \"SELECT id, name, position, company, tags, search_name FROM entities\"
         ))).fetchall()
-        sn_params = [
-            {'sv': _bsn(r.name, r.position, r.company, r.tags), 'id': r.id}
-            for r in sn_rows
-        ]
+        sn_params = []
+        for r in sn_rows:
+            sv = _bsn(r.name, r.position, r.company, r.tags)
+            if sv != r.search_name:
+                sn_params.append({'sv': sv, 'id': r.id})
         if sn_params:
             await sn_conn.execute(text(\"UPDATE entities SET search_name = :sv WHERE id = :id\"), sn_params)
         print(f\"Backfilled search_name on {len(sn_params)} entities\")

@@ -27,6 +27,16 @@ TRANSLIT_RU_EN = {
     'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'
 }
 
+# Паспортная транслитерация (загранпаспорт, ICAO Doc 9303 / приказ МВД 2014):
+# й → i, ю → iu, я → ia, ё → e, ъ → ie. Так записаны имена в LinkedIn и в
+# резюме на английском — «Arsenii Ziuzin» = «Арсений Зюзин». Обычная таблица
+# выше даёт «arseniy zyuzin», и поиск «зюзин» не находил «Ziuzin» (Эльвира,
+# 03.11.2026). Её вариант добавляется к обычному, а не заменяет его.
+TRANSLIT_RU_EN_PASSPORT = {
+    **TRANSLIT_RU_EN,
+    'ё': 'e', 'й': 'i', 'ъ': 'ie', 'ю': 'iu', 'я': 'ia',
+}
+
 # Альтернативные варианты транслитерации
 TRANSLIT_ALTERNATIVES = {
     'а': ['a'],
@@ -128,16 +138,22 @@ class SoftScore:
         return self.confidence >= SOFT_THRESHOLD and self.components >= SOFT_MIN_COMPONENTS
 
 
-def transliterate_ru_to_en(text: str) -> str:
-    """Транслитерация русского текста в английский."""
+def transliterate_ru_to_en(text: str, table: dict = TRANSLIT_RU_EN) -> str:
+    """Транслитерация русского текста в английский (по умолчанию — обычная таблица,
+    `TRANSLIT_RU_EN_PASSPORT` — как в загранпаспорте)."""
     result = []
     text_lower = text.lower()
     for char in text_lower:
-        if char in TRANSLIT_RU_EN:
-            result.append(TRANSLIT_RU_EN[char])
+        if char in table:
+            result.append(table[char])
         else:
             result.append(char)
     return ''.join(result)
+
+
+def _ru_to_en_variants(text: str) -> Set[str]:
+    """Латинские записи русского текста: обычная и паспортная."""
+    return {transliterate_ru_to_en(text), transliterate_ru_to_en(text, TRANSLIT_RU_EN_PASSPORT)}
 
 
 def transliterate_en_to_ru(text: str) -> str:
@@ -222,16 +238,13 @@ def generate_name_variants(name: str) -> Set[str]:
     has_latin = bool(re.search(r'[a-z]', name_lower))
 
     if has_cyrillic:
-        # Русское имя -> генерируем английские варианты
-        en_variant = transliterate_ru_to_en(name_lower)
-        variants.add(en_variant)
+        # Русское имя -> английские варианты (обычный и паспортный)
+        variants |= _ru_to_en_variants(name_lower)
 
-        # Генерируем альтернативные транслитерации для каждой части имени
+        # И для каждой части имени
         parts = name_lower.split()
         for part in parts:
-            # Стандартная транслитерация части
-            en_part = transliterate_ru_to_en(part)
-            variants.add(en_part)
+            variants |= _ru_to_en_variants(part)
 
     if has_latin:
         # Английское имя -> генерируем русские варианты
@@ -265,7 +278,7 @@ def _name_word_variants(word: str) -> Set[str]:
     w = fold_homoglyphs(word or "").strip("-_.,").lower()
     out = {w}
     if re.search(r'[а-яё]', w):
-        out.add(transliterate_ru_to_en(w))
+        out |= _ru_to_en_variants(w)
     if re.search(r'[a-z]', w):
         out.add(transliterate_en_to_ru(w))
     # Свёртка поверх готового набора — так «дёмин»/«dyomin» и «демин»/«demin»
