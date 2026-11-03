@@ -17,7 +17,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from . import texts
 from .messenger import Buttons, SendError
-from .runtime import get_service
+from .runtime import get_handoff, get_service
 from .service import TOKEN_PREFIX
 
 logger = logging.getLogger("hr-analyzer.onboarding")
@@ -54,6 +54,24 @@ async def on_start(message: Message, payload: str) -> None:
         return
     if not await service.handle_start(message.from_user.id, payload):
         await message.answer(texts.START_UNKNOWN)
+
+
+async def on_plain_start(message: Message) -> bool:
+    """`/start` без ссылки от HR-аккаунта из ONBOARDING_HANDOFF_ACCOUNTS — подключаем его к передаче."""
+    try:
+        handoff = await get_handoff()
+        if handoff is None or message.from_user is None:
+            return False
+        if not await handoff.register_account(message.from_user.id, message.from_user.username):
+            return False
+    except Exception:
+        logger.exception("ONBOARDING handoff register")
+        return False
+    await message.answer(
+        "Аккаунт подключён: сюда будут приходить новые сотрудники на онбординг (#onboarding_new) "
+        "и этапы их испытательного срока (#onboarding_stage)."
+    )
+    return True
 
 
 async def on_private_text(message: Message) -> bool:

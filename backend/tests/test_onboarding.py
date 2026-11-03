@@ -118,6 +118,24 @@ def test_schedule_practice_and_onboarding_dates():
     assert by_kind["week"] == date(2026, 11, 17)
     assert by_kind["month3"] == date(2027, 1, 29)
     assert sch.add_months(date(2026, 1, 31), 1) == date(2026, 2, 28)
+    assert by_kind["month1"] == date(2026, 12, 14)  # 12.12 — суббота → понедельник
+
+
+def test_working_hours_window():
+    def local(dt):
+        return sch.utc_to_local(dt, TZ).replace(tzinfo=None)
+
+    def shift(y, m, d, hh, mm=0):
+        return local(sch.within_working_hours(sch.local_to_utc(datetime(y, m, d, hh, mm), TZ), TZ))
+
+    assert shift(2026, 11, 4, 12) == datetime(2026, 11, 4, 12)    # среда, день — как есть
+    assert shift(2026, 11, 4, 18) == datetime(2026, 11, 4, 18)    # ровно 18:00 — ещё можно
+    assert shift(2026, 11, 4, 18, 1) == datetime(2026, 11, 5, 10)  # вечер → утро
+    assert shift(2026, 11, 4, 7) == datetime(2026, 11, 4, 10)     # рано → 10:00
+    assert shift(2026, 11, 6, 23) == datetime(2026, 11, 9, 10)    # пятница ночь → понедельник
+    assert shift(2026, 11, 7, 12) == datetime(2026, 11, 9, 10)    # суббота → понедельник
+    utc = sch.local_to_utc(datetime(2026, 11, 7, 12), TZ)
+    assert sch.within_working_hours(utc, TZ, skip_weekends=False) == utc
 
 
 # -------------------------------------------------------------------- сценарии
@@ -140,7 +158,10 @@ async def test_retries_then_hr_signal(service, messenger, clock):
     for _ in range(3):
         clock.advance(hours=2, minutes=1)
         await service.run_due_jobs()
-    assert len(messenger.to(CANDIDATE_TG)) == 3  # первое + 2 повтора
+    assert len(messenger.to(CANDIDATE_TG)) == 3  # первое + 2 повтора (14:01, 16:02 МСК)
+    assert messenger.to(HR_TG) == []  # сигнал выпал на 18:03 — после окна 10–18, ждёт утра
+    clock.now = datetime(2026, 11, 4, 7, 1)  # 04.11 10:01 МСК
+    await service.run_due_jobs()
     [signal] = messenger.to(HR_TG)
     assert "не ответил(а) по практике на 04.11" in signal.text
 
@@ -204,7 +225,10 @@ async def test_transfer_survey_and_onboarding(service, messenger, clock):
     await service.answer_survey(CANDIDATE_TG, "practice", 0, 2)  # «Многое осталось непонятным»
     assert "Многое осталось непонятным" in messenger.to(HR_TG)[-1].text
 
-    clock.now = datetime(2026, 12, 12, 7, 1)  # месяц 1, 10:01 МСК
+    clock.now = datetime(2026, 12, 12, 7, 1)  # месяц 1 — суббота 12.12: в выходной бот молчит
+    await service.run_due_jobs()
+    assert not any("Контрольная точка" in m.text for m in messenger.to(LEAD_TG))
+    clock.now = datetime(2026, 12, 14, 7, 1)  # понедельник 14.12, 10:01 МСК
     await service.run_due_jobs()
     assert "Контрольная точка: месяц Иван Петров" in messenger.to(LEAD_TG)[-1].text
 
@@ -434,6 +458,44 @@ async def test_api_probation_decision(client, service, org_owner, admin_token, p
     assert r.status_code == 200 and r.json()["probation_end_date"] == "2027-03-12"
     r = await client.post(url, json={"decision": "leaves", "reason": "Не подошёл темп"}, headers=auth_headers(admin_token))
     assert r.json()["status"] == "left" and r.json()["left_reason"] == "Не подошёл темп"
+
+
+async def test_api_wallets_for_accounting(client, service, org_owner, org_member, admin_token,
+                                          second_user, second_user_token, practice_entity):
+    r = await client.post(f"/api/onboarding/entities/{practice_entity.id}/case",
+                          json={"practice_start": "2026-11-05T10:00", "first_name": "Пётр"},
+                          headers=auth_headers(admin_token))
+    case_id = r.json()["id"]
+    async with service.sessions() as s:
+        token = (await s.get(OnboardingCase, case_id)).link_token
+    await service.handle_start(CANDIDATE_TG, token)
+    await service.handle_text(CANDIDATE_TG, "TRC20: TAccounting")
+    await service.set_status(case_id, CaseStatus.transferred, department="SEO", lead_name="Мария",
+                             department_start_date=date(2026, 11, 12))
+
+    accountant = auth_headers(second_user_token)  # участник орга без HR-роли
+    assert (await client.get("/api/onboarding/wallets", headers=accountant)).status_code == 403
+    assert (await client.post("/api/onboarding/wallet-access", json={"user_id": second_user.id},
+                              headers=accountant)).status_code == 403  # сам себе не выдаст
+
+    r = await client.post("/api/onboarding/wallet-access", json={"user_id": second_user.id},
+                          headers=auth_headers(admin_token))
+    assert r.status_code == 201
+    r = await client.get("/api/onboarding/wallets", headers=accountant)
+    assert r.status_code == 200
+    [row] = r.json()
+    assert row["full_name"] == "Пётр Иванов" and row["department"] == "SEO" and row["wallet"] == "TRC20: TAccounting"
+    assert set(row) == {"case_id", "entity_id", "full_name", "department", "lead_name", "status",
+                        "status_label", "wallet", "saved_at"}  # остальных данных кандидата бухгалтерии не видно
+    assert (await client.get(f"/api/onboarding/cases/{case_id}/wallet", headers=accountant)).status_code == 200
+    # карточка бота с опросами и сигналами бухгалтерии по-прежнему закрыта
+    assert (await client.get(f"/api/onboarding/entities/{practice_entity.id}/case", headers=accountant)).status_code == 403
+
+    listed = await client.get("/api/onboarding/wallet-access", headers=auth_headers(admin_token))
+    assert [u["user_id"] for u in listed.json()] == [second_user.id]
+    assert (await client.delete(f"/api/onboarding/wallet-access/{second_user.id}",
+                                headers=auth_headers(admin_token))).status_code == 204
+    assert (await client.get("/api/onboarding/wallets", headers=accountant)).status_code == 403
 
 
 async def test_api_disabled_is_503(client, org_owner, admin_token, practice_entity, monkeypatch):

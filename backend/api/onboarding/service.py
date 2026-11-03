@@ -109,7 +109,7 @@ class OnboardingService:
         async with self.sessions() as s:
             s.add(case)
             await s.flush()
-            self._add_jobs(s, case.id, sch.preboarding_jobs(now, start_utc, tz, self.settings.practice_days))
+            self._add_jobs(s, case.id, sch.preboarding_jobs(now, start_utc, tz, self.settings.practice_days, self.settings.skip_weekends))
             await s.commit()
         return case
 
@@ -142,8 +142,9 @@ class OnboardingService:
                 case.probation_end_date = sch.add_months(start, 3)
                 case.awaiting = None
                 await self._cancel(s, case.id, PREBOARDING_JOBS)
-                self._add_jobs(s, case.id, [("survey_reminder", self.clock() + timedelta(hours=24), {"kind": "practice"})])
-                self._add_jobs(s, case.id, sch.onboarding_jobs(start, case.timezone))
+                reminder = self._work_time(self.clock() + timedelta(hours=24), case)
+                self._add_jobs(s, case.id, [("survey_reminder", reminder, {"kind": "practice"})])
+                self._add_jobs(s, case.id, sch.onboarding_jobs(start, case.timezone, self.settings.skip_weekends))
             elif status is CaseStatus.failed:
                 case.awaiting = None
                 await self._cancel(s, case.id, PREBOARDING_JOBS)
@@ -192,9 +193,13 @@ class OnboardingService:
                 case.probation_end_date = new_end
                 await self._cancel_onboarding_kinds(s, case.id, {"month3", "checkpoint_m3", "probation_close"})
                 before_end = new_end - timedelta(days=14)
+                if self.settings.skip_weekends:
+                    before_end, new_end_day = sch.next_workday(before_end), sch.next_workday(new_end)
+                else:
+                    new_end_day = new_end
                 jobs: list[sch.Job] = [
                     ("staff_reminder", sch.at_local(before_end, sch.STAFF_HOUR, case.timezone), {"kind": "checkpoint_m3"}),
-                    ("staff_reminder", sch.at_local(new_end, sch.STAFF_HOUR, case.timezone), {"kind": "probation_close"}),
+                    ("staff_reminder", sch.at_local(new_end_day, sch.STAFF_HOUR, case.timezone), {"kind": "probation_close"}),
                 ]
                 if not await self._survey_done(s, case.id, "month3"):
                     jobs.append(("survey", sch.at_local(before_end, sch.SURVEY_HOUR, case.timezone), {"kind": "month3"}))
@@ -234,7 +239,7 @@ class OnboardingService:
             case.awaiting = "wallet"
             await self._cancel(s, case.id, {"invite_check"})
             interval = sch.retry_interval(now, case.practice_start_at, case.timezone)
-            self._add_jobs(s, case.id, [("first_retry", now + interval, {"attempt": 1})])
+            self._add_jobs(s, case.id, [("first_retry", self._work_time(now + interval, case), {"attempt": 1})])
             await s.commit()
         await self._send_candidate(
             case, texts.FIRST_MESSAGE.format(**self._ctx(case)), texts.SCRIPT_BUTTONS, "первое сообщение"
@@ -457,9 +462,9 @@ class OnboardingService:
         interval = sch.retry_interval(now, case.practice_start_at, case.timezone)
         attempt = payload.get("attempt", 1)
         if attempt < self.settings.first_retry_count:
-            next_job = ("first_retry", now + interval, {"attempt": attempt + 1})
+            next_job = ("first_retry", self._work_time(now + interval, case), {"attempt": attempt + 1})
         else:
-            next_job = ("first_no_answer", now + interval, {})
+            next_job = ("first_no_answer", self._work_time(now + interval, case), {})
         async with self.sessions() as s:
             self._add_jobs(s, case.id, [next_job])
             await s.commit()
@@ -511,7 +516,8 @@ class OnboardingService:
             case, texts.SURVEY_INTRO[kind].format(**self._ctx(case)), texts.survey_button(kind), "опрос"
         )
         async with self.sessions() as s:
-            self._add_jobs(s, case.id, [("survey_reminder", self.clock() + timedelta(hours=24), {"kind": kind})])
+            reminder = self._work_time(self.clock() + timedelta(hours=24), case)
+            self._add_jobs(s, case.id, [("survey_reminder", reminder, {"kind": kind})])
             await s.commit()
 
     async def _job_survey_reminder(self, case: OnboardingCase, payload: dict) -> None:
@@ -677,6 +683,9 @@ class OnboardingService:
             .order_by(OnboardingCase.id.desc())
             .limit(1)
         )
+
+    def _work_time(self, run_at: datetime, case: OnboardingCase) -> datetime:
+        return sch.within_working_hours(run_at, case.timezone, self.settings.skip_weekends)
 
     def _local_now(self, case: OnboardingCase) -> datetime:
         return sch.utc_to_local(self.clock(), case.timezone)

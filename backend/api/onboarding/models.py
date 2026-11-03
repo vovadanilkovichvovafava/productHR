@@ -7,7 +7,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 
 from api.models.database import Base
 
@@ -120,6 +120,20 @@ class Wallet(Base):
     created_at = Column(DateTime, default=_utcnow)
 
 
+class WalletAccess(Base):
+    """Кому, кроме owner/admin, открыты кошельки — бухгалтерия (встреча 30.10.2026: «отдельное
+    поле для бухгалтерии», «лид потерял кошелёк — запросил у HR»). Выдают owner/admin."""
+
+    __tablename__ = "onboarding_wallet_access"
+    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_onboarding_wallet_access"),)
+
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    granted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class Signal(Base):
     """Сигналы и напоминания для HR и лида — журнал для карточки и аналитики."""
 
@@ -131,3 +145,44 @@ class Signal(Base):
     text = Column(Text, nullable=False)
     delivered_to = Column(BigInteger, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
+
+
+# ------------------------------------------------- передача в автоспамер / AI-селлер
+# Голосовое Владимира 03.11.2026: своего бота-собеседника нет — переписку ведут HR-аккаунты
+# автоспамера и AI-селлера; productHR только передаёт им, кого и когда вести (handoff.py).
+
+
+class HandoffAccount(Base):
+    """HR-аккаунт, которому бот передаёт людей. Перечислены в ONBOARDING_HANDOFF_ACCOUNTS;
+    tg_id появляется, когда аккаунт один раз нажмёт Start у бота (иначе бот ему не напишет)."""
+
+    __tablename__ = "onboarding_handoff_accounts"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(64), nullable=False, unique=True)  # без @, в нижнем регистре
+    tg_id = Column(BigInteger, nullable=True)
+    linked_at = Column(DateTime, nullable=True)
+
+
+class Handoff(Base):
+    """Человек, переведённый в отдел, и где он в онбординге.
+
+    status: baseline — был в отделе до включения моста, не трогаем; waiting — не хватает
+    Telegram или даты выхода; active — ведётся, next_at — когда следующая пометка аккаунту;
+    done — все этапы переданы; stopped — уволен/ушёл, аккаунту отправлен «стоп».
+    """
+
+    __tablename__ = "onboarding_handoffs"
+
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    entity_id = Column(Integer, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, unique=True)
+    status = Column(String(16), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("onboarding_handoff_accounts.id", ondelete="SET NULL"), nullable=True)
+    first_day = Column(Date, nullable=True)
+    stage_index = Column(Integer, default=0, nullable=False)
+    next_at = Column(DateTime, nullable=True, index=True)
+    waiting_reason = Column(String(32), nullable=True)
+    notified_reason = Column(String(32), nullable=True)  # о чём HR уже сказали — не повторяем
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)

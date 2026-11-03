@@ -1384,8 +1384,33 @@ invitations,org_units}.py`, `entities/hire.py`. Ревью нашло захва
   `onboarding_jobs`; отмена напоминаний при смене статуса — `status='cancelled'`.
 - **Сигналы HR** — в личку ответственному HR (`User.telegram_id`), не вышло —
   в `ONBOARDING_HR_FALLBACK_CHAT_ID`; журнал `onboarding_signals`.
-- **Кошелёк** читают только owner/admin (`GET /cases/{id}/wallet`), маркер
-  `PII_ACCESS onboarding_wallet`. Маркеры: `ONBOARDING case=…`, `ONBOARDING jobs done=`.
+- **Кошельки** читают owner/admin и те, кому они выдали доступ
+  (`onboarding_wallet_access`; `POST/DELETE /api/onboarding/wallet-access` —
+  бухгалтерия, встреча Маши и Вовы 30.10.2026). Бухгалтерии — список
+  `GET /api/onboarding/wallets` (ФИО, отдел, лид, статус, кошелёк — и ничего
+  больше; карточка бота с опросами ей закрыта). Маркеры `PII_ACCESS
+  onboarding_wallet(s)`, `ONBOARDING wallet_access grant|revoke`.
+- **Рабочее окно** (`ONBOARDING_SKIP_WEEKENDS`, по умолчанию да): повторы,
+  напоминания об опросах и сигналы HR не уходят ночью и в выходные — переносятся
+  на 10:00 ближайшего рабочего дня (`schedule.within_working_hours`; 18:00 ровно
+  ещё можно). Опросы и напоминания онбординга, выпавшие на субботу/воскресенье,
+  — на понедельник в тот же час. Время из ТЗ (Loom 20:00, утро после Loom, за
+  день до старта) не двигается.
+- **Передача HR-аккаунтам автоспамера / AI-селлера** (`api/onboarding/handoff.py`;
+  голосовое Владимира 03.11.2026: «своего бота-собеседника не будет — переписку ведут
+  HR-аккаунты автоспамера и AI-селлера, productHR только передаёт, кого и когда»).
+  Включается `ONBOARDING_HANDOFF_ACCOUNTS` (@ники через запятую; каждый аккаунт один раз
+  жмёт Start у бота — хук в `cmd_start`). Воркер раз в 30 с: первый запуск помечает всех,
+  кто УЖЕ «Перешёл в отдел», как `baseline` (истории не пишем, отметка в
+  `data_migration_marks`); новые → проверка Telegram/телефона и даты «Выход в отдел»
+  (`department_transfer_date`), нет — один раз HR (создатель карточки / запасной чат);
+  в 10:00 первого рабочего дня `#onboarding_new` аккаунту с наименьшей нагрузкой, дальше
+  ему же `#onboarding_stage` (week, month1–3, probation_end), уход — `#onboarding_stop`.
+  НЕ встраивается в пути смены статуса — смотрит на `entities.status`, поэтому ловит
+  воронку, карточку и «Штат» одинаково. Кошелёк не передаётся. Формат для профиля
+  AI-селлера — `~/Desktop/Rabota/spam/HANDOFF_FORMAT.md`. Обзор для HR —
+  `GET /api/onboarding/handoffs`. Сторож — `tests/test_onboarding_handoff.py`.
+- Маркеры: `ONBOARDING case=…`, `ONBOARDING jobs done=`, `ONBOARDING handoff …`.
 - **Первый рабочий день** (чек-лист ТЗ, стр. 11–13): в день выхода в отдел
   10:00 — приветствие с материалами (`ONBOARDING_MATERIALS_URL`; кошелёк
   просим, только если его ещё нет), пинг лиду с пунктами звонка (календаря у

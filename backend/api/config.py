@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     onboarding_practice_days: int = Field(default=7, alias="ONBOARDING_PRACTICE_DAYS")
     # Благодарность не прошедшим практику от бота (ТЗ 7.3 — пока не решено)
     onboarding_send_thanks_on_fail: bool = Field(default=False, alias="ONBOARDING_SEND_THANKS_ON_FAIL")
+    # Не писать в выходные и вне 10:00–18:00 (кроме времени, которое ТЗ задаёт явно: Loom 20:00)
+    onboarding_skip_weekends: bool = Field(default=True, alias="ONBOARDING_SKIP_WEEKENDS")
+    # Передача новых сотрудников HR-аккаунтам автоспамера/AI-селлера (api/onboarding/handoff.py):
+    # @ники через запятую. Пусто — передача выключена. Каждый аккаунт один раз жмёт Start у бота.
+    onboarding_handoff_accounts: str = Field(default="", alias="ONBOARDING_HANDOFF_ACCOUNTS")
 
     # AI API Keys
     anthropic_api_key: str = Field(

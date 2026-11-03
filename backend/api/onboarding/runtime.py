@@ -14,6 +14,7 @@ from .service import OnboardingService
 logger = logging.getLogger("hr-analyzer.onboarding")
 
 _service: Optional[OnboardingService] = None
+_handoff = None  # HandoffService — передача людей HR-аккаунтам автоспамера/AI-селлера
 _lock = asyncio.Lock()
 
 
@@ -21,6 +22,36 @@ def enabled() -> bool:
     from api.config import settings
 
     return bool(settings.telegram_bot_token and settings.onboarding_wallet_key)
+
+
+def handoff_enabled() -> bool:
+    from api.config import settings
+
+    return bool(settings.telegram_bot_token and settings.onboarding_handoff_accounts.strip())
+
+
+async def get_handoff():
+    """HandoffService или None, если не задан TELEGRAM_BOT_TOKEN или ONBOARDING_HANDOFF_ACCOUNTS."""
+    global _handoff
+    if _handoff is not None or not handoff_enabled():
+        return _handoff
+    async with _lock:
+        if _handoff is None:
+            from api.bot import get_bot
+            from api.database import AsyncSessionLocal
+
+            from .handoff import HandoffService
+            from .service import utcnow
+            from .telegram import AiogramMessenger
+
+            _handoff = HandoffService(AsyncSessionLocal, AiogramMessenger(get_bot()), Settings.from_app(), utcnow)
+    return _handoff
+
+
+def set_handoff(handoff) -> None:
+    """Для тестов."""
+    global _handoff
+    _handoff = handoff
 
 
 async def get_service() -> Optional[OnboardingService]:
@@ -53,10 +84,10 @@ def set_service(service: Optional[OnboardingService]) -> None:
 
 async def run_worker(interval_seconds: float = 30) -> None:
     """Раз в interval_seconds выполняет созревшие задачи (повторы, Loom, опросы, напоминания)."""
-    if not enabled():
-        logger.info("ONBOARDING выключен: нет TELEGRAM_BOT_TOKEN или ONBOARDING_WALLET_KEY")
+    if not enabled() and not handoff_enabled():
+        logger.info("ONBOARDING выключен: нет TELEGRAM_BOT_TOKEN или ONBOARDING_WALLET_KEY / ONBOARDING_HANDOFF_ACCOUNTS")
         return
-    logger.info("ONBOARDING воркер запущен")
+    logger.info("ONBOARDING воркер запущен (бот: %s, передача аккаунтам: %s)", enabled(), handoff_enabled())
     while True:
         try:
             service = await get_service()
@@ -68,4 +99,14 @@ async def run_worker(interval_seconds: float = 30) -> None:
             raise
         except Exception:
             logger.exception("ONBOARDING воркер")
+        try:
+            handoff = await get_handoff()
+            if handoff is not None:
+                sent = await handoff.tick()
+                if sent:
+                    logger.info("ONBOARDING handoff sent=%s", sent)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("ONBOARDING передача")
         await asyncio.sleep(interval_seconds)

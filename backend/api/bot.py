@@ -2773,6 +2773,10 @@ async def cmd_start(message: types.Message):
             await handle_bind_token(message, payload)
             return
 
+    # HR-аккаунт автоспамера/AI-селлера подключается к передаче новых сотрудников
+    if await onboarding_tg.on_plain_start(message):
+        return
+
     # Build access-aware menu
     async with async_session() as session:
         access = await _get_user_access(session, message.from_user.id)

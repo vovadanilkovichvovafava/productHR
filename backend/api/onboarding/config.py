@@ -2,6 +2,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+def parse_accounts(raw: str) -> tuple[str, ...]:
+    """«@HR_one, hr_two» → ("hr_one", "hr_two")."""
+    return tuple(dict.fromkeys(p.strip().lstrip("@").lower() for p in (raw or "").split(",") if p.strip()))
+
+
 @dataclass(frozen=True)
 class Settings:
     bot_username: str = ""
@@ -15,6 +20,8 @@ class Settings:
     practice_days: int = 7
     first_retry_count: int = 2
     send_thanks_on_fail: bool = False
+    skip_weekends: bool = True
+    handoff_accounts: tuple[str, ...] = ()
 
     @classmethod
     def from_app(cls, bot_username: str = "") -> "Settings":
@@ -31,4 +38,6 @@ class Settings:
             hr_fallback_chat_id=app.onboarding_hr_fallback_chat_id or None,
             practice_days=app.onboarding_practice_days,
             send_thanks_on_fail=app.onboarding_send_thanks_on_fail,
+            skip_weekends=app.onboarding_skip_weekends,
+            handoff_accounts=parse_accounts(app.onboarding_handoff_accounts),
         )

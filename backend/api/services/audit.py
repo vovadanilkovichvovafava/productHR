@@ -55,6 +55,8 @@ ACTIONS: Tuple[Tuple[str, str, str], ...] = (
     ("POST", rf"/api/onboarding/entities/{_N}/case", "Назначил практику в боте (ссылка для кандидата)"),
     ("POST", rf"/api/onboarding/cases/{_N}/status", "Сменил статус кандидата в боте практики"),
     ("POST", rf"/api/onboarding/cases/{_N}/probation", "Решение по испытательному сроку (бот)"),
+    ("POST", rf"/api/onboarding/wallet-access", "Выдал доступ к кошелькам (бухгалтерия)"),
+    ("DELETE", rf"/api/onboarding/wallet-access/{_N}", "Снял доступ к кошелькам"),
     # Воронки и заявки
     ("POST", rf"/api/vacancies/applications/bulk-move", "Массовый перевод кандидатов по этапу"),
     ("DELETE", rf"/api/vacancies/applications/{_N}/history/{_N}", "Удалил запись истории (откат этапа)"),

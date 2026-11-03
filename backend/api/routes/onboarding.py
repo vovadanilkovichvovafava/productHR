@@ -6,7 +6,7 @@ HR назначает практику в карточке кандидата �
 ставит здесь же.
 
 Доступ — рекрутёры организации (owner/admin/hr), чужой или вне скоупа кандидат — 404.
-Данные кошелька — только владелец и админы (как паспорт сотрудника), чтение пишется в лог.
+Данные кошелька — владелец, админы и бухгалтерия, которой они выдали доступ; чтение пишется в лог.
 """
 
 import logging
@@ -20,7 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models.database import Entity, OrgRole, User, UserRole
-from ..onboarding.models import ACTIVE_STATUSES, CaseStatus, OnboardingCase, Signal, SurveyResponse, Wallet
+from ..onboarding.models import (
+    ACTIVE_STATUSES, CaseStatus, Handoff, HandoffAccount, OnboardingCase, Signal, SurveyResponse, Wallet,
+    WalletAccess,
+)
 from ..onboarding.runtime import enabled, get_service
 from ..onboarding.surveys import SURVEYS
 from ..services.auth import get_current_user, get_user_org, get_user_org_role
@@ -290,6 +293,39 @@ async def decide_probation(
     return await _case_view(case, db)
 
 
+# --------------------------------------------------------------- кошельки
+
+
+class WalletAccessGrant(BaseModel):
+    user_id: int
+
+
+async def _wallet_reader(user: User, db: AsyncSession):
+    """Кошельки видят owner/admin и те, кому они выдали доступ (бухгалтерия)."""
+    org = await get_user_org(user, db)
+    if org is None:
+        raise HTTPException(403, "Нет организации")
+    if user.role == UserRole.superadmin:
+        return org
+    if await get_user_org_role(user, org.id, db) in (OrgRole.owner, OrgRole.admin):
+        return org
+    granted = await db.scalar(
+        select(WalletAccess.id).where(WalletAccess.org_id == org.id, WalletAccess.user_id == user.id)
+    )
+    if granted is None:
+        raise HTTPException(403, "Данные кошельков видят владелец, админы и бухгалтерия")
+    return org
+
+
+async def _wallet_admin(user: User, db: AsyncSession):
+    org = await get_user_org(user, db)
+    if org is None:
+        raise HTTPException(403, "Нет организации")
+    if user.role != UserRole.superadmin and await get_user_org_role(user, org.id, db) not in (OrgRole.owner, OrgRole.admin):
+        raise HTTPException(403, "Доступ к кошелькам выдают владелец и админы")
+    return org
+
+
 @router.get("/cases/{case_id}/wallet")
 async def read_wallet(
     case_id: int,
@@ -297,13 +333,156 @@ async def read_wallet(
     current_user: User = Depends(get_current_user),
 ):
     current_user = await db.merge(current_user)
-    org, role = await _org_and_role(current_user, db)
-    if current_user.role != UserRole.superadmin and role not in (OrgRole.owner, OrgRole.admin):
-        raise HTTPException(403, "Данные кошелька видят только владелец и админы")
-    case = await _case(case_id, org.id, current_user, db)
+    org = await _wallet_reader(current_user, db)
+    case = await db.get(OnboardingCase, case_id)
+    if case is None or case.org_id != org.id:
+        raise HTTPException(404, "Карточка бота не найдена")
     service = await _service_or_503()
     wallet = await db.scalar(select(Wallet).where(Wallet.case_id == case.id))
     if wallet is None:
         raise HTTPException(404, "Кандидат ещё не прислал кошелёк")
     logger.info("PII_ACCESS onboarding_wallet case=%s entity=%s by=%s", case.id, case.entity_id, current_user.id)
     return {"wallet": service.cipher.decrypt(wallet.ciphertext), "saved_at": wallet.created_at}
+
+
+@router.get("/wallets")
+async def list_wallets(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Список для бухгалтерии: кто, какой отдел, кошелёк. Без остальных данных кандидата."""
+    current_user = await db.merge(current_user)
+    org = await _wallet_reader(current_user, db)
+    service = await _service_or_503()
+    rows = (await db.execute(
+        select(OnboardingCase, Wallet)
+        .join(Wallet, Wallet.case_id == OnboardingCase.id)
+        .where(OnboardingCase.org_id == org.id)
+        .order_by(OnboardingCase.full_name)
+    )).all()
+    logger.info("PII_ACCESS onboarding_wallets list=%s by=%s", len(rows), current_user.id)
+    return [
+        {
+            "case_id": case.id,
+            "entity_id": case.entity_id,
+            "full_name": case.full_name,
+            "department": case.department,
+            "lead_name": case.lead_name,
+            "status": case.status,
+            "status_label": STATUS_LABELS.get(case.status, case.status),
+            "wallet": service.cipher.decrypt(wallet.ciphertext),
+            "saved_at": wallet.created_at,
+        }
+        for case, wallet in rows
+    ]
+
+
+@router.get("/wallet-access")
+async def list_wallet_access(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await _wallet_admin(current_user, db)
+    rows = (await db.execute(
+        select(User).join(WalletAccess, WalletAccess.user_id == User.id).where(WalletAccess.org_id == org.id)
+    )).scalars().all()
+    return [{"user_id": u.id, "name": u.name, "email": u.email} for u in rows]
+
+
+@router.post("/wallet-access", status_code=201)
+async def grant_wallet_access(
+    body: WalletAccessGrant,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await _wallet_admin(current_user, db)
+    target = await db.get(User, body.user_id)
+    if target is None or await get_user_org_role(target, org.id, db) is None:
+        raise HTTPException(400, "Доступ выдаётся только участнику этой организации")
+    exists = await db.scalar(
+        select(WalletAccess.id).where(WalletAccess.org_id == org.id, WalletAccess.user_id == target.id)
+    )
+    if exists is None:
+        db.add(WalletAccess(org_id=org.id, user_id=target.id, granted_by=current_user.id))
+        await db.commit()
+    logger.info("ONBOARDING wallet_access grant user=%s by=%s", target.id, current_user.id)
+    return {"user_id": target.id, "name": target.name, "email": target.email}
+
+
+@router.delete("/wallet-access/{user_id}", status_code=204)
+async def revoke_wallet_access(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await _wallet_admin(current_user, db)
+    row = await db.scalar(
+        select(WalletAccess).where(WalletAccess.org_id == org.id, WalletAccess.user_id == user_id)
+    )
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+    logger.info("ONBOARDING wallet_access revoke user=%s by=%s", user_id, current_user.id)
+
+
+# ------------------------------------------- передача HR-аккаунтам автоспамера / AI-селлера
+
+HANDOFF_STATUS_LABELS = {
+    "waiting": "Ждёт данных",
+    "active": "Ведётся",
+    "done": "Все этапы переданы",
+    "stopped": "Остановлено",
+}
+HANDOFF_REASON_LABELS = {
+    "no_telegram": "нет Telegram и телефона в карточке",
+    "no_first_day": "не указана дата выхода в отдел",
+    "no_account": "ни один HR-аккаунт не нажал Start у бота",
+    "send_failed": "Telegram не принял сообщение аккаунту — повтор через 10 минут",
+}
+
+
+@router.get("/handoffs")
+async def list_handoffs(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Кого бот передал HR-аккаунтам, кто ждёт данных и почему (baseline — до включения — не показываем)."""
+    from ..config import settings as app_settings
+    from ..onboarding.config import parse_accounts
+    from ..onboarding.handoff import STAGES
+
+    current_user = await db.merge(current_user)
+    org, _ = await _org_and_role(current_user, db)
+    rows = (await db.execute(
+        select(Handoff, Entity, HandoffAccount)
+        .join(Entity, Entity.id == Handoff.entity_id)
+        .outerjoin(HandoffAccount, HandoffAccount.id == Handoff.account_id)
+        .where(Entity.org_id == org.id, Handoff.status != "baseline")
+        .order_by(Handoff.id.desc())
+        .limit(500)
+    )).all()
+    configured = parse_accounts(app_settings.onboarding_handoff_accounts)
+    linked = {a.username: a for a in (await db.execute(select(HandoffAccount))).scalars().all()}
+    return {
+        "accounts": [
+            {"username": f"@{name}", "linked": bool(linked.get(name) and linked[name].tg_id)}
+            for name in configured
+        ],
+        "handoffs": [
+            {
+                "entity_id": entity.id,
+                "full_name": entity.name,
+                "status": row.status,
+                "status_label": HANDOFF_STATUS_LABELS.get(row.status, row.status),
+                "waiting_reason": HANDOFF_REASON_LABELS.get(row.waiting_reason) if row.waiting_reason else None,
+                "first_day": row.first_day,
+                "next_stage": STAGES[row.stage_index].key if row.status == "active" and row.stage_index < len(STAGES) else None,
+                "next_at_utc": row.next_at,
+                "account": f"@{account.username}" if account else None,
+            }
+            for row, entity, account in rows
+        ],
+    }

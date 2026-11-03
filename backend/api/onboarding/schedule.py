@@ -33,6 +33,33 @@ def at_local(day: date, hour: int, tz: str) -> datetime:
     return local_to_utc(datetime.combine(day, time(hour)), tz)
 
 
+# Рабочее окно (ТЗ 3.3: «на связи 10:00–18:00»; встреча 30.10: «убираешь выходные дни»).
+# Время, которое ТЗ задаёт явно (Loom 20:00, утро после Loom, за день до старта), не двигаем.
+WORK_START_HOUR = 10
+WORK_END = time(18, 0)
+
+
+def next_workday(day: date) -> date:
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return day
+
+
+def within_working_hours(run_at_utc: datetime, tz: str, skip_weekends: bool = True) -> datetime:
+    """Ближайший момент не раньше run_at в окне 10:00–18:00 местного времени, без выходных."""
+    local = utc_to_local(run_at_utc, tz).replace(tzinfo=None)
+    day = local.date()
+    if local.time() > WORK_END:
+        day, local = day + timedelta(days=1), None
+    elif local.hour < WORK_START_HOUR:
+        local = None
+    if skip_weekends and day.weekday() >= 5:
+        day, local = next_workday(day), None
+    if local is None:
+        return at_local(day, WORK_START_HOUR, tz)
+    return run_at_utc
+
+
 def add_months(d: date, months: int) -> date:
     index = d.month - 1 + months
     year, month = d.year + index // 12, index % 12 + 1
@@ -59,20 +86,25 @@ def needs_day_before(now_utc: datetime, start_utc: datetime, tz: str) -> bool:
     return start_day > today + timedelta(days=1)
 
 
-def preboarding_jobs(now_utc: datetime, start_utc: datetime, tz: str, practice_days: int) -> list[Job]:
+def preboarding_jobs(
+    now_utc: datetime, start_utc: datetime, tz: str, practice_days: int, skip_weekends: bool = True
+) -> list[Job]:
     start_day = utc_to_local(start_utc, tz).date()
-    jobs: list[Job] = [("invite_check", now_utc + retry_interval(now_utc, start_utc, tz), {})]
+    invite_check = within_working_hours(now_utc + retry_interval(now_utc, start_utc, tz), tz, skip_weekends)
+    jobs: list[Job] = [("invite_check", invite_check, {})]
     if needs_day_before(now_utc, start_utc, tz):
         jobs.append(("day_before", at_local(start_day - timedelta(days=1), DAY_BEFORE_HOUR, tz), {}))
     for offset in range(practice_days):
         day = start_day + timedelta(days=offset)
         jobs.append(("loom", at_local(day, LOOM_HOUR, tz), {"day": day.isoformat()}))
     last_day = practice_last_day(start_day, practice_days)
+    if skip_weekends:  # сигнал HR «решения нет» — в рабочий день
+        last_day = next_workday(last_day)
     jobs.append(("practice_deadline", at_local(last_day, NO_DECISION_HOUR, tz), {}))
     return jobs
 
 
-def onboarding_jobs(department_start: date, tz: str) -> list[Job]:
+def onboarding_jobs(department_start: date, tz: str, skip_weekends: bool = True) -> list[Job]:
     """ТЗ 4: сроки считаются от даты перехода в отдел."""
     d = department_start
     month3 = add_months(d, 3)
@@ -94,4 +126,8 @@ def onboarding_jobs(department_start: date, tz: str) -> list[Job]:
         ("staff_reminder", month3, STAFF_HOUR, {"kind": "probation_close"}),
         ("staff_reminder", add_months(d, 6), STAFF_HOUR, {"kind": "control_6m"}),
     ]
-    return [(kind, at_local(day, hour, tz), payload) for kind, day, hour, payload in plan]
+    # месяц от выхода может прийтись на субботу — переносим на понедельник, час тот же
+    return [
+        (kind, at_local(next_workday(day) if skip_weekends else day, hour, tz), payload)
+        for kind, day, hour, payload in plan
+    ]
