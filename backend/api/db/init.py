@@ -153,6 +153,8 @@ async def init_database():
         await run_migration(engine, f"ALTER TYPE entitystatus ADD VALUE IF NOT EXISTS '{status_val}'", f"Add {status_val} to entitystatus enum")
 
     # Step 3: Create all tables
+    # Таблицы onboarding_* живут в своём модуле — импорт регистрирует их в Base.metadata
+    import api.onboarding.models  # noqa: F401
     logger.info("Creating tables with create_all...")
     try:
         async with engine.begin() as conn:

@@ -45,6 +45,12 @@ def _dbg(msg: str):
 bot: Bot | None = None
 dp = Dispatcher()
 
+# HR-бот практики и испытательного срока: его кнопки — отдельный роутер, а сообщения
+# перехватываются хуками в cmd_start / collect_group_message / cmd_ai_digest / on_bot_added
+# (обработчики dp срабатывают раньше роутеров, см. api/onboarding/telegram.py).
+from .onboarding import telegram as onboarding_tg
+dp.include_router(onboarding_tg.router)
+
 
 def get_bot() -> Bot:
     """Get or create bot instance."""
@@ -174,6 +180,9 @@ async def on_bot_added(event: ChatMemberUpdated):
                 logger.info(f"✅ Chat '{event.chat.title}' created (no linked user)")
     except Exception as e:
         logger.error(f"❌ Error adding chat: {type(e).__name__}: {e}")
+
+    # HR завёл рабочий чат практики и добавил бота раньше кандидата — кнопка «Старт»
+    await onboarding_tg.on_bot_added(event.chat.id, event.from_user.id if event.from_user else None)
 
 
 @dp.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_MEMBER >> IS_NOT_MEMBER))
@@ -2409,6 +2418,9 @@ async def cmd_vacancy(message: types.Message):
 @dp.message(F.chat.type.in_({"group", "supergroup"}), lambda msg: not (msg.text and msg.text.startswith("/")))
 async def collect_group_message(message: types.Message):
     """Silently collect all messages from groups. Skips commands so they reach their handlers."""
+    # Кандидат пришёл в рабочий чат практики — приветствие с «Старт» (сбор ниже идёт как обычно)
+    await onboarding_tg.on_group_message(message)
+
     # Skip messages without user info (system messages, channel posts, etc.)
     if not message.from_user:
         logger.debug(f"Skipping message without from_user in chat {message.chat.id}")
@@ -2752,6 +2764,10 @@ async def cmd_start(message: types.Message):
                 "Откройте личный кабинет на сайте и нажмите «Привязать Telegram» — "
                 "получите новую одноразовую ссылку."
             )
+            return
+        # Ссылка-приглашение кандидата на практику (ob_…), а не привязка аккаунта
+        if onboarding_tg.is_onboarding_token(payload):
+            await onboarding_tg.on_start(message, payload)
             return
         if payload:
             await handle_bind_token(message, payload)
@@ -3661,6 +3677,9 @@ async def cmd_ai_digest(message: types.Message):
     # Ответ в чат по заявке перехватываем раньше: этот обработчик ловит любой
     # текст в личке, и без проверки ответ ушёл бы в AI-сводку.
     if await _handle_access_chat_reply(message):
+        return
+    # Кандидат присылает кошелёк или свободный ответ опроса — тоже не в AI-сводку
+    if await onboarding_tg.on_private_text(message):
         return
 
     async with async_session() as session:

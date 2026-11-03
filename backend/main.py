@@ -22,7 +22,7 @@ from api.routes import auth, users, criteria, entities, entity_ai, organizations
 from api.routes import email_templates, analytics, exports, notifications, forms, employees, documents, org_units, magic_button, pen
 from api.routes import candidate_search, extension_download, csv_import
 from api.routes import candidate_database, recruiter_workspaces
-from api.routes import timeoff, tags, staff_board, access_hub, audit, ai_usage, dump_import
+from api.routes import timeoff, tags, staff_board, access_hub, audit, ai_usage, dump_import, onboarding
 from api.config import settings
 from api.db import init_database, run_alembic_migrations_sync
 from api.middleware import SecurityHeadersMiddleware, CorrelationMiddleware
@@ -242,6 +242,11 @@ async def lifespan(app: FastAPI):
     employee_reminders_bg_task = asyncio.create_task(employee_reminders_task())
     logger.info("Employee reminders task started (daily)")
 
+    # HR-бот практики и испытательного срока: повторы, Loom, опросы, напоминания по расписанию
+    # (выключен без TELEGRAM_BOT_TOKEN / ONBOARDING_WALLET_KEY — задача сразу завершится)
+    from api.onboarding.runtime import run_worker as onboarding_worker
+    onboarding_bg_task = asyncio.create_task(onboarding_worker())
+
     # Log all registered routes for debugging
     logger.info("=== REGISTERED API ROUTES ===")
     vacancy_routes = []
@@ -261,6 +266,7 @@ async def lifespan(app: FastAPI):
         bot_task.cancel()
     if employee_reminders_bg_task:
         employee_reminders_bg_task.cancel()
+    onboarding_bg_task.cancel()
 
     # Close Redis connection
     try:
@@ -342,6 +348,8 @@ app.include_router(realtime.router, tags=["realtime"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 # Разовый импорт дампа базы (работает, только пока задан IMPORT_DUMP_TOKEN)
 app.include_router(dump_import.router, prefix="/api/dump-import", tags=["dump-import"])
+# HR-бот практики и испытательного срока (ТЗ «Пребординг и онбординг трафика»)
+app.include_router(onboarding.router, prefix="/api/onboarding", tags=["onboarding"])
 
 # Register vacancies and parser routers with explicit logging
 logger.info("=== REGISTERING VACANCIES ROUTER ===")
