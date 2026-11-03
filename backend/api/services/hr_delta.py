@@ -29,6 +29,13 @@ JSON-колонке (`extra_data.enceladus_id`) и не вставлять вт�
 успели поменять в productHR, строку не трогаем, в отчёт — conflict.
 append_notes — дописать в `entities.extra_data.notes` комментарии, которых там
 ещё нет (по id записи), не трогая остальное в карточке.
+Ответ на анкету, вставленный пакетом, сам уведомляет рекрутёров (04.11.2026):
+кандидат заполнил анкету по старой ссылке Энцеладуса — ответ лёг там, приехал
+сюда дозаливкой, и «Ответ на анкету» не получил никто (Губич, 31.10). Правило
+то же, что у `notify_form_submitted`: отправителю ссылки и текущему рекрутёру
+кандидата, по одному на человека. notify_form_answers (`rows`: `{"token"}` или
+`{"submission_id"}`) — то же для ответов, перенесённых раньше; уведомление,
+которое уже есть, второй раз не создаётся.
 upsert — строка вставляется с ТЕМ ЖЕ первичным ключом, а если такая есть —
 перезаписываются только те колонки, что пришли в строке (остальные не
 трогаются). Значения — как их отдаёт просмотр таблиц (строки): тип каждой
@@ -261,6 +268,119 @@ def _append_notes(cur, rows: Iterable[dict], idmap: dict) -> dict:
     return stats
 
 
+def _form_answer_recipients(cur, dispatch_by, entity_id, entity_created_by) -> list[int]:
+    """То же правило, что `hr_notifications.form_answer_recipients` (там — async ORM):
+    отправитель ссылки, затем текущие рекрутёры по правилу метки «HR: …»
+    (`hr_tags.compute_hr_tags`: автор живой заявки, без автора — владелец воронки,
+    плюс со-рекрутёры; порядок — по (hr_id, vacancy_id)); нет живых заявок — тот,
+    за кем карточка. Удалённых пользователей нет в выборке — им некуда писать."""
+    recipients: list[int] = []
+
+    def add(user_id) -> None:
+        if user_id and user_id not in recipients:
+            recipients.append(user_id)
+
+    if dispatch_by:
+        cur.execute("SELECT id FROM public.users WHERE id = %s", (dispatch_by,))
+        if cur.fetchone():
+            add(dispatch_by)
+    cur.execute(
+        "SELECT hr_id FROM ("
+        " SELECT COALESCE(a.created_by, v.created_by) AS hr_id, v.id AS vid"
+        " FROM public.vacancy_applications a JOIN public.vacancies v ON v.id = a.vacancy_id"
+        " WHERE a.entity_id = %(e)s AND a.stage::text NOT IN ('rejected', 'withdrawn')"
+        " AND v.deleted_at IS NULL"
+        " UNION"
+        " SELECT c.user_id, v.id FROM public.application_co_recruiters c"
+        " JOIN public.vacancy_applications a ON a.id = c.application_id"
+        " JOIN public.vacancies v ON v.id = a.vacancy_id"
+        " WHERE a.entity_id = %(e)s AND a.stage::text NOT IN ('rejected', 'withdrawn')"
+        " AND v.deleted_at IS NULL"
+        ") t JOIN public.users u ON u.id = t.hr_id ORDER BY hr_id, vid",
+        {"e": entity_id},
+    )
+    current = [r[0] for r in cur.fetchall()]
+    for hr_id in current:
+        add(hr_id)
+    if not current and entity_created_by:
+        cur.execute("SELECT id FROM public.users WHERE id = %s", (entity_created_by,))
+        if cur.fetchone():
+            add(entity_created_by)
+    return recipients
+
+
+def _notify_form_answers(cur, submission_ids: Iterable[int]) -> dict:
+    """Уведомление «Ответ на анкету» по ответам, пришедшим пакетом (см. docstring
+    модуля). Текст и ссылка — как у `notify_form_submitted`. Если такое же
+    уведомление этому человеку уже создано не раньше ответа — не дублируем
+    (повторный пакет, notify_form_answers по уже уведомлённому ответу)."""
+    stats = {"answers": 0, "created": 0, "already": 0, "nobody": 0, "absent": 0}
+    for sid in submission_ids:
+        cur.execute(
+            "SELECT COALESCE(d.entity_id, s.entity_id), d.id, d.created_by, s.submitted_at,"
+            " e.name, e.created_by, t.title"
+            " FROM public.form_submissions s"
+            " LEFT JOIN public.form_dispatches d ON d.id = s.dispatch_id"
+            " LEFT JOIN public.entities e ON e.id = COALESCE(d.entity_id, s.entity_id)"
+            " LEFT JOIN public.form_templates t ON t.id = s.form_id"
+            " WHERE s.id = %s",
+            (sid,),
+        )
+        got = cur.fetchone()
+        if got is None or got[0] is None:
+            stats["absent"] += 1
+            continue
+        entity_id, dispatch_id, dispatch_by, submitted_at, name, entity_by, form_title = got
+        stats["answers"] += 1
+        recipients = _form_answer_recipients(cur, dispatch_by, entity_id, entity_by)
+        if not recipients:
+            stats["nobody"] += 1
+            logger.warning("FORM_ANSWER_NOTIFY via=hr_delta submission=%s — некому", sid)
+            continue
+        message = f"{name or 'Кандидат'} заполнил(а) анкету «{form_title}»"
+        link = f"/all-candidates?entity={entity_id}&tab=anketa"
+        sent = []
+        for user_id in recipients:
+            cur.execute(
+                "SELECT 1 FROM public.notifications WHERE user_id = %s AND type = 'form_submitted'"
+                " AND link = %s AND message = %s AND created_at >= COALESCE(%s, created_at)",
+                (user_id, link, message, submitted_at),
+            )
+            if cur.fetchone():
+                stats["already"] += 1
+                continue
+            cur.execute(
+                "INSERT INTO public.notifications (user_id, type, title, message, link, is_read, created_at)"
+                " VALUES (%s, 'form_submitted', 'Ответ на анкету', %s, %s, false, now())",
+                (user_id, message, link),
+            )
+            stats["created"] += 1
+            sent.append(user_id)
+        logger.warning(
+            "FORM_ANSWER_NOTIFY via=hr_delta submission=%s dispatch=%s entity=%s to=%s",
+            sid, dispatch_id, entity_id, sent,
+        )
+    return stats
+
+
+def _submission_ids(cur, rows: Iterable[dict], idmap: dict) -> list[int]:
+    """notify_form_answers: строки `{"submission_id"}` (можно $ref) или `{"token"}` ссылки."""
+    ids = []
+    for raw in rows:
+        raw = _resolve(dict(raw), idmap)
+        if raw.get("submission_id"):
+            ids.append(int(raw["submission_id"]))
+            continue
+        cur.execute(
+            "SELECT COALESCE(d.submission_id, (SELECT max(s.id) FROM public.form_submissions s"
+            " WHERE s.dispatch_id = d.id)) FROM public.form_dispatches d WHERE d.token = %s",
+            (raw["token"],),
+        )
+        got = cur.fetchone()
+        ids.append(got[0] if got and got[0] else -1)
+    return ids
+
+
 def _delete(cur, table: str, keys: Iterable[dict], meta, idmap: dict | None = None) -> dict:
     cols, pk = meta
     stats = {"deleted": 0, "absent": 0, "conflict": 0}
@@ -340,12 +460,19 @@ def apply_delta(dsn: str, bundle: dict, dry_run: bool) -> dict[str, Any]:
                     touched.append(table)
                 elif op == "append_notes":
                     stats = _append_notes(cur, step["rows"], idmap)
+                elif op == "notify_form_answers":
+                    stats = _notify_form_answers(cur, _submission_ids(cur, step["rows"], idmap))
                 elif op == "delete":
                     stats = _delete(cur, table, step["keys"], metas[table], idmap)
                 else:
                     raise ValueError(f"шаг {i}: неизвестная операция {op}")
                 report["steps"].append({"op": op, "table": table, **stats})
                 logger.warning("HR_DELTA %s %s %s%s", op, table, stats, " (dry_run)" if dry_run else "")
+            # Ответы на анкеты, вставленные этим пакетом, — уведомить, когда на
+            # месте и ссылки, и заявки (от них зависит «текущий рекрутёр»).
+            new_answers = [v for k, v in idmap.items() if k.startswith("form_submissions:")]
+            if new_answers:
+                report["form_answer_notifications"] = _notify_form_answers(cur, new_answers)
             report["sequences"] = _sync_sequences(cur, touched, dry_run)
             report["new_ids"] = {k: v for k, v in idmap.items() if k.startswith("entities:")}
         if dry_run:
