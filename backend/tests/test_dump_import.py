@@ -113,3 +113,22 @@ async def test_delta_closed_without_token(client, monkeypatch):
     monkeypatch.delenv("IMPORT_DUMP_TOKEN", raising=False)
     r = await client.post("/api/dump-import/finish-delta", json={"size": 1, "sha256": "0" * 64})
     assert r.status_code == 404
+
+
+def test_delta_refs_resolve_inside_json():
+    """03.11.2026: строки из Энцеладуса получают новые номера, ссылки на них — {"$ref": …}."""
+    from api.services.hr_delta import _resolve
+
+    idmap = {"entities:9595": 9601, "stage_transitions:7": 40}
+    row = {
+        "entity_id": {"$ref": "entities:9595"},
+        "extra_data": {"hidden_duplicate_id": {"$ref": "entities:9595"}, "keep": [1, {"a": 2}]},
+        "pinned_entry_key": {"$ref": "stage_transitions:7", "$fmt": "transition:{}"},
+    }
+    assert _resolve(row, idmap) == {
+        "entity_id": 9601,
+        "extra_data": {"hidden_duplicate_id": 9601, "keep": [1, {"a": 2}]},
+        "pinned_entry_key": "transition:40",
+    }
+    with pytest.raises(ValueError):
+        _resolve({"x": {"$ref": "entities:1"}}, idmap)
