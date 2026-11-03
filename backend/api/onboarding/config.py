@@ -22,6 +22,11 @@ class Settings:
     send_thanks_on_fail: bool = False
     skip_weekends: bool = True
     handoff_accounts: tuple[str, ...] = ()
+    handoff_webhook_url: str = ""
+    handoff_webhook_secret: str = ""
+    handoff_stages: bool = False
+    practice_start_time: str = "10:00"
+    hrd: str = ""
 
     @classmethod
     def from_app(cls, bot_username: str = "") -> "Settings":
@@ -40,4 +45,9 @@ class Settings:
             send_thanks_on_fail=app.onboarding_send_thanks_on_fail,
             skip_weekends=app.onboarding_skip_weekends,
             handoff_accounts=parse_accounts(app.onboarding_handoff_accounts),
+            handoff_webhook_url=app.onboarding_handoff_webhook_url.strip(),
+            handoff_webhook_secret=app.onboarding_handoff_webhook_secret,
+            handoff_stages=app.onboarding_handoff_stages,
+            practice_start_time=app.onboarding_practice_start_time,
+            hrd=app.onboarding_hrd,
         )

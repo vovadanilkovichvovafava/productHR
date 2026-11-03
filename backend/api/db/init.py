@@ -217,6 +217,18 @@ async def init_database():
          "staff_board_departments.visibility"),
         ("ALTER TABLE staff_board_departments ADD COLUMN IF NOT EXISTS visible_to JSON DEFAULT '[]'",
          "staff_board_departments.visible_to"),
+        # Передача HR-аккаунтам (api/onboarding/handoff.py): события практика/перевод/стоп,
+        # 03.11.2026. Таблица могла появиться в предыдущей версии без этих колонок.
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS practice_date DATE",
+         "onboarding_handoffs.practice_date"),
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS baseline_status VARCHAR(32)",
+         "onboarding_handoffs.baseline_status"),
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS practice_sent_at TIMESTAMP",
+         "onboarding_handoffs.practice_sent_at"),
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS transfer_sent_at TIMESTAMP",
+         "onboarding_handoffs.transfer_sent_at"),
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS stop_sent_at TIMESTAMP",
+         "onboarding_handoffs.stop_sent_at"),
         # Назначения: человек в отделе. Строка доски = назначение, поэтому без
         # таблицы доска не открывается вообще — заводим её здесь, не надеясь
         # на create_all.

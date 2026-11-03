@@ -1,24 +1,31 @@
-"""Передача новых сотрудников HR-аккаунтам автоспамера / AI-селлера.
+"""Передача кандидатов и сотрудников HR-профилю автоспамера / AI-селлера.
 
-Голосовое Владимира 03.11.2026: «у нас не будет бота как такового… сделать бота, который будет
-забирать данные, когда человек попадает в онбординг после практики, и посылать это тг-аккаунтам,
-которые мы добавили. Всё остальное делает другая часть команды». Встреча Маши и Вовы 30.10:
-первое сообщение — в 10:00 первого рабочего дня, «100% гарантия».
+Голосовое Владимира 03.11.2026: своего бота-собеседника нет — переписку ведут HR-аккаунты
+автоспамера и AI-селлера. Отчёт админа в тот же день: HR-профиль ведёт человека сам, от
+практики до конца испытательного (напоминания, Loom, поздравление, опросы, кошелёк,
+сигналы HR), «осталось понять, как АТС будет их нам передавать». Поэтому productHR передаёт
+только СОБЫТИЯ, расписание — на их стороне:
 
-Как работает (раз в 30 с из runtime.run_worker):
-1. первый запуск — все, кто УЖЕ «Перешёл в отдел», помечаются baseline: истории не пишем;
-2. новый «Перешёл в отдел» → проверяем Telegram/телефон и дату выхода в отдел; чего-то нет —
-   один раз говорим HR, ждём;
-3. в 10:00 первого рабочего дня — карточка #onboarding_new аккаунту (у кого меньше людей),
-   дальше тому же аккаунту пометки этапов #onboarding_stage; выходные пропускаем;
-4. человек больше не «Перешёл в отдел» (уволен, ушёл…) — #onboarding_stop.
+- practice  — статус «Практика» (probation): дата старта, руководитель практики, HRD;
+- transfer  — «Перешёл в отдел» (transferred): отдел, лид, первый рабочий день;
+- stop      — отказ / отозван / резерв / уволен / уволился после переданного события.
 
-Формат сообщений — docs: ~/Desktop/Rabota/spam/HANDOFF_FORMAT.md. Кошелёк и прочие данные
-карточки не передаются.
+Как работает (раз в 30 с из runtime.run_worker): смотрит на entities.status, а не встраивается
+в пути смены статуса — воронка, карточка и «Штат» ловятся одинаково. Первый запуск помечает
+всех, кто УЖЕ на практике или в отделе (baseline): то же событие им не шлём, следующее — да.
+Нет Telegram/телефона или нужной даты — один раз говорим HR и ждём.
+
+Доставка: JSON на ONBOARDING_HANDOFF_WEBHOOK_URL (подпись HMAC-SHA256), иначе — сообщение
+HR-аккаунту из ONBOARDING_HANDOFF_ACCOUNTS (с наименьшей нагрузкой; человек закрепляется за
+ним). Формат — ~/Desktop/Rabota/spam/HANDOFF_FORMAT.md. Кошелёк и прочее не передаётся.
+Пометки этапов (неделя, месяцы) — только при ONBOARDING_HANDOFF_STAGES.
 """
 
+import hashlib
+import hmac
+import json
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -43,9 +50,20 @@ from .models import Handoff, HandoffAccount
 
 logger = logging.getLogger("hr-analyzer.onboarding")
 
-BASELINE_MARK = "onboarding_handoff_baseline_2026_11"
+BASELINE_MARK = "onboarding_handoff_baseline_v2_2026_11"
 RETRY_AFTER = timedelta(minutes=10)
+PRACTICE = EntityStatus.probation       # «Практика»
+TRANSFER = EntityStatus.transferred     # «Перешёл в отдел»
+TRACKED = (PRACTICE, TRANSFER)
+STOP_REASONS = {
+    EntityStatus.rejected: "не прошёл (Отказ)",
+    EntityStatus.withdrawn: "отозвал отклик",
+    EntityStatus.reserve: "отложен в резерв",
+    EntityStatus.dismissed: "уволен",
+    EntityStatus.quit: "уволился",
+}
 # Ключи карточки, которые ведёт доска «Штат» (routes/staff_board.py): наш и запасной из ClickUp
+PRACTICE_START_KEYS = ("practice_start_date", "cf:Выход на практику")
 DEPT_START_KEYS = ("department_transfer_date", "cf:Выход в отдел")
 MANAGER_KEYS = ("manager_name", "cf:Рук-ль")
 
@@ -57,9 +75,7 @@ class Stage:
     hour: int
 
 
-# Этапы онбординга из ТЗ (раздел 4) — для AI-селлера: когда что делать с человеком
 STAGES = (
-    Stage("first_day", "первый рабочий день", sch.FIRST_DAY_HOUR),
     Stage("week", "неделя в отделе — опрос недели", sch.SURVEY_HOUR),
     Stage("month1", "месяц работы — опрос месяца 1", sch.SURVEY_HOUR),
     Stage("month2", "два месяца — опрос месяца 2", sch.SURVEY_HOUR),
@@ -70,13 +86,30 @@ STAGES = (
 
 def stage_day(stage: Stage, first_day: date) -> date:
     return {
-        "first_day": first_day,
         "week": first_day + timedelta(days=5),
         "month1": sch.add_months(first_day, 1),
         "month2": sch.add_months(first_day, 2),
         "month3": sch.add_months(first_day, 3) - timedelta(days=14),
         "probation_end": sch.add_months(first_day, 3),
     }[stage.key]
+
+
+TAGS = {"practice": "#onboarding_practice", "transfer": "#onboarding_transfer",
+        "stop": "#onboarding_stop", "stage": "#onboarding_stage"}
+# Ключ события → подпись строки в Telegram-сообщении (порядок = порядок строк)
+LABELS = (
+    ("id", "id"), ("stage_title", "Этап"), ("full_name", "ФИО"), ("telegram", "Telegram"),
+    ("phone", "Телефон"), ("practice_start", "Старт практики"), ("practice_lead", "Руководитель практики"),
+    ("hrd", "HRD"), ("department", "Отдел"), ("lead", "Лид"), ("first_day", "Первый рабочий день"),
+    ("reason", "Причина"), ("timezone", "Часовой пояс"), ("hr", "HR"),
+)
+
+
+class NullMessenger:
+    """Без бота (только вебхук) — Telegram не нужен."""
+
+    async def send(self, chat_id, text, buttons=None):
+        raise SendError("Telegram-бот не настроен")
 
 
 def _parse_date(value) -> Optional[date]:
@@ -103,6 +136,24 @@ def _pick(extra: dict, keys) -> Optional[str]:
     return None
 
 
+def event_text(event: dict) -> str:
+    lines = [TAGS[event["event"]]]
+    for key, label in LABELS:
+        value = event.get(key)
+        if value not in (None, ""):
+            lines.append(f"{label}: {value}")
+    return "\n".join(lines)
+
+
+async def _http_post(url: str, body: bytes, headers: dict) -> None:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(url, content=body, headers=headers)
+    if response.status_code >= 400:
+        raise SendError(f"вебхук ответил {response.status_code}")
+
+
 class HandoffService:
     def __init__(
         self,
@@ -110,11 +161,17 @@ class HandoffService:
         messenger: Messenger,
         settings: Settings,
         clock: Callable[[], datetime],
+        poster: Callable[[str, bytes, dict], Awaitable[None]] = _http_post,
     ):
         self.sessions = sessions
         self.messenger = messenger
         self.settings = settings
         self.clock = clock
+        self.poster = poster
+
+    @property
+    def via_webhook(self) -> bool:
+        return bool(self.settings.handoff_webhook_url)
 
     # ------------------------------------------------------------------ вход
 
@@ -135,13 +192,12 @@ class HandoffService:
         return True
 
     async def tick(self) -> int:
-        """Один проход воркера. Возвращает, сколько сообщений ушло аккаунтам."""
-        if not self.settings.handoff_accounts:
+        """Один проход воркера. Возвращает, сколько событий передано."""
+        if not (self.via_webhook or self.settings.handoff_accounts):
             return 0
         await self._baseline_once()
-        await self._pick_up_new()
-        await self._check_waiting()
-        return await self._send_due()
+        await self._pick_up()
+        return await self._process()
 
     # ------------------------------------------------------------- этапы прохода
 
@@ -149,156 +205,192 @@ class HandoffService:
         async with self.sessions() as s:
             if await s.get(DataMigrationMark, BASELINE_MARK) is not None:
                 return
-            ids = (await s.scalars(
-                select(Entity.id).where(Entity.status == EntityStatus.transferred)
+            people = (await s.execute(
+                select(Entity.id, Entity.org_id, Entity.status).where(Entity.status.in_(TRACKED))
             )).all()
             known = set((await s.scalars(select(Handoff.entity_id))).all())
-            for entity_id in ids:
+            for entity_id, org_id, status in people:
                 if entity_id not in known:
-                    s.add(Handoff(entity_id=entity_id, status="baseline"))
+                    s.add(Handoff(entity_id=entity_id, org_id=org_id, status="baseline",
+                                  baseline_status=status.value, updated_at=self.clock()))
             s.add(DataMigrationMark(key=BASELINE_MARK))
             await s.commit()
-        logger.info("ONBOARDING handoff baseline: %s человек уже в отделе — им не пишем", len(ids))
+        logger.info("ONBOARDING handoff baseline: %s человек уже на практике/в отделе", len(people))
 
-    async def _pick_up_new(self) -> None:
+    async def _pick_up(self) -> None:
         async with self.sessions() as s:
             fresh = (await s.execute(
                 select(Entity.id, Entity.org_id)
                 .outerjoin(Handoff, Handoff.entity_id == Entity.id)
-                .where(Entity.status == EntityStatus.transferred, Handoff.id.is_(None))
+                .where(Entity.status.in_(TRACKED), Handoff.id.is_(None))
             )).all()
             for entity_id, org_id in fresh:
-                s.add(Handoff(entity_id=entity_id, org_id=org_id, status="waiting", updated_at=self.clock()))
-            # вернулся в отдел после ухода — ведём заново
+                s.add(Handoff(entity_id=entity_id, org_id=org_id, status="active", updated_at=self.clock()))
+            # вернулся на практику/в отдел после стопа — ведём заново
             returned = (await s.scalars(
                 select(Handoff)
                 .join(Entity, Entity.id == Handoff.entity_id)
-                .where(Handoff.status == "stopped", Entity.status == EntityStatus.transferred)
+                .where(Handoff.status == "stopped", Entity.status.in_(TRACKED))
             )).all()
             for row in returned:
-                row.status, row.stage_index, row.next_at = "waiting", 0, None
+                row.status, row.baseline_status = "active", None
+                row.practice_sent_at = row.transfer_sent_at = row.stop_sent_at = None
+                row.stage_index, row.next_at = 0, None
                 row.waiting_reason = row.notified_reason = None
                 row.updated_at = self.clock()
             await s.commit()
         for entity_id, _ in fresh:
             logger.info("ONBOARDING handoff new entity=%s", entity_id)
 
-    async def _check_waiting(self) -> None:
-        """waiting → active, когда есть Telegram/телефон и дата выхода. До первой карточки
-        следим за датой: HR мог её поправить."""
-        async with self.sessions() as s:
-            rows = (await s.execute(
-                select(Handoff, Entity)
-                .join(Entity, Entity.id == Handoff.entity_id)
-                .where(
-                    (Handoff.status == "waiting")
-                    | ((Handoff.status == "active") & (Handoff.stage_index == 0))
-                )
-            )).all()
-        for row, entity in rows:
-            if entity.status != EntityStatus.transferred:
-                continue  # остановку сделает _send_due
-            extra = entity.extra_data or {}
-            contact = self._contact(entity)
-            first_day = _parse_date(_pick(extra, DEPT_START_KEYS))
-            reason = None if contact else "no_telegram"
-            reason = reason or (None if first_day else "no_first_day")
-            async with self.sessions() as s:
-                fresh = await s.get(Handoff, row.id)
-                if reason:
-                    fresh.status, fresh.waiting_reason = "waiting", reason
-                    notify = fresh.notified_reason != reason
-                    fresh.notified_reason = reason
-                    await s.commit()
-                    if notify:
-                        await self._tell_hr(entity, reason)
-                    continue
-                if fresh.status == "active" and fresh.first_day == first_day:
-                    continue
-                fresh.status, fresh.waiting_reason = "active", None
-                fresh.first_day = first_day
-                fresh.stage_index = 0
-                fresh.next_at = self._stage_time(STAGES[0], first_day)
-                fresh.updated_at = self.clock()
-                await s.commit()
-                logger.info("ONBOARDING handoff scheduled entity=%s first_day=%s at=%s",
-                            entity.id, first_day, fresh.next_at)
-
-    async def _send_due(self) -> int:
+    async def _process(self) -> int:
         now = self.clock()
         async with self.sessions() as s:
             rows = (await s.execute(
                 select(Handoff, Entity)
                 .join(Entity, Entity.id == Handoff.entity_id)
-                .where(Handoff.status == "active", Handoff.next_at <= now)
-            )).all()
-            # активные, у кого статус уже не «Перешёл в отдел», — стоп, не дожидаясь этапа
-            gone = (await s.execute(
-                select(Handoff, Entity)
-                .join(Entity, Entity.id == Handoff.entity_id)
-                .where(Handoff.status.in_(("active", "waiting")), Entity.status != EntityStatus.transferred)
+                .where(
+                    Handoff.status.in_(("baseline", "active")),
+                    (Handoff.next_at.is_(None)) | (Handoff.next_at <= now),
+                )
             )).all()
         sent = 0
-        for row, entity in gone:
-            await self._stop(row, entity)
-        stopped = {row.id for row, _ in gone}
         for row, entity in rows:
-            if row.id in stopped:
-                continue
-            if await self._send_stage(row, entity):
-                sent += 1
+            status = entity.status
+            if status == PRACTICE and row.practice_sent_at is None and row.baseline_status != PRACTICE.value:
+                sent += await self._send_event(row, entity, "practice")
+            elif status == TRANSFER and row.transfer_sent_at is None and row.baseline_status != TRANSFER.value:
+                sent += await self._send_event(row, entity, "transfer")
+            elif status in STOP_REASONS:
+                sent += await self._stop(row, entity)
+            elif (status == TRANSFER and row.transfer_sent_at and self.settings.handoff_stages
+                  and row.next_at is not None and row.stage_index < len(STAGES)):
+                sent += await self._send_event(row, entity, "stage")
         return sent
 
-    # ------------------------------------------------------------------ отправка
+    # ------------------------------------------------------------------ события
 
-    async def _send_stage(self, row: Handoff, entity: Entity) -> bool:
-        stage = STAGES[row.stage_index]
+    async def _send_event(self, row: Handoff, entity: Entity, kind: str) -> int:
+        extra = entity.extra_data or {}
+        practice_date = _parse_date(_pick(extra, PRACTICE_START_KEYS))
+        first_day = _parse_date(_pick(extra, DEPT_START_KEYS))
+        reason = None if self._contact(entity) else "no_telegram"
+        if not reason and kind == "practice" and not practice_date:
+            reason = "no_practice_date"
+        if not reason and kind in ("transfer", "stage") and not first_day:
+            reason = "no_first_day"
+        if reason:
+            await self._wait(row, entity, reason)
+            return 0
+
+        event = await self._event(entity, kind)
+        if kind == "practice":
+            event["practice_start"] = f"{practice_date.strftime('%d.%m.%Y')} {self.settings.practice_start_time}"
+            event["practice_start_iso"] = f"{practice_date.isoformat()}T{self.settings.practice_start_time}"
+            event["practice_lead"] = _pick(extra, MANAGER_KEYS)
+            event["hrd"] = self.settings.hrd or None
+        else:
+            department, _ = await self._department_and_hr(entity)
+            event["department"] = department
+            event["lead"] = _pick(extra, MANAGER_KEYS)
+            event["first_day"] = first_day.strftime("%d.%m.%Y")
+            event["first_day_iso"] = first_day.isoformat()
+        if kind == "stage":
+            stage = STAGES[row.stage_index]
+            event["stage"] = stage.key
+            event["stage_title"] = f"{stage.key} — {stage.title}"
+
+        account = await self._deliver(row, entity, event)
+        if account is False:
+            return 0
+        async with self.sessions() as s:
+            fresh = await s.get(Handoff, row.id)
+            fresh.status = "active"
+            if account is not None:
+                fresh.account_id = account.id
+            fresh.waiting_reason = fresh.notified_reason = None
+            fresh.next_at = None
+            if kind == "practice":
+                fresh.practice_sent_at, fresh.practice_date = self.clock(), practice_date
+            elif kind == "transfer":
+                fresh.transfer_sent_at, fresh.first_day = self.clock(), first_day
+                fresh.stage_index = 0
+                if self.settings.handoff_stages:
+                    fresh.next_at = self._stage_time(STAGES[0], first_day)
+            else:
+                fresh.stage_index += 1
+                if fresh.stage_index < len(STAGES):
+                    fresh.next_at = self._stage_time(STAGES[fresh.stage_index], fresh.first_day or first_day)
+            fresh.updated_at = self.clock()
+            await s.commit()
+        logger.info("ONBOARDING handoff %s entity=%s → %s", event.get("stage") or kind, entity.id,
+                    f"@{account.username}" if account else "webhook")
+        return 1
+
+    async def _stop(self, row: Handoff, entity: Entity) -> int:
+        """Отказ/уход. Если ни одно событие не передавали — молча закрываем."""
+        told = row.practice_sent_at or row.transfer_sent_at
+        if told:
+            event = await self._event(entity, "stop")
+            event["reason"] = STOP_REASONS[entity.status]
+            event["status"] = entity.status.value
+            if await self._deliver(row, entity, event) is False:
+                return 0
+        async with self.sessions() as s:
+            fresh = await s.get(Handoff, row.id)
+            fresh.status, fresh.next_at = "stopped", None
+            fresh.stop_sent_at = self.clock() if told else None
+            fresh.updated_at = self.clock()
+            await s.commit()
+        logger.info("ONBOARDING handoff stop entity=%s status=%s told=%s", entity.id, entity.status, bool(told))
+        return 1 if told else 0
+
+    async def _event(self, entity: Entity, kind: str) -> dict:
+        _, hr = await self._department_and_hr(entity)
+        return {
+            "event": kind,
+            "id": entity.id,
+            "full_name": entity.name,
+            "telegram": self._telegram(entity),
+            "phone": (entity.phone or "").strip() or None,
+            "timezone": self.settings.default_tz,
+            "hr": hr,
+        }
+
+    async def _deliver(self, row: Handoff, entity: Entity, event: dict):
+        """Аккаунт (Telegram), None (вебхук) или False — не доставлено, повтор позже."""
+        if self.via_webhook:
+            body = json.dumps({**event, "sent_at": self.clock().isoformat() + "Z"}, ensure_ascii=False).encode()
+            headers = {"Content-Type": "application/json", "X-Onboarding-Event": event["event"]}
+            if self.settings.handoff_webhook_secret:
+                digest = hmac.new(self.settings.handoff_webhook_secret.encode(), body, hashlib.sha256).hexdigest()
+                headers["X-Onboarding-Signature"] = f"sha256={digest}"
+            try:
+                await self.poster(self.settings.handoff_webhook_url, body, headers)
+            except Exception as exc:  # сеть, 5xx — повторим
+                logger.warning("ONBOARDING handoff webhook failed entity=%s: %s", entity.id, exc)
+                await self._postpone(row, "send_failed")
+                return False
+            return None
         account = await self._account_for(row)
         if account is None:
             await self._postpone(row, "no_account")
             return False
-        text = await self._card(entity, row, stage)
         try:
-            await self.messenger.send(account.tg_id, text)
+            await self.messenger.send(account.tg_id, event_text(event))
         except SendError as exc:
             logger.warning("ONBOARDING handoff send failed entity=%s @%s: %s", entity.id, account.username, exc)
             await self._postpone(row, "send_failed")
             return False
-        async with self.sessions() as s:
-            fresh = await s.get(Handoff, row.id)
-            fresh.account_id = account.id
-            fresh.stage_index += 1
-            fresh.waiting_reason = fresh.notified_reason = None
-            fresh.updated_at = self.clock()
-            if fresh.stage_index >= len(STAGES):
-                fresh.status, fresh.next_at = "done", None
-            else:
-                fresh.next_at = self._stage_time(STAGES[fresh.stage_index], fresh.first_day)
-            await s.commit()
-        logger.info("ONBOARDING handoff %s entity=%s → @%s", stage.key, entity.id, account.username)
-        return True
+        return account
 
-    async def _stop(self, row: Handoff, entity: Entity) -> None:
+    async def _wait(self, row: Handoff, entity: Entity, reason: str) -> None:
         async with self.sessions() as s:
             fresh = await s.get(Handoff, row.id)
-            account = await s.get(HandoffAccount, fresh.account_id) if fresh.account_id else None
-            fresh.status, fresh.next_at = "stopped", None
-            fresh.updated_at = self.clock()
+            notify = fresh.notified_reason != reason
+            fresh.waiting_reason = fresh.notified_reason = reason
             await s.commit()
-        if account is not None and account.tg_id:  # аккаунт уже вёл человека — пусть перестанет
-            status = getattr(entity.status, "value", entity.status)
-            text = "\n".join([
-                "#onboarding_stop",
-                f"id: {entity.id}",
-                f"ФИО: {entity.name}",
-                f"Telegram: {self._contact(entity) or '—'}",
-                f"Причина: статус «{status}» — больше не пишем",
-            ])
-            try:
-                await self.messenger.send(account.tg_id, text)
-            except SendError as exc:
-                logger.warning("ONBOARDING handoff stop not delivered entity=%s: %s", entity.id, exc)
-        logger.info("ONBOARDING handoff stopped entity=%s status=%s", entity.id, entity.status)
+        if notify:
+            await self._tell_hr(entity, reason)
 
     async def _postpone(self, row: Handoff, reason: str) -> None:
         async with self.sessions() as s:
@@ -309,12 +401,12 @@ class HandoffService:
             await s.commit()
         if notify and reason == "no_account":
             await self._tell_fallback(
-                "Некому передать нового сотрудника: ни один HR-аккаунт из ONBOARDING_HANDOFF_ACCOUNTS "
+                "Некому передать кандидата: ни один HR-аккаунт из ONBOARDING_HANDOFF_ACCOUNTS "
                 "не нажал Start у бота. Передача ждёт."
             )
 
     async def _account_for(self, row: Handoff) -> Optional[HandoffAccount]:
-        """Свой аккаунт, если человек уже закреплён; иначе подключённый, у кого меньше людей."""
+        """Закреплённый аккаунт, если он в списке и подключён; иначе подключённый с наименьшей нагрузкой."""
         async with self.sessions() as s:
             if row.account_id:
                 account = await s.get(HandoffAccount, row.account_id)
@@ -322,7 +414,7 @@ class HandoffService:
                     return account
             load = (
                 select(Handoff.account_id, func.count(Handoff.id).label("n"))
-                .where(Handoff.status.in_(("active", "done")), Handoff.account_id.is_not(None))
+                .where(Handoff.status == "active", Handoff.account_id.is_not(None))
                 .group_by(Handoff.account_id)
                 .subquery()
             )
@@ -337,29 +429,6 @@ class HandoffService:
                 .limit(1)
             )
 
-    async def _card(self, entity: Entity, row: Handoff, stage: Stage) -> str:
-        extra = entity.extra_data or {}
-        department, hr = await self._department_and_hr(entity)
-        lines = ["#onboarding_new" if stage.key == "first_day" else "#onboarding_stage", f"id: {entity.id}"]
-        if stage.key != "first_day":
-            lines.append(f"Этап: {stage.key} — {stage.title}")
-        lines += [
-            f"ФИО: {entity.name}",
-            f"Telegram: {self._telegram(entity) or '—'}",
-        ]
-        phone = (entity.phone or "").strip()
-        if phone:
-            lines.append(f"Телефон: {phone}")
-        lines += [
-            f"Отдел: {department or '—'}",
-            f"Лид: {_pick(extra, MANAGER_KEYS) or '—'}",
-            f"Первый рабочий день: {row.first_day.strftime('%d.%m.%Y')}",
-            f"Часовой пояс: {self.settings.default_tz}",
-        ]
-        if hr:
-            lines.append(f"HR: {hr}")
-        return "\n".join(lines)
-
     # ------------------------------------------------------------------ помощники
 
     def _stage_time(self, stage: Stage, first_day: date) -> datetime:
@@ -367,7 +436,6 @@ class HandoffService:
         if self.settings.skip_weekends:
             day = sch.next_workday(day)
         at = sch.at_local(day, stage.hour, self.settings.default_tz)
-        # дату выхода поставили задним числом или сегодня после 10:00 — передаём сразу, в рабочее время
         return max(at, sch.within_working_hours(self.clock(), self.settings.default_tz, self.settings.skip_weekends))
 
     @staticmethod
@@ -396,12 +464,16 @@ class HandoffService:
     async def _tell_hr(self, entity: Entity, reason: str) -> None:
         text = {
             "no_telegram": (
-                f"{entity.name} переведён(а) в отдел, но в карточке нет Telegram и телефона — "
-                "допишите, иначе HR-аккаунт не сможет написать в первый рабочий день."
+                f"{entity.name}: в карточке нет Telegram и телефона — допишите, иначе HR-бот "
+                "не сможет написать кандидату первым."
+            ),
+            "no_practice_date": (
+                f"{entity.name} на практике, но не указана дата выхода на практику — проставьте её "
+                "на «Штате», иначе HR-бот не напишет кандидату."
             ),
             "no_first_day": (
-                f"{entity.name} переведён(а) в отдел, но не указана дата выхода в отдел — "
-                "проставьте её на «Штате», от неё считаются первое сообщение и этапы онбординга."
+                f"{entity.name} переведён(а) в отдел, но не указана дата выхода в отдел — проставьте её "
+                "на «Штате», от неё считаются первый рабочий день и этапы онбординга."
             ),
         }[reason]
         targets = []

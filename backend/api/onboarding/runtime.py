@@ -27,24 +27,33 @@ def enabled() -> bool:
 def handoff_enabled() -> bool:
     from api.config import settings
 
-    return bool(settings.telegram_bot_token and settings.onboarding_handoff_accounts.strip())
+    return bool(
+        settings.onboarding_handoff_webhook_url.strip()
+        or (settings.telegram_bot_token and settings.onboarding_handoff_accounts.strip())
+    )
 
 
 async def get_handoff():
-    """HandoffService или None, если не задан TELEGRAM_BOT_TOKEN или ONBOARDING_HANDOFF_ACCOUNTS."""
+    """HandoffService или None: нужен ONBOARDING_HANDOFF_WEBHOOK_URL либо бот + ONBOARDING_HANDOFF_ACCOUNTS."""
     global _handoff
     if _handoff is not None or not handoff_enabled():
         return _handoff
     async with _lock:
         if _handoff is None:
-            from api.bot import get_bot
+            from api.config import settings as app
             from api.database import AsyncSessionLocal
 
-            from .handoff import HandoffService
+            from .handoff import HandoffService, NullMessenger
             from .service import utcnow
-            from .telegram import AiogramMessenger
 
-            _handoff = HandoffService(AsyncSessionLocal, AiogramMessenger(get_bot()), Settings.from_app(), utcnow)
+            messenger = NullMessenger()
+            if app.telegram_bot_token:
+                from api.bot import get_bot
+
+                from .telegram import AiogramMessenger
+
+                messenger = AiogramMessenger(get_bot())
+            _handoff = HandoffService(AsyncSessionLocal, messenger, Settings.from_app(), utcnow)
     return _handoff
 
 

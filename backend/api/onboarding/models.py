@@ -165,11 +165,14 @@ class HandoffAccount(Base):
 
 
 class Handoff(Base):
-    """Человек, переведённый в отдел, и где он в онбординге.
+    """Человек, которого ведёт HR-профиль автоспамера, и какие события ему уже переданы.
 
-    status: baseline — был в отделе до включения моста, не трогаем; waiting — не хватает
-    Telegram или даты выхода; active — ведётся, next_at — когда следующая пометка аккаунту;
-    done — все этапы переданы; stopped — уволен/ушёл, аккаунту отправлен «стоп».
+    Отчёт админа 03.11.2026: сценарий от практики до конца испытательного ведёт их система,
+    от productHR нужны события — практика назначена, перевод в отдел, стоп.
+    status: baseline — был на практике/в отделе до включения моста (baseline_status), то же
+    событие не шлём; active — ведётся; stopped — отправлен «стоп».
+    waiting_reason — чего не хватает для ближайшего события (Telegram, дата).
+    stage_index/next_at — пометки этапов после перевода, только при ONBOARDING_HANDOFF_STAGES.
     """
 
     __tablename__ = "onboarding_handoffs"
@@ -180,6 +183,11 @@ class Handoff(Base):
     status = Column(String(16), nullable=False, index=True)
     account_id = Column(Integer, ForeignKey("onboarding_handoff_accounts.id", ondelete="SET NULL"), nullable=True)
     first_day = Column(Date, nullable=True)
+    practice_date = Column(Date, nullable=True)
+    baseline_status = Column(String(32), nullable=True)
+    practice_sent_at = Column(DateTime, nullable=True)
+    transfer_sent_at = Column(DateTime, nullable=True)
+    stop_sent_at = Column(DateTime, nullable=True)
     stage_index = Column(Integer, default=0, nullable=False)
     next_at = Column(DateTime, nullable=True, index=True)
     waiting_reason = Column(String(32), nullable=True)

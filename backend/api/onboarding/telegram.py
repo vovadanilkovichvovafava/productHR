@@ -68,8 +68,8 @@ async def on_plain_start(message: Message) -> bool:
         logger.exception("ONBOARDING handoff register")
         return False
     await message.answer(
-        "Аккаунт подключён: сюда будут приходить новые сотрудники на онбординг (#onboarding_new) "
-        "и этапы их испытательного срока (#onboarding_stage)."
+        "Аккаунт подключён: сюда будут приходить кандидаты на практику (#onboarding_practice), "
+        "переводы в отдел (#onboarding_transfer) и остановки (#onboarding_stop)."
     )
     return True
 

@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     # Передача новых сотрудников HR-аккаунтам автоспамера/AI-селлера (api/onboarding/handoff.py):
     # @ники через запятую. Пусто — передача выключена. Каждый аккаунт один раз жмёт Start у бота.
     onboarding_handoff_accounts: str = Field(default="", alias="ONBOARDING_HANDOFF_ACCOUNTS")
+    # Вместо Telegram — JSON на адрес их системы, подпись HMAC-SHA256 в X-Onboarding-Signature
+    onboarding_handoff_webhook_url: str = Field(default="", alias="ONBOARDING_HANDOFF_WEBHOOK_URL")
+    onboarding_handoff_webhook_secret: str = Field(default="", alias="ONBOARDING_HANDOFF_WEBHOOK_SECRET")
+    # Пометки этапов (неделя, месяцы) — их система ведёт расписание сама, поэтому выключено
+    onboarding_handoff_stages: bool = Field(default=False, alias="ONBOARDING_HANDOFF_STAGES")
+    # Для первого сообщения практики: время старта (в productHR хранится только дата) и HRD
+    onboarding_practice_start_time: str = Field(default="10:00", alias="ONBOARDING_PRACTICE_START_TIME")
+    onboarding_hrd: str = Field(default="", alias="ONBOARDING_HRD")
 
     # AI API Keys
     anthropic_api_key: str = Field(

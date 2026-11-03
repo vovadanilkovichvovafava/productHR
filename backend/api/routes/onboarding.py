@@ -431,13 +431,12 @@ async def revoke_wallet_access(
 # ------------------------------------------- передача HR-аккаунтам автоспамера / AI-селлера
 
 HANDOFF_STATUS_LABELS = {
-    "waiting": "Ждёт данных",
     "active": "Ведётся",
-    "done": "Все этапы переданы",
     "stopped": "Остановлено",
 }
 HANDOFF_REASON_LABELS = {
     "no_telegram": "нет Telegram и телефона в карточке",
+    "no_practice_date": "не указана дата выхода на практику",
     "no_first_day": "не указана дата выхода в отдел",
     "no_account": "ни один HR-аккаунт не нажал Start у бота",
     "send_failed": "Telegram не принял сообщение аккаунту — повтор через 10 минут",
@@ -449,10 +448,9 @@ async def list_handoffs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Кого бот передал HR-аккаунтам, кто ждёт данных и почему (baseline — до включения — не показываем)."""
+    """Кого передали HR-профилю, кто ждёт данных и почему (baseline — до включения — не показываем)."""
     from ..config import settings as app_settings
     from ..onboarding.config import parse_accounts
-    from ..onboarding.handoff import STAGES
 
     current_user = await db.merge(current_user)
     org, _ = await _org_and_role(current_user, db)
@@ -471,6 +469,7 @@ async def list_handoffs(
             {"username": f"@{name}", "linked": bool(linked.get(name) and linked[name].tg_id)}
             for name in configured
         ],
+        "delivery": "webhook" if app_settings.onboarding_handoff_webhook_url.strip() else "telegram",
         "handoffs": [
             {
                 "entity_id": entity.id,
@@ -478,9 +477,11 @@ async def list_handoffs(
                 "status": row.status,
                 "status_label": HANDOFF_STATUS_LABELS.get(row.status, row.status),
                 "waiting_reason": HANDOFF_REASON_LABELS.get(row.waiting_reason) if row.waiting_reason else None,
+                "practice_sent_at": row.practice_sent_at,
+                "practice_date": row.practice_date,
+                "transfer_sent_at": row.transfer_sent_at,
                 "first_day": row.first_day,
-                "next_stage": STAGES[row.stage_index].key if row.status == "active" and row.stage_index < len(STAGES) else None,
-                "next_at_utc": row.next_at,
+                "stop_sent_at": row.stop_sent_at,
                 "account": f"@{account.username}" if account else None,
             }
             for row, entity, account in rows
