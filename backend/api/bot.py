@@ -2748,6 +2748,7 @@ async def cmd_start(message: types.Message):
     """Handle /start command in private chat. Supports deep linking for auto-bind."""
     if message.chat.type != "private":
         return
+    onboarding_tg.log_contact(message, "start")  # ID любого, кто пишет боту — STAFFWISE_CONTACT
 
     # Привязка ТОЛЬКО по одноразовому секретному токену.
     #
@@ -3684,6 +3685,7 @@ async def cmd_ai_digest(message: types.Message):
 
     Доступно только владельцу/админу организации (сводка охватывает всю орг).
     """
+    onboarding_tg.log_contact(message, "text")  # ID любого, кто пишет боту — STAFFWISE_CONTACT
     # Ответ в чат по заявке перехватываем раньше: этот обработчик ловит любой
     # текст в личке, и без проверки ответ ушёл бы в AI-сводку.
     if await _handle_access_chat_reply(message):

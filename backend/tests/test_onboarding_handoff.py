@@ -402,3 +402,51 @@ async def test_any_text_from_listed_account_links_it(handoff, monkeypatch):
     async with handoff.sessions() as s:
         account = await s.scalar(select(HandoffAccount).where(HandoffAccount.username == "hr_one"))
     assert account.tg_id == ACC_ONE
+
+
+async def test_employee_start_is_logged_too(monkeypatch, caplog):
+    """ID в лог пишется у ЛЮБОГО, кто пишет боту, — сотрудник тоже (а меню у него как было)."""
+    import api.bot as bot_module
+
+    monkeypatch.setattr(bot_module, "_get_user_access", AsyncMock(return_value={"org_id": 1, "is_admin": False}))
+    monkeypatch.setattr(bot_module, "main_menu_kb", lambda access: None)
+    message = SimpleNamespace(
+        text="/start", chat=SimpleNamespace(type="private", id=6161),
+        from_user=SimpleNamespace(id=6161, username="staff_guy", full_name="Сотрудник"), answer=AsyncMock(),
+    )
+    with caplog.at_level("INFO", logger="hr-analyzer.onboarding"):
+        await bot_module.cmd_start(message)
+    assert "STAFFWISE_CONTACT via=start user_id=6161 @staff_guy" in caplog.text
+    assert "Добро пожаловать" in message.answer.await_args.args[0]
+
+
+async def test_sticker_from_stranger_counts(monkeypatch, caplog):
+    """Стикер/фото/голосовое от не-сотрудника — ID в лог и тот же ответ, что на текст."""
+    import api.bot as bot_module
+    from api.onboarding import telegram as onboarding_tg
+    from api.onboarding import texts
+
+    monkeypatch.setattr(bot_module, "_get_user_access", AsyncMock(return_value=None))
+    message = SimpleNamespace(
+        text=None, chat=SimpleNamespace(type="private", id=7171),
+        from_user=SimpleNamespace(id=7171, username="hr_sticker", full_name="HR"), answer=AsyncMock(),
+    )
+    with caplog.at_level("INFO", logger="hr-analyzer.onboarding"):
+        await onboarding_tg.private_non_text(message)
+    assert "STAFFWISE_CONTACT via=media user_id=7171 @hr_sticker" in caplog.text
+    assert message.answer.await_args.args[0] == texts.STAFFWISE_START_TEMP
+
+
+async def test_sticker_from_employee_only_logged(monkeypatch, caplog):
+    import api.bot as bot_module
+    from api.onboarding import telegram as onboarding_tg
+
+    monkeypatch.setattr(bot_module, "_get_user_access", AsyncMock(return_value={"org_id": 1}))
+    message = SimpleNamespace(
+        text=None, chat=SimpleNamespace(type="private", id=8181),
+        from_user=SimpleNamespace(id=8181, username="staff_s", full_name="S"), answer=AsyncMock(),
+    )
+    with caplog.at_level("INFO", logger="hr-analyzer.onboarding"):
+        await onboarding_tg.private_non_text(message)
+    assert "user_id=8181" in caplog.text
+    message.answer.assert_not_called()

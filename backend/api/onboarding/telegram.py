@@ -83,13 +83,18 @@ async def on_stranger(message: Message, via: str) -> None:
     """
     if await on_plain_start(message):
         return
-    user = message.from_user
+    await message.answer(texts.STAFFWISE_START_TEMP)
+
+
+def log_contact(message: Message, via: str) -> None:
+    """ID, ник и имя любого, кто пишет боту в личку (сотрудник, HR-аккаунт, кандидат) — без текста
+    сообщения. По строке STAFFWISE_CONTACT HR-аккаунт вписывают в ONBOARDING_HANDOFF_ACCOUNTS."""
+    user = getattr(message, "from_user", None)
     logger.info(
         "STAFFWISE_CONTACT via=%s user_id=%s @%s name=%s",
         via, getattr(user, "id", None), getattr(user, "username", None) or "—",
         getattr(user, "full_name", None) or "",
     )
-    await message.answer(texts.STAFFWISE_START_TEMP)
 
 
 async def on_private_text(message: Message) -> bool:
@@ -154,6 +159,25 @@ async def _reply(callback: CallbackQuery, text: str | None) -> None:
     await callback.answer()
     if text and isinstance(callback.message, Message):
         await callback.message.answer(text)
+
+
+@router.message(F.chat.type == "private", ~F.text)
+async def private_non_text(message: Message) -> None:
+    """Стикер, фото, голосовое в личку — тоже засчитываем: ID в лог; не-сотруднику — как на текст.
+    Своих обработчиков такого в личке у api/bot.py нет, поэтому сюда они доходят."""
+    log_contact(message, "media")
+    if message.from_user is None:
+        return
+    try:
+        from api.bot import _get_user_access, async_session
+
+        async with async_session() as session:
+            access = await _get_user_access(session, message.from_user.id)
+    except Exception:
+        logger.exception("ONBOARDING media access check")
+        return
+    if not access:
+        await on_stranger(message, "media")
 
 
 @router.callback_query(F.data.startswith("scr:"))
