@@ -1413,6 +1413,13 @@ invitations,org_units}.py`, `entities/hire.py`. Ревью нашло захва
   `ONBOARDING_HANDOFF_STAGES`. Колонки событий заведены в шаге 3.0 `init_database`.
   Формат — `~/Desktop/Rabota/spam/HANDOFF_FORMAT.md`, обзор для HR —
   `GET /api/onboarding/handoffs`. Сторож — `tests/test_onboarding_handoff.py`.
+- **Аккаунты передачи по Telegram ID**: в `ONBOARDING_HANDOFF_ACCOUNTS` можно и числовые ID
+  (у купленных аккаунтов часто нет @ника) — такие подключены сразу, без повторного Start.
+- **Бот — @Staffwise_bot** (04.11.2026). `/start` от НЕ-сотрудника (нет привязанного
+  аккаунта: кандидат, HR-аккаунт не из списка) получает `texts.STAFFWISE_START_TEMP` вместо
+  меню «Энцеладуса»; сотрудник — меню, как раньше. Текст ВРЕМЕННЫЙ, переделать.
+  До деплоя @Staffwise_bot отвечал локальный ответчик Ильнара — перед запуском productHR
+  с этим токеном его остановить (один токен — один слушатель, иначе 409).
 - Маркеры: `ONBOARDING case=…`, `ONBOARDING jobs done=`, `ONBOARDING handoff …`.
 - **Первый рабочий день** (чек-лист ТЗ, стр. 11–13): в день выхода в отдел
   10:00 — приветствие с материалами (`ONBOARDING_MATERIALS_URL`; кошелёк

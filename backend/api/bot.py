@@ -2781,6 +2781,12 @@ async def cmd_start(message: types.Message):
     async with async_session() as session:
         access = await _get_user_access(session, message.from_user.id)
 
+    # Не сотрудник (кандидат, HR-аккаунт не из списка): меню и «Энцеладус» ему ни к чему —
+    # ВРЕМЕННЫЙ ответ HR-бота Staffwise (04.11.2026, переделать — texts.STAFFWISE_START_TEMP)
+    if not access:
+        await message.answer(onboarding_tg.texts.STAFFWISE_START_TEMP)
+        return
+
     await message.answer(
         "👋 Добро пожаловать в Enceladus!\n\n"
         "Добавьте меня в группу для анализа сообщений.\n"

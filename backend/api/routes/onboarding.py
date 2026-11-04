@@ -466,7 +466,7 @@ async def list_handoffs(
     linked = {a.username: a for a in (await db.execute(select(HandoffAccount))).scalars().all()}
     return {
         "accounts": [
-            {"username": f"@{name}", "linked": bool(linked.get(name) and linked[name].tg_id)}
+            {"username": name if name.isdigit() else f"@{name}", "linked": bool(linked.get(name) and linked[name].tg_id)}
             for name in configured
         ],
         "delivery": "webhook" if app_settings.onboarding_handoff_webhook_url.strip() else "telegram",

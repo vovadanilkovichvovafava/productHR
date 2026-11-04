@@ -325,8 +325,11 @@ class TestCommandHandlers:
 
     @pytest.mark.asyncio
     async def test_cmd_start_private_chat(self, db_session: AsyncSession, telegram_private_chat, telegram_user):
-        """Test /start command in private chat — приветствие и меню."""
+        """/start в личке от человека без привязанного аккаунта — временный ответ HR-бота
+        Staffwise (04.11.2026), а не меню сотрудника. Меню сотрудника —
+        test_onboarding_handoff.py::test_start_from_employee_keeps_menu."""
         from api.bot import cmd_start
+        from api.onboarding import texts
 
         p = self._patch_session(db_session)
         try:
@@ -336,9 +339,7 @@ class TestCommandHandlers:
             p.stop()
 
         message.answer.assert_called_once()
-        call_args = message.answer.call_args[0][0]
-        assert "Добро пожаловать" in call_args
-        assert "/menu" in call_args
+        assert message.answer.call_args[0][0] == texts.STAFFWISE_START_TEMP
 
     @pytest.mark.asyncio
     async def test_cmd_start_group_chat(self, telegram_chat, telegram_user):

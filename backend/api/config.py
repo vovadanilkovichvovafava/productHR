@@ -70,7 +70,8 @@ class Settings(BaseSettings):
     # Не писать в выходные и вне 10:00–18:00 (кроме времени, которое ТЗ задаёт явно: Loom 20:00)
     onboarding_skip_weekends: bool = Field(default=True, alias="ONBOARDING_SKIP_WEEKENDS")
     # Передача новых сотрудников HR-аккаунтам автоспамера/AI-селлера (api/onboarding/handoff.py):
-    # @ники через запятую. Пусто — передача выключена. Каждый аккаунт один раз жмёт Start у бота.
+    # @ники или числовые Telegram ID через запятую. Пусто — передача выключена. Аккаунт по нику
+    # один раз жмёт Start у бота; по ID — подключён сразу (ID берут из того, что он написал боту).
     onboarding_handoff_accounts: str = Field(default="", alias="ONBOARDING_HANDOFF_ACCOUNTS")
     # Вместо Telegram — JSON на адрес их системы, подпись HMAC-SHA256 в X-Onboarding-Signature
     onboarding_handoff_webhook_url: str = Field(default="", alias="ONBOARDING_HANDOFF_WEBHOOK_URL")

@@ -326,3 +326,42 @@ async def test_api_handoffs_overview(client, handoff, monkeypatch, db_session, o
     assert by_name["Без Ника"]["waiting_reason"] == "нет Telegram и телефона в карточке"
     assert by_name["Передан"]["practice_sent_at"] and by_name["Передан"]["account"] == "@hr_one"
     assert sent.id == by_name["Передан"]["entity_id"]
+
+
+async def test_accounts_by_telegram_id(async_engine, messenger, clock, db_session, organization, admin_user):
+    """У купленных аккаунтов часто нет @ника — в списке их числовой ID, подключены без /start."""
+    svc = _service(async_engine, messenger, clock, handoff_accounts=("777001",))
+    await svc.tick()
+    await _person(db_session, organization, admin_user, "Иван Петров")
+    assert await svc.tick() == 1
+    assert messenger.to(777001)[0].startswith("#onboarding_practice")
+    # /start с этого аккаунта без ника тоже узнаётся по ID
+    assert await svc.register_account(777001, None)
+    assert not await svc.register_account(777002, None)
+
+
+async def test_start_from_stranger_gets_staffwise_reply(monkeypatch):
+    """Не сотрудник на /start — временный ответ Staffwise, а не меню «Энцеладуса»."""
+    import api.bot as bot_module
+    from api.onboarding import texts
+
+    monkeypatch.setattr(bot_module, "_get_user_access", AsyncMock(return_value=None))
+    message = SimpleNamespace(
+        text="/start", chat=SimpleNamespace(type="private", id=4242),
+        from_user=SimpleNamespace(id=4242, username="someone"), answer=AsyncMock(),
+    )
+    await bot_module.cmd_start(message)
+    assert message.answer.await_args.args[0] == texts.STAFFWISE_START_TEMP
+
+
+async def test_start_from_employee_keeps_menu(monkeypatch):
+    import api.bot as bot_module
+
+    monkeypatch.setattr(bot_module, "_get_user_access", AsyncMock(return_value={"org_id": 1, "is_admin": False}))
+    monkeypatch.setattr(bot_module, "main_menu_kb", lambda access: None)
+    message = SimpleNamespace(
+        text="/start", chat=SimpleNamespace(type="private", id=4243),
+        from_user=SimpleNamespace(id=4243, username="employee"), answer=AsyncMock(),
+    )
+    await bot_module.cmd_start(message)
+    assert "Добро пожаловать" in message.answer.await_args.args[0]

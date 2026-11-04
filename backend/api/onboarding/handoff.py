@@ -176,9 +176,13 @@ class HandoffService:
     # ------------------------------------------------------------------ вход
 
     async def register_account(self, tg_id: int, username: Optional[str]) -> bool:
-        """/start от HR-аккаунта из списка — запоминаем, куда ему писать."""
+        """/start от HR-аккаунта из списка (по @нику или по Telegram ID) — запоминаем, куда писать."""
         name = (username or "").lstrip("@").lower()
-        if not name or name not in self.settings.handoff_accounts:
+        if name and name in self.settings.handoff_accounts:
+            pass
+        elif str(tg_id) in self.settings.handoff_accounts:
+            name = str(tg_id)  # у купленных аккаунтов часто нет @ника — тогда в списке их ID
+        else:
             return False
         async with self.sessions() as s:
             account = await s.scalar(select(HandoffAccount).where(HandoffAccount.username == name))
@@ -195,11 +199,34 @@ class HandoffService:
         """Один проход воркера. Возвращает, сколько событий передано."""
         if not (self.via_webhook or self.settings.handoff_accounts):
             return 0
+        await self._sync_id_accounts()
         await self._baseline_once()
         await self._pick_up()
         return await self._process()
 
     # ------------------------------------------------------------- этапы прохода
+
+    async def _sync_id_accounts(self) -> None:
+        """Аккаунты, указанные числовым Telegram ID, подключены сразу: ID берут из того, что они
+        уже написали боту, — значит Telegram даст боту им ответить."""
+        ids = [key for key in self.settings.handoff_accounts if key.isdigit()]
+        if not ids:
+            return
+        async with self.sessions() as s:
+            known = {a.username: a for a in (await s.scalars(
+                select(HandoffAccount).where(HandoffAccount.username.in_(ids))
+            )).all()}
+            changed = False
+            for key in ids:
+                account = known.get(key)
+                if account is None:
+                    s.add(HandoffAccount(username=key, tg_id=int(key), linked_at=self.clock()))
+                    changed = True
+                elif account.tg_id is None:
+                    account.tg_id, account.linked_at = int(key), self.clock()
+                    changed = True
+            if changed:
+                await s.commit()
 
     async def _baseline_once(self) -> None:
         async with self.sessions() as s:
