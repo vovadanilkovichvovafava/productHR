@@ -31,8 +31,8 @@ SETTINGS = dict(handoff_accounts=("hr_one", "hr_two"), hr_fallback_chat_id=FALLB
 class FakeMessenger:
     sent: list = field(default_factory=list)
 
-    async def send(self, chat_id, text, buttons=None):
-        self.sent.append(SimpleNamespace(chat_id=chat_id, text=text))
+    async def send(self, chat_id, text, buttons=None, html=False):
+        self.sent.append(SimpleNamespace(chat_id=chat_id, text=text, html=html))
 
     def to(self, chat_id):
         return [m.text for m in self.sent if m.chat_id == chat_id]
@@ -181,8 +181,10 @@ async def test_missing_data_asks_hr_once(handoff, messenger, db_session, organiz
     await handoff.tick()
     notices = messenger.to(FALLBACK)
     assert len(notices) == 2
-    assert any("нет Telegram и телефона" in n for n in notices)
-    assert any("не указана дата выхода на практику" in n for n in notices)
+    assert "Без Ника: в карточке нет Telegram и телефона" in notices[0]  # ника нет — имя без ссылки
+    # ФИО — ссылка на Telegram кандидата, уведомление уходит HTML-разметкой
+    assert notices[1].startswith('<a href="https://t.me/no_date">Без Даты</a> на практике, но не указана дата')
+    assert all(m.html for m in messenger.sent if m.chat_id == FALLBACK)
 
     no_nick.telegram_usernames = ["found_nick"]
     await db_session.commit()

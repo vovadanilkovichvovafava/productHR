@@ -38,7 +38,7 @@ class FakeMessenger:
     sent: list = field(default_factory=list)
     failing: set = field(default_factory=set)
 
-    async def send(self, chat_id, text, buttons=None):
+    async def send(self, chat_id, text, buttons=None, html=False):
         if chat_id in self.failing:
             raise SendError("Forbidden: bot was blocked by the user")
         self.sent.append(SimpleNamespace(chat_id=chat_id, text=text, buttons=buttons))

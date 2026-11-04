@@ -23,6 +23,7 @@ HR-аккаунту из ONBOARDING_HANDOFF_ACCOUNTS (с наименьшей н
 
 import hashlib
 import hmac
+import html
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -108,7 +109,7 @@ LABELS = (
 class NullMessenger:
     """Без бота (только вебхук) — Telegram не нужен."""
 
-    async def send(self, chat_id, text, buttons=None):
+    async def send(self, chat_id, text, buttons=None, html=False):
         raise SendError("Telegram-бот не настроен")
 
 
@@ -489,17 +490,22 @@ class HandoffService:
         return department, (hr.name if hr else None)
 
     async def _tell_hr(self, entity: Entity, reason: str) -> None:
+        # ФИО — ссылка на Telegram кандидата, когда ник есть (просьба Ильнара 04.11.2026)
+        nick = self._telegram(entity)
+        name = html.escape(entity.name or "")
+        if nick:
+            name = f'<a href="https://t.me/{html.escape(nick.lstrip("@"), quote=True)}">{name}</a>'
         text = {
             "no_telegram": (
-                f"{entity.name}: в карточке нет Telegram и телефона — допишите, иначе HR-бот "
+                f"{name}: в карточке нет Telegram и телефона — допишите, иначе HR-бот "
                 "не сможет написать кандидату первым."
             ),
             "no_practice_date": (
-                f"{entity.name} на практике, но не указана дата выхода на практику — проставьте её "
+                f"{name} на практике, но не указана дата выхода на практику — проставьте её "
                 "на «Штате», иначе HR-бот не напишет кандидату."
             ),
             "no_first_day": (
-                f"{entity.name} переведён(а) в отдел, но не указана дата выхода в отдел — проставьте её "
+                f"{name} переведён(а) в отдел, но не указана дата выхода в отдел — проставьте её "
                 "на «Штате», от неё считаются первый рабочий день и этапы онбординга."
             ),
         }[reason]
@@ -513,7 +519,7 @@ class HandoffService:
             targets.append(self.settings.hr_fallback_chat_id)
         for chat_id in targets:
             try:
-                await self.messenger.send(chat_id, text)
+                await self.messenger.send(chat_id, text, html=True)
                 break
             except SendError as exc:
                 logger.warning("ONBOARDING handoff HR notice to %s failed: %s", chat_id, exc)

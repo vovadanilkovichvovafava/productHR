@@ -11,4 +11,5 @@ class SendError(Exception):
 
 
 class Messenger(Protocol):
-    async def send(self, chat_id: int, text: str, buttons: Buttons | None = None) -> None: ...
+    async def send(self, chat_id: int, text: str, buttons: Buttons | None = None, html: bool = False) -> None:
+        """html=True — text в HTML-разметке Telegram (ссылки), спецсимволы экранирует вызывающий."""
