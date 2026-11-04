@@ -194,3 +194,37 @@ class Handoff(Base):
     notified_reason = Column(String(32), nullable=True)  # о чём HR уже сказали — не повторяем
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow)
+
+
+class HandoffWallet(Base):
+    """Кошелёк, который HR-профиль их системы вернул в productHR (POST /api/onboarding/inbound).
+
+    Привязан к карточке, а не к OnboardingCase: при передаче HR-профилю карточки бота нет.
+    Шифруется тем же ключом, что и Wallet (ONBOARDING_WALLET_KEY).
+    """
+
+    __tablename__ = "onboarding_handoff_wallets"
+
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    entity_id = Column(Integer, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, unique=True)
+    ciphertext = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class HandoffAnswer(Base):
+    """Ответ кандидата из их системы (опрос недели, месяцев, Loom…). Тот же опрос и вопрос — перезапись."""
+
+    __tablename__ = "onboarding_handoff_answers"
+
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    entity_id = Column(Integer, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, index=True)
+    survey = Column(String(64), nullable=False)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    is_signal = Column(Boolean, default=False, nullable=False)
+    answered_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)

@@ -1413,6 +1413,13 @@ invitations,org_units}.py`, `entities/hire.py`. Ревью нашло захва
   `ONBOARDING_HANDOFF_STAGES`. Колонки событий заведены в шаге 3.0 `init_database`.
   Формат — `~/Desktop/Rabota/spam/HANDOFF_FORMAT.md`, обзор для HR —
   `GET /api/onboarding/handoffs`. Сторож — `tests/test_onboarding_handoff.py`.
+- **Обратно от HR-профиля** (админ 04.11.2026: «Да, возвращаем»): `POST /api/onboarding/inbound`
+  без пользователя productHR — вход по `ONBOARDING_INBOUND_SECRET` (`Authorization: Bearer` или
+  HMAC тела в `X-Onboarding-Signature`; пусто — 503). По `id` из события (только переданные,
+  не baseline) пишет кошелёк в `onboarding_handoff_wallets` (Fernet, `ONBOARDING_WALLET_KEY`) и
+  ответы в `onboarding_handoff_answers` (тот же опрос+вопрос — перезапись). Привязка к
+  карточке, не к `OnboardingCase` — при передаче карточки бота нет. Кошельки — в общем
+  `/api/onboarding/wallets` для бухгалтерии, ответы — `GET /api/onboarding/entities/{id}/answers`.
 - **Аккаунты передачи по Telegram ID**: в `ONBOARDING_HANDOFF_ACCOUNTS` можно и числовые ID
   (у купленных аккаунтов часто нет @ника) — такие подключены сразу, без повторного Start.
 - **Бот — @Staffwise_bot** (04.11.2026). `/start` от НЕ-сотрудника (нет привязанного
@@ -1420,7 +1427,7 @@ invitations,org_units}.py`, `entities/hire.py`. Ревью нашло захва
   меню «Энцеладуса»; сотрудник — меню, как раньше. Текст ВРЕМЕННЫЙ, переделать.
   До деплоя @Staffwise_bot отвечал локальный ответчик Ильнара — перед запуском productHR
   с этим токеном его остановить (один токен — один слушатель, иначе 409).
-- Маркеры: `ONBOARDING case=…`, `ONBOARDING jobs done=`, `ONBOARDING handoff …`,
+- Маркеры: `ONBOARDING case=…`, `ONBOARDING jobs done=`, `ONBOARDING handoff …`, `ONBOARDING inbound …`,
   `STAFFWISE_CONTACT via=start|text|media user_id=… @ник` — КТО УГОДНО написал боту в личку
   (сотрудник тоже; текст сообщения не пишется) — по нему берут ID HR-аккаунтов. HR-аккаунт из списка подключается ЛЮБЫМ сообщением, не только /start;
   не-сотрудник на любой текст получает временный ответ Staffwise, а не «привяжите аккаунт».

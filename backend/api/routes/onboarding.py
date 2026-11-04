@@ -9,20 +9,24 @@ HR назначает практику в карточке кандидата �
 Данные кошелька — владелец, админы и бухгалтерия, которой они выдали доступ; чтение пишется в лог.
 """
 
+import hashlib
+import hmac
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models.database import Entity, OrgRole, User, UserRole
+from ..limiter import limiter
+from ..models.database import BoardDepartment, BoardPlacement, Entity, OrgRole, User, UserRole
+from ..onboarding.crypto import WalletCipher
 from ..onboarding.models import (
-    ACTIVE_STATUSES, CaseStatus, Handoff, HandoffAccount, OnboardingCase, Signal, SurveyResponse, Wallet,
-    WalletAccess,
+    ACTIVE_STATUSES, CaseStatus, Handoff, HandoffAccount, HandoffAnswer, HandoffWallet, OnboardingCase, Signal,
+    SurveyResponse, Wallet, WalletAccess,
 )
 from ..onboarding.runtime import enabled, get_service
 from ..onboarding.surveys import SURVEYS
@@ -353,15 +357,29 @@ async def list_wallets(
     """Список для бухгалтерии: кто, какой отдел, кошелёк. Без остальных данных кандидата."""
     current_user = await db.merge(current_user)
     org = await _wallet_reader(current_user, db)
-    service = await _service_or_503()
+    cipher = _cipher_or_503()
     rows = (await db.execute(
         select(OnboardingCase, Wallet)
         .join(Wallet, Wallet.case_id == OnboardingCase.id)
         .where(OnboardingCase.org_id == org.id)
-        .order_by(OnboardingCase.full_name)
     )).all()
-    logger.info("PII_ACCESS onboarding_wallets list=%s by=%s", len(rows), current_user.id)
-    return [
+    # Кошельки, которые вернул HR-профиль (POST /inbound): отдел — с «Штата», лид — из карточки
+    returned = (await db.execute(
+        select(Entity, HandoffWallet)
+        .join(HandoffWallet, HandoffWallet.entity_id == Entity.id)
+        .where(Entity.org_id == org.id)
+    )).all()
+    departments = dict((await db.execute(
+        select(BoardPlacement.entity_id, BoardDepartment.name)
+        .join(BoardDepartment, BoardDepartment.id == BoardPlacement.department_id)
+        .where(
+            BoardPlacement.entity_id.in_([entity.id for entity, _ in returned] or [-1]),
+            func.coalesce(BoardDepartment.kind, "team") != "sandbox",
+        )
+        .order_by(BoardPlacement.id)
+    )).all())
+    logger.info("PII_ACCESS onboarding_wallets list=%s by=%s", len(rows) + len(returned), current_user.id)
+    result = [
         {
             "case_id": case.id,
             "entity_id": case.entity_id,
@@ -370,11 +388,26 @@ async def list_wallets(
             "lead_name": case.lead_name,
             "status": case.status,
             "status_label": STATUS_LABELS.get(case.status, case.status),
-            "wallet": service.cipher.decrypt(wallet.ciphertext),
+            "wallet": cipher.decrypt(wallet.ciphertext),
             "saved_at": wallet.created_at,
         }
         for case, wallet in rows
     ]
+    result += [
+        {
+            "case_id": None,
+            "entity_id": entity.id,
+            "full_name": entity.name,
+            "department": departments.get(entity.id),
+            "lead_name": (entity.extra_data or {}).get("manager_name"),
+            "status": entity.status.value if entity.status else None,
+            "status_label": None,
+            "wallet": cipher.decrypt(wallet.ciphertext),
+            "saved_at": wallet.updated_at,
+        }
+        for entity, wallet in returned
+    ]
+    return sorted(result, key=lambda row: row["full_name"] or "")
 
 
 @router.get("/wallet-access")
@@ -485,5 +518,125 @@ async def list_handoffs(
                 "account": f"@{account.username}" if account else None,
             }
             for row, entity, account in rows
+        ],
+    }
+
+
+# ------------------------------------------- обратно от HR-профиля: кошелёк и ответы
+# Админ 04.11.2026: «Да, возвращаем». Их система шлёт POST по `id` из наших событий;
+# пользователя productHR у неё нет — вход по секрету ONBOARDING_INBOUND_SECRET.
+
+
+class InboundAnswer(BaseModel):
+    survey: str = Field(min_length=1, max_length=64, description="Опрос: week, month1, loom…")
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str = Field(min_length=1, max_length=5000)
+    signal: bool = Field(False, description="Ответ, на который HR уже получил сигнал")
+    answered_at: Optional[datetime] = None
+
+
+class InboundData(BaseModel):
+    id: int = Field(description="id из события #onboarding_* — номер карточки в productHR")
+    wallet: Optional[str] = Field(None, min_length=1, max_length=500)
+    answers: list[InboundAnswer] = Field(default_factory=list, max_length=100)
+
+
+def _inbound_authorized(request: Request, body: bytes, secret: str) -> bool:
+    """Authorization: Bearer <секрет> или X-Onboarding-Signature: sha256=<HMAC тела> — как наш вебхук."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and hmac.compare_digest(auth[7:].strip().encode(), secret.encode()):
+        return True
+    signature = request.headers.get("X-Onboarding-Signature", "")
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return bool(signature) and hmac.compare_digest(signature.encode(), expected.encode())
+
+
+def _naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _cipher_or_503() -> WalletCipher:
+    from ..config import settings as app_settings
+
+    if not app_settings.onboarding_wallet_key:
+        raise HTTPException(503, "Не задан ONBOARDING_WALLET_KEY: кошельки хранятся только зашифрованными")
+    return WalletCipher(app_settings.onboarding_wallet_key)
+
+
+@router.post("/inbound")
+@limiter.limit("120/minute")
+async def inbound(request: Request, db: AsyncSession = Depends(get_db)):
+    from ..config import settings as app_settings
+
+    secret = app_settings.onboarding_inbound_secret.strip()
+    if not secret:
+        raise HTTPException(503, "Приём выключен: не задан ONBOARDING_INBOUND_SECRET")
+    body = await request.body()
+    if not _inbound_authorized(request, body, secret):
+        raise HTTPException(401, "Неверный секрет или подпись")
+    try:
+        data = InboundData.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(422, exc.errors(include_url=False, include_context=False, include_input=False))
+    if data.wallet is None and not data.answers:
+        raise HTTPException(422, "Нужен wallet или answers")
+
+    handoff = await db.scalar(
+        select(Handoff).where(Handoff.entity_id == data.id, Handoff.status != "baseline")
+    )
+    if handoff is None:
+        raise HTTPException(404, "Такого id productHR не передавал")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if data.wallet is not None:
+        ciphertext = _cipher_or_503().encrypt(data.wallet.strip())
+        wallet = await db.scalar(select(HandoffWallet).where(HandoffWallet.entity_id == data.id))
+        if wallet is None:
+            db.add(HandoffWallet(org_id=handoff.org_id, entity_id=data.id, ciphertext=ciphertext,
+                                 created_at=now, updated_at=now))
+        else:
+            wallet.ciphertext, wallet.updated_at = ciphertext, now
+
+    for item in data.answers:
+        row = await db.scalar(select(HandoffAnswer).where(
+            HandoffAnswer.entity_id == data.id,
+            HandoffAnswer.survey == item.survey,
+            HandoffAnswer.question == item.question,
+        ))
+        if row is None:
+            row = HandoffAnswer(org_id=handoff.org_id, entity_id=data.id, survey=item.survey,
+                                question=item.question, created_at=now)
+            db.add(row)
+        row.answer, row.is_signal = item.answer, item.signal
+        row.answered_at, row.updated_at = _naive_utc(item.answered_at), now
+    await db.commit()
+    logger.info("ONBOARDING inbound entity=%s wallet=%s answers=%s", data.id, data.wallet is not None,
+                len(data.answers))
+    return {"ok": True, "id": data.id, "wallet": data.wallet is not None, "answers": len(data.answers)}
+
+
+@router.get("/entities/{entity_id}/answers")
+async def entity_answers(
+    entity_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Что HR-профиль вернул по человеку: ответы опросов и есть ли кошелёк (сам кошелёк — в /wallets)."""
+    current_user = await db.merge(current_user)
+    org, _ = await _org_and_role(current_user, db)
+    await _entity(entity_id, org.id, current_user, db)
+    answers = (await db.execute(
+        select(HandoffAnswer).where(HandoffAnswer.entity_id == entity_id).order_by(HandoffAnswer.id)
+    )).scalars().all()
+    wallet_at = await db.scalar(select(HandoffWallet.updated_at).where(HandoffWallet.entity_id == entity_id))
+    return {
+        "has_wallet": wallet_at is not None,
+        "wallet_saved_at": wallet_at,
+        "answers": [
+            {"survey": a.survey, "question": a.question, "answer": a.answer, "is_signal": a.is_signal,
+             "answered_at": a.answered_at, "received_at": a.updated_at}
+            for a in answers
         ],
     }

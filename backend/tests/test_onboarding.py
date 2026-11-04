@@ -85,6 +85,7 @@ async def service(async_engine, messenger, clock, monkeypatch):
     )
     monkeypatch.setattr(runtime, "enabled", lambda: True)
     monkeypatch.setattr("api.routes.onboarding.enabled", lambda: True)
+    monkeypatch.setattr("api.config.settings.onboarding_wallet_key", settings.wallet_enc_key)
     runtime.set_service(svc)
     yield svc
     runtime.set_service(None)

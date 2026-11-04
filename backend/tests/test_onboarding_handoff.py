@@ -450,3 +450,90 @@ async def test_sticker_from_employee_only_logged(monkeypatch, caplog):
         await onboarding_tg.private_non_text(message)
     assert "user_id=8181" in caplog.text
     message.answer.assert_not_called()
+
+
+# ------------------------------------------- обратно от HR-профиля: кошелёк и ответы
+
+INBOUND_SECRET = "inbound-test-secret"
+
+
+@pytest.fixture
+def inbound_on(monkeypatch):
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setattr("api.config.settings.onboarding_inbound_secret", INBOUND_SECRET)
+    monkeypatch.setattr("api.config.settings.onboarding_wallet_key", Fernet.generate_key().decode())
+
+
+async def _handed_over(handoff, db, org, user, name="Иван Петров"):
+    await _link(handoff)
+    await handoff.tick()
+    entity = await _person(db, org, user, name)
+    assert await handoff.tick() == 1
+    return entity
+
+
+def _signed(payload: dict) -> tuple[bytes, dict]:
+    body = json.dumps(payload, ensure_ascii=False).encode()
+    digest = hmac.new(INBOUND_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    return body, {"Content-Type": "application/json", "X-Onboarding-Signature": f"sha256={digest}"}
+
+
+async def test_inbound_saves_wallet_and_answers(client, handoff, inbound_on, db_session, org_owner,
+                                                admin_token, organization, admin_user):
+    entity = await _handed_over(handoff, db_session, organization, admin_user)
+    body, headers = _signed({
+        "id": entity.id,
+        "wallet": "TRC20: TReturned",
+        "answers": [
+            {"survey": "week", "question": "Как прошла первая неделя?", "answer": "Норм",
+             "answered_at": "2026-11-12T15:00:00+03:00"},
+            {"survey": "week", "question": "Что мешает?", "answer": "Нет доступа к ПП", "signal": True},
+        ],
+    })
+    r = await client.post("/api/onboarding/inbound", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "id": entity.id, "wallet": True, "answers": 2}
+
+    # повтор того же вопроса — перезапись, а не дубль; Bearer тоже принимается
+    r = await client.post("/api/onboarding/inbound", headers={"Authorization": f"Bearer {INBOUND_SECRET}"}, json={
+        "id": entity.id, "answers": [{"survey": "week", "question": "Что мешает?", "answer": "Уже всё ок"}],
+    })
+    assert r.status_code == 200, r.text
+
+    r = await client.get(f"/api/onboarding/entities/{entity.id}/answers", headers=auth_headers(admin_token))
+    data = r.json()
+    assert data["has_wallet"] is True
+    assert [(a["question"], a["answer"], a["is_signal"]) for a in data["answers"]] == [
+        ("Как прошла первая неделя?", "Норм", False), ("Что мешает?", "Уже всё ок", False),
+    ]
+    assert data["answers"][0]["answered_at"].startswith("2026-11-12T12:00")  # в UTC
+
+    r = await client.get("/api/onboarding/wallets", headers=auth_headers(admin_token))
+    assert r.status_code == 200, r.text
+    [row] = r.json()
+    assert row["entity_id"] == entity.id and row["wallet"] == "TRC20: TReturned" and row["lead_name"] == "Анна"
+
+
+async def test_inbound_rejects_bad_secret_and_unknown_id(client, handoff, inbound_on, db_session,
+                                                         organization, admin_user):
+    entity = await _handed_over(handoff, db_session, organization, admin_user)
+    body, headers = _signed({"id": entity.id, "wallet": "x"})
+    bad = {**headers, "X-Onboarding-Signature": "sha256=" + "0" * 64}
+    assert (await client.post("/api/onboarding/inbound", content=body, headers=bad)).status_code == 401
+    assert (await client.post("/api/onboarding/inbound", json={"id": entity.id, "wallet": "x"},
+                              headers={"Authorization": "Bearer wrong"})).status_code == 401
+
+    stranger = await _person(db_session, organization, admin_user, "Не Передавали", status=EntityStatus.new)
+    body, headers = _signed({"id": stranger.id, "wallet": "x"})
+    assert (await client.post("/api/onboarding/inbound", content=body, headers=headers)).status_code == 404
+
+    body, headers = _signed({"id": entity.id})
+    assert (await client.post("/api/onboarding/inbound", content=body, headers=headers)).status_code == 422
+
+
+async def test_inbound_off_without_secret(client, monkeypatch):
+    monkeypatch.setattr("api.config.settings.onboarding_inbound_secret", "")
+    r = await client.post("/api/onboarding/inbound", json={"id": 1, "wallet": "x"},
+                          headers={"Authorization": "Bearer "})
+    assert r.status_code == 503

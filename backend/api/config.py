@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     # Для первого сообщения практики: время старта (в productHR хранится только дата) и HRD
     onboarding_practice_start_time: str = Field(default="10:00", alias="ONBOARDING_PRACTICE_START_TIME")
     onboarding_hrd: str = Field(default="", alias="ONBOARDING_HRD")
+    # Приём кошелька и ответов обратно от HR-профиля (POST /api/onboarding/inbound); пусто — выключен
+    onboarding_inbound_secret: str = Field(default="", alias="ONBOARDING_INBOUND_SECRET")
 
     # AI API Keys
     anthropic_api_key: str = Field(
