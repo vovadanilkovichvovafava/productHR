@@ -340,8 +340,8 @@ async def test_accounts_by_telegram_id(async_engine, messenger, clock, db_sessio
     assert not await svc.register_account(777002, None)
 
 
-async def test_start_from_stranger_gets_staffwise_reply(monkeypatch):
-    """Не сотрудник на /start — временный ответ Staffwise, а не меню «Энцеладуса»."""
+async def test_start_from_stranger_gets_staffwise_reply(monkeypatch, caplog):
+    """Не сотрудник на /start — временный ответ Staffwise, а не меню «Энцеладуса»; ID и ник — в лог."""
     import api.bot as bot_module
     from api.onboarding import texts
 
@@ -350,8 +350,10 @@ async def test_start_from_stranger_gets_staffwise_reply(monkeypatch):
         text="/start", chat=SimpleNamespace(type="private", id=4242),
         from_user=SimpleNamespace(id=4242, username="someone"), answer=AsyncMock(),
     )
-    await bot_module.cmd_start(message)
+    with caplog.at_level("INFO", logger="hr-analyzer.onboarding"):
+        await bot_module.cmd_start(message)
     assert message.answer.await_args.args[0] == texts.STAFFWISE_START_TEMP
+    assert "STAFFWISE_CONTACT via=start user_id=4242 @someone" in caplog.text
 
 
 async def test_start_from_employee_keeps_menu(monkeypatch):
@@ -365,3 +367,38 @@ async def test_start_from_employee_keeps_menu(monkeypatch):
     )
     await bot_module.cmd_start(message)
     assert "Добро пожаловать" in message.answer.await_args.args[0]
+
+
+def _text_message(user_id, username, text="привет"):
+    return SimpleNamespace(
+        text=text, chat=SimpleNamespace(type="private", id=user_id),
+        from_user=SimpleNamespace(id=user_id, username=username, full_name="Кто-то"), answer=AsyncMock(),
+    )
+
+
+async def test_any_text_from_stranger_logs_id_and_replies(monkeypatch, caplog):
+    """Не сотрудник пишет любой текст — временный ответ и ID в лог, без AI-сводки и без «привяжите аккаунт»."""
+    import api.bot as bot_module
+    from api.onboarding import texts
+
+    monkeypatch.setattr(bot_module, "_handle_access_chat_reply", AsyncMock(return_value=False))
+    monkeypatch.setattr(bot_module, "_get_user_access", AsyncMock(return_value=None))
+    message = _text_message(5151, "hr_acc_x")
+    with caplog.at_level("INFO", logger="hr-analyzer.onboarding"):
+        await bot_module.cmd_ai_digest(message)
+    assert message.answer.await_args.args[0] == texts.STAFFWISE_START_TEMP
+    assert "STAFFWISE_CONTACT via=text user_id=5151 @hr_acc_x" in caplog.text
+
+
+async def test_any_text_from_listed_account_links_it(handoff, monkeypatch):
+    """HR-аккаунт из списка подключается любым сообщением, не только /start."""
+    import api.bot as bot_module
+
+    monkeypatch.setattr(bot_module, "_handle_access_chat_reply", AsyncMock(return_value=False))
+    monkeypatch.setattr(bot_module, "_get_user_access", AsyncMock(return_value=None))
+    message = _text_message(ACC_ONE, "HR_one", "здравствуйте")
+    await bot_module.cmd_ai_digest(message)
+    assert "Аккаунт подключён" in message.answer.await_args.args[0]
+    async with handoff.sessions() as s:
+        account = await s.scalar(select(HandoffAccount).where(HandoffAccount.username == "hr_one"))
+    assert account.tg_id == ACC_ONE

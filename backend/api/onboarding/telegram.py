@@ -74,6 +74,24 @@ async def on_plain_start(message: Message) -> bool:
     return True
 
 
+async def on_stranger(message: Message, via: str) -> None:
+    """Боту написал НЕ сотрудник (Telegram не привязан к productHR): /start или любое сообщение.
+
+    HR-аккаунт из ONBOARDING_HANDOFF_ACCOUNTS — подключаем (любым сообщением, не только /start).
+    Остальным — временный ответ Staffwise, а ID и ник — в лог STAFFWISE_CONTACT: по нему HR-аккаунт
+    вписывают в список (04.11.2026, просьба Ильнара).
+    """
+    if await on_plain_start(message):
+        return
+    user = message.from_user
+    logger.info(
+        "STAFFWISE_CONTACT via=%s user_id=%s @%s name=%s",
+        via, getattr(user, "id", None), getattr(user, "username", None) or "—",
+        getattr(user, "full_name", None) or "",
+    )
+    await message.answer(texts.STAFFWISE_START_TEMP)
+
+
 async def on_private_text(message: Message) -> bool:
     """True — сообщение забрал бот практики (ждал кошелёк или ответ опроса)."""
     try:

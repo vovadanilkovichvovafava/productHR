@@ -2784,7 +2784,7 @@ async def cmd_start(message: types.Message):
     # Не сотрудник (кандидат, HR-аккаунт не из списка): меню и «Энцеладус» ему ни к чему —
     # ВРЕМЕННЫЙ ответ HR-бота Staffwise (04.11.2026, переделать — texts.STAFFWISE_START_TEMP)
     if not access:
-        await message.answer(onboarding_tg.texts.STAFFWISE_START_TEMP)
+        await onboarding_tg.on_stranger(message, "start")  # ответ + ID/ник в лог STAFFWISE_CONTACT
         return
 
     await message.answer(
@@ -3694,7 +3694,12 @@ async def cmd_ai_digest(message: types.Message):
 
     async with async_session() as session:
         access = await _get_user_access(session, message.from_user.id)
-        if not access or not access.get('org_id'):
+        if not access:
+            # Не сотрудник (кандидат, HR-аккаунт автоспамера): любое сообщение подключает HR-аккаунт
+            # из списка, остальным — временный ответ Staffwise и ID/ник в лог (STAFFWISE_CONTACT)
+            await onboarding_tg.on_stranger(message, "text")
+            return
+        if not access.get('org_id'):
             await message.answer("Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»")
             return
         if not access.get('is_admin'):
