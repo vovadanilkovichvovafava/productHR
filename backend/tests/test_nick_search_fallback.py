@@ -45,16 +45,28 @@ class _FakeResult:
     def scalar(self):
         return self._value
 
+    def scalars(self):
+        return self
+
+    def all(self):
+        # номера карточек, совпавших по имени (smart_name_ids)
+        return [42]
+
 
 class _FakeDB:
-    """Сессия-заглушка: поиск строит запрос, а считает совпадения одним SELECT."""
+    """Сессия-заглушка: поиск строит запрос, а считает совпадения одним SELECT.
+    Нечёткое имя — отдельный SELECT по индексу (smart_name_ids, 04.11.2026)."""
 
     def __init__(self, found: int):
         self.found = found
-        self.queries = 0
+        self.statements: list[str] = []
+
+    @property
+    def counts(self) -> int:
+        return sum("count(" in s for s in self.statements)
 
     async def execute(self, statement):
-        self.queries += 1
+        self.statements.append(str(statement))
         return _FakeResult(self.found)
 
 
@@ -125,7 +137,9 @@ async def test_nick_miss_falls_back_to_normal_search():
     sql = _where(query)
     # Обычный поиск: имя/должность/компания/контакты — человек находится по ФИО.
     assert "position" in sql
-    assert "search_name" in sql
+    # нечёткое имя: номера из запроса по search_name уходят в общий OR
+    assert any("search_name" in s for s in db.statements)
+    assert "entities.id IN (42)" in sql
 
 
 @pytest.mark.asyncio
@@ -134,7 +148,7 @@ async def test_plain_query_never_counts_twice():
     db = _FakeDB(found=0)
     _, fallback = await apply_text_search(db, select(Entity), "ковалёв")
     assert fallback is False
-    assert db.queries == 0
+    assert db.counts == 0
 
 
 @pytest.mark.asyncio

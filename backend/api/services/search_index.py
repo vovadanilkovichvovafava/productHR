@@ -216,15 +216,40 @@ def _translit_ilike_patterns(q: str) -> List[str]:
     return [f"%{t}%" for t in terms if t]
 
 
-def name_search_conditions(q: str) -> List:
+async def smart_name_ids(db, q: str) -> Optional[List[int]]:
+    """id карточек, у которых имя нечётко совпало с запросом, — по GIN-индексу.
+
+    Внутри общего OR (имя ИЛИ почта ИЛИ комментарии…) индекс не работает: база
+    проходит все ~8 500 строк и для каждой считает word_similarity по каждому
+    варианту слова. Это 0,6 с из 0,75 на локальной копии того же объёма, на проде
+    поиск шёл 8–11 с (04.11.2026). Отдельным запросом по индексу — 7 мс. Даже
+    один, без OR, планировщик выбирает полный проход (оценка GIN-триграмм у него
+    завышена втрое), поэтому полный проход на этот запрос выключен.
+    None — pg_trgm нет, ветка остаётся как была.
+    """
+    snf = smart_name_filter(q)
+    if snf is None:
+        return None
+    await db.execute(text("SET LOCAL enable_seqscan = off"))
+    rows = (await db.execute(select(Entity.id).where(snf))).scalars().all()
+    await db.execute(text("SET LOCAL enable_seqscan TO DEFAULT"))
+    return list(rows)
+
+
+def name_search_conditions(q: str, name_ids: Optional[List[int]] = None) -> List:
     """OR-условия поиска кандидата по ИМЕНИ для ЛЮБОГО окна поиска: умный
     pg_trgm-матч (транслит + любой порядок слов + опечатки, если pg_trgm доступен)
     + транслит-ILIKE как fallback. Вызывать ПОСЛЕ ensure_pg_trgm_checked(db).
-    Использование: base.where(or_(*name_search_conditions(q), <прочие поля>))."""
+    Использование: base.where(or_(*name_search_conditions(q), <прочие поля>)).
+    name_ids — готовый ответ smart_name_ids: тогда умный матч — по номерам."""
     conds: List = []
-    snf = smart_name_filter(q)
-    if snf is not None:
-        conds.append(snf)
+    if name_ids is not None:
+        if name_ids:
+            conds.append(Entity.id.in_(name_ids))
+    else:
+        snf = smart_name_filter(q)
+        if snf is not None:
+            conds.append(snf)
     # Ё≡Е для ILIKE: сворачиваем и запрос, И колонку. Колонку — обязательно: в базе
     # лежит «Дёмин», а ищут «Демин», и никакой бэкфилл этого не покроет (search_name
     # тут не участвует). На проде pg_trgm недоступен и работает именно эта ветка,
@@ -314,7 +339,8 @@ def nick_search_conditions(q: str) -> List:
     ]
 
 
-def broad_search_conditions(q: str, include_tags: bool = False) -> List:
+def broad_search_conditions(q: str, include_tags: bool = False,
+                            name_ids: Optional[List[int]] = None) -> List:
     """Обычный («не-ник») поиск: имя + контакты + должность/компания + комментарии.
 
     Собрано в одном месте, потому что раньше три окна поиска (/search, /kanban,
@@ -328,7 +354,7 @@ def broad_search_conditions(q: str, include_tags: bool = False) -> List:
     like = f"%{q.lower()}%"
     conds: List = [
         # pg_trgm (транслит + любой порядок слов + опечатки) + транслит-ILIKE + Ё≡Е
-        *name_search_conditions(q),
+        *name_search_conditions(q, name_ids),
         *contact_search_conditions(q),  # почта/телефон(норм.)/telegram + контакты из резюме
         Entity.position.ilike(like),
         Entity.company.ilike(like),
@@ -361,8 +387,10 @@ async def apply_text_search(db, query, q: str, include_tags: bool = False):
         )).scalar() or 0
         if found:
             return strict, False
-        return query.where(or_(*broad_search_conditions(q, include_tags))), True
-    return query.where(or_(*broad_search_conditions(q, include_tags))), False
+        name_ids = await smart_name_ids(db, q)
+        return query.where(or_(*broad_search_conditions(q, include_tags, name_ids))), True
+    name_ids = await smart_name_ids(db, q)
+    return query.where(or_(*broad_search_conditions(q, include_tags, name_ids))), False
 
 
 def notes_search_conditions(q: str) -> List:
