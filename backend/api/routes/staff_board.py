@@ -166,6 +166,11 @@ _K_ASSIGNEES = "assignee_user_ids"
 # деплое. Имена храним рядом с id: карточку читают из разных мест, лишний
 # запрос в users там делать негде.
 _K_BOARD_HR = "board_hr_tags"
+# Прошлые рабочие отделы человека — ротации «был в Продукте, теперь байер FB»
+# (Мария, 05.11.2026). Назначение при переводе удаляется, поэтому без этого
+# списка след прежнего отдела терялся совсем. Лежит в карточке, как и всё
+# остальное у человека: [{department_id, name, from, to}], старые — первыми.
+_K_TEAM_HISTORY = "board_team_history"
 MAX_ASSIGNEES = 5
 _K_DISMISSAL = "dismissal_date"
 _K_DONE = {
@@ -228,6 +233,14 @@ class Folder(BaseModel):
     name: str
 
 
+class BoardTeamStint(BaseModel):
+    """Отдел, в котором человек работал раньше (ротация)."""
+    department_id: Optional[int] = None
+    name: str
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+
 class BoardRow(BaseModel):
     entity_id: int
     # Строка доски = НАЗНАЧЕНИЕ человека в отдел (staff_board_placements).
@@ -256,6 +269,9 @@ class BoardRow(BaseModel):
     # Рабочий отдел человека — чтобы и СТРОКА ПЕСОЧНИЦЫ показывала отдел, а не
     # саму себя: «нужно видеть отделы везде, даже на сендбоксе».
     team_name: Optional[str] = None
+    # Прошлые рабочие отделы — ротации, старые первыми. Показываются тихой
+    # подписью под отделом, чтобы строка не разрасталась.
+    team_history: List[BoardTeamStint] = []
     telegram: Optional[str] = None
     practice_start_date: Optional[str] = None
     department_start_date: Optional[str] = None
@@ -833,6 +849,60 @@ async def _load_sourcers(
     return out
 
 
+def _team_history(
+    ex: Dict[str, Any], depts: Optional[Dict[int, BoardDepartment]]
+) -> List[BoardTeamStint]:
+    """Прошлые отделы из карточки. Имя — текущее имя отдела, если он ещё есть
+    (отдел могли переименовать), иначе то, что запомнили при переводе."""
+    out: List[BoardTeamStint] = []
+    raw = ex.get(_K_TEAM_HISTORY)
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        did = _as_int(item.get("department_id"))
+        dept = (depts or {}).get(did) if did else None
+        name = (dept.name if dept is not None else None) or item.get("name")
+        if not name:
+            continue
+        out.append(BoardTeamStint(
+            department_id=did, name=name,
+            date_from=item.get("from") or None, date_to=item.get("to") or None,
+        ))
+    return out
+
+
+def _remember_rotation(
+    entity: Entity,
+    old: "BoardPlacement",
+    new_dept: BoardDepartment,
+    depts: Dict[int, BoardDepartment],
+) -> None:
+    """Перевод из отдела в отдел — записать прежний отдел в историю человека.
+
+    Только команда → команда: уход с практики в отдел и смена песочницы — это
+    не ротация. С какого числа он там был — дата создания назначения.
+    """
+    old_dept = depts.get(old.department_id)
+    if old_dept is None or (old_dept.kind or "team") == "sandbox":
+        return
+    if (new_dept.kind or "team") == "sandbox" or old_dept.id == new_dept.id:
+        return
+    ex = dict(_extra(entity))
+    history = [h for h in (ex.get(_K_TEAM_HISTORY) or []) if isinstance(h, dict)]
+    history.append({
+        "department_id": old_dept.id,
+        "name": old_dept.name,
+        "from": old.created_at.date().isoformat() if old.created_at else None,
+        "to": date.today().isoformat(),
+    })
+    ex[_K_TEAM_HISTORY] = history
+    entity.extra_data = ex
+    flag_modified(entity, "extra_data")
+    logger.info(
+        f"BOARD_ROTATION: entity {entity.id} «{old_dept.name}» → «{new_dept.name}»"
+    )
+
+
 def _row_from_entity(
     entity: Entity,
     offer: Optional[EntityFile],
@@ -910,6 +980,8 @@ def _row_from_entity(
         else:
             sandbox_name = person_sandbox.get("name")
 
+    team_history = _team_history(ex, depts)
+
     # HR: сначала выбранные руками, иначе — из меток «HR: …» кандидата. Они
     # лежат в extra_data.system_hr_tags (их считает services/hr_tags по
     # активным заявкам), поэтому лишних запросов не нужно. Правка руками
@@ -948,6 +1020,7 @@ def _row_from_entity(
         department_is_sandbox=is_sandbox,
         sandbox_name=sandbox_name,
         team_name=team_name,
+        team_history=team_history,
         telegram=telegram,
         practice_start_date=practice,
         department_start_date=_iso(dept_start),
@@ -1436,8 +1509,8 @@ async def create_placement(
     # песочницы. Иначе отделы копились: у тестовой карточки на проде вышло
     # четыре строки сразу — SANDBOX, ASA, Facebook и iOS Product (Мария,
     # 07.10.2026: «он не должен быть в сэндбоксе, он должен быть в отделе»).
+    depts_all = await _board_depts(db, org.id)
     if old is None and (dept.kind or "team") != "sandbox":
-        depts_all = await _board_depts(db, org.id)
         teams = [
             pl for pl in placements
             if ((depts_all.get(pl.department_id).kind if depts_all.get(pl.department_id) else "team") or "team") != "sandbox"
@@ -1451,6 +1524,7 @@ async def create_placement(
         # этом просили перенести из другого отдела — переносим: человек там уже
         # есть, значит «перенос» сводится к тому, чтобы убрать прежнюю строку.
         if old is not None and old.id != exists.id:
+            _remember_rotation(entity, old, dept, depts_all)
             await db.delete(old)
             await db.commit()
             logger.info(
@@ -1478,6 +1552,7 @@ async def create_placement(
     db.add(placement)
 
     if old is not None:
+        _remember_rotation(entity, old, dept, depts_all)
         await db.delete(old)
 
     await db.commit()

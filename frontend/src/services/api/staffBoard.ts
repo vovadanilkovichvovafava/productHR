@@ -9,6 +9,14 @@ export interface BoardFolder {
   name: string;
 }
 
+/** Отдел, где человек работал раньше: «был в Продукте, теперь байер FB». */
+export interface BoardTeamStint {
+  department_id: number | null;
+  name: string;
+  date_from: string | null;
+  date_to: string | null;
+}
+
 export interface BoardRow {
   entity_id: number;
   /** Строка доски = НАЗНАЧЕНИЕ человека в отдел. Один человек может стоять в
@@ -34,6 +42,8 @@ export interface BoardRow {
   /** Рабочий отдел человека — им подписана и СТРОКА ПЕСОЧНИЦЫ: отделы видно
    *  везде, а песочница уходит подписью. Пусто, если отдела ещё нет. */
   team_name: string | null;
+  /** Прошлые рабочие отделы (ротации), старые первыми. Пусто — ротаций не было. */
+  team_history?: BoardTeamStint[];
   telegram: string | null;
   practice_start_date: string | null;
   department_start_date: string | null;

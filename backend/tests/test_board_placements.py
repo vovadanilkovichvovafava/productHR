@@ -958,3 +958,76 @@ async def test_one_off_backfill_board_hr_tags(
     await db_session.refresh(other)
     assert e.extra_data["board_hr_tags"] == [{"hr_id": admin_user.id, "name": admin_user.name}]
     assert other.extra_data["board_hr_tags"] == [{"hr_id": admin_user.id, "name": admin_user.name}]
+
+
+@pytest.mark.asyncio
+async def test_rotation_between_teams_is_remembered(
+    client, db_session, organization, admin_user, org_owner
+):
+    """Ротация: был в Продукте, стал байером FB — прежний отдел не теряется
+    (Мария, 05.11.2026). Назначение при переводе удаляется, след — в карточке."""
+    sandbox = await _dept(client, admin_user, "SANDBOX", kind="sandbox")
+    product = await _dept(client, admin_user, "Продукт", kind="team", parent_id=sandbox["id"])
+    fb = await _dept(client, admin_user, "Байер FB", kind="team", parent_id=sandbox["id"])
+    seo = await _dept(client, admin_user, "SEO", kind="team", parent_id=sandbox["id"])
+    e = await _person(db_session, organization, admin_user, status=EntityStatus.transferred)
+
+    async def place(dept_id, **extra):
+        r = await client.post(
+            "/api/staff-board/placements",
+            json={"entity_id": e.id, "department_id": dept_id, **extra},
+            headers=_h(admin_user),
+        )
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    # Практика → отдел — это не ротация.
+    await place(sandbox["id"])
+    first = await place(product["id"])
+    assert first["team_history"] == []
+
+    # Отдел → отдел (без replace_placement_id: команда у человека одна).
+    moved = await place(fb["id"])
+    assert [h["name"] for h in moved["team_history"]] == ["Продукт"]
+    stint = moved["team_history"][0]
+    assert stint["date_to"] == date.today().isoformat() and stint["date_from"]
+
+    # И явным переносом — история копится, старые первыми.
+    again = await place(seo["id"], replace_placement_id=moved["placement_id"])
+    assert [h["name"] for h in again["team_history"]] == ["Продукт", "Байер FB"]
+
+    # История — у человека: её видно и в строке песочницы.
+    rows = await _rows(client, admin_user, e.id)
+    assert {r["department_name"] for r in rows} == {"SANDBOX", "SEO"}
+    assert all([h["name"] for h in r["team_history"]] == ["Продукт", "Байер FB"] for r in rows)
+
+    # Переименовали отдел — в истории новое имя.
+    r = await client.patch(
+        f"/api/staff-board/departments/{product['id']}", json={"name": "iOS Product"},
+        headers=_h(admin_user),
+    )
+    assert r.status_code == 200, r.text
+    rows = await _rows(client, admin_user, e.id)
+    assert rows[0]["team_history"][0]["name"] == "iOS Product"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_change_is_not_rotation(
+    client, db_session, organization, admin_user, org_owner
+):
+    """Смена песочницы — перевод на практике, а не ротация между отделами."""
+    s1 = await _dept(client, admin_user, "SANDBOX", kind="sandbox")
+    s2 = await _dept(client, admin_user, "SANDBOX MOBILE", kind="sandbox")
+    e = await _person(db_session, organization, admin_user)
+    first = (await client.post(
+        "/api/staff-board/placements",
+        json={"entity_id": e.id, "department_id": s1["id"]}, headers=_h(admin_user),
+    )).json()
+    r = await client.post(
+        "/api/staff-board/placements",
+        json={"entity_id": e.id, "department_id": s2["id"],
+              "replace_placement_id": first["placement_id"]},
+        headers=_h(admin_user),
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["team_history"] == []

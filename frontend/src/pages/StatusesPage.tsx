@@ -12,7 +12,7 @@ import {
   getBoardRows, updateBoardRow, addBoardPlacement, removeBoardPlacement,
   getBoardDepartments, createBoardDepartment, updateBoardDepartment, setBoardDepartmentHidden,
   saveBoardDepartmentOrder,
-  type BoardDepartment, type BoardRow, type BoardRowUpdate,
+  type BoardDepartment, type BoardRow, type BoardRowUpdate, type BoardTeamStint,
 } from "@/services/api/staffBoard";
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
 import {
@@ -2439,6 +2439,27 @@ const SOURCER_FILTER_STORAGE_KEY = "hf-statuses-sourcer";
  *  и «Влад» (наставник практики) — разные люди и не путаются. Уже назначенных
  *  других HR это не снимает — их кружки остаются. */
 const BOARD_HR_FIRST_NAMES = ["мария", "maria", "эльвира", "elvira", "влада", "vlada"];
+/** Ротации человека для ячейки «Отдел»: короткая подпись «↻ Продукт» (последний
+ *  прежний отдел, «+N» — если их было больше) и вся история подсказкой.
+ *  Мария, 05.11.2026: «Виктор сначала был в продукте, а теперь он байер фб —
+ *  отметить на борде, но чтобы не было перегруженности». Поэтому не колонка и
+ *  не вторая строка, а та же тихая подпись, что и «из SANDBOX». */
+export function rotationNote(
+  history: BoardTeamStint[] | undefined,
+  current: string,
+): { short: string; title: string } | null {
+  const past = (history ?? []).filter((h) => h.name);
+  if (!past.length) return null;
+  const last = past[past.length - 1];
+  const more = past.length > 1 ? ` +${past.length - 1}` : "";
+  const lines = past.map((h) => {
+    const when = [fmt(h.date_from), fmt(h.date_to)].filter(Boolean).join(" – ");
+    return when ? `${h.name} · ${when}` : h.name;
+  });
+  if (current) lines.push(`Сейчас: ${current}`);
+  return { short: `↻ ${last.name}${more}`, title: `Ротации:\n${lines.join("\n")}` };
+}
+
 export const isBoardHr = (name: string | null | undefined) =>
   BOARD_HR_FIRST_NAMES.includes((name || "").trim().split(/\s+/)[0].toLowerCase());
 
@@ -2480,6 +2501,7 @@ function DepartmentCell({
   const from = row.department_is_sandbox
     ? (row.team_name ? own : null)   // в строке песочницы подпись — она сама
     : row.sandbox_name;
+  const rotation = rotationNote(row.team_history, name);
   const hue = pillHue(name);
   const options = departments.filter(
     (d) => (!d.hidden || d.id === row.department_id) && d.id !== row.department_id
@@ -2508,9 +2530,13 @@ function DepartmentCell({
           >
             {name}
           </span>
-          {from && (
-            <span className="hf-statuses-dept-from" title={`Остаётся в песочнице ${from}`}>
-              из {from}
+          {(from || rotation) && (
+            /* Одна тихая подпись на всё: «из SANDBOX · ↻ Продукт». */
+            <span
+              className="hf-statuses-dept-from"
+              title={[from && `Остаётся в песочнице ${from}`, rotation?.title].filter(Boolean).join("\n\n")}
+            >
+              {[from && `из ${from}`, rotation?.short].filter(Boolean).join(" · ")}
             </span>
           )}
         </span>
