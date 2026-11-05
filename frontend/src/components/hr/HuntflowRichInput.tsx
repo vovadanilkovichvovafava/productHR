@@ -6,6 +6,7 @@ import { HuntflowEditorIcon } from './HuntflowControls';
 import { escapeHtml, isUrl, linkifyToHtml, toHref } from '@/utils/linkify';
 import { useLinkPrompt, wrapRangeWithLink } from './LinkPrompt';
 import { getOrgMembers } from '@/services/api/auth';
+import { placementStyle, useMenuPlacement } from '@/utils/menuPlacement';
 
 /**
  * Рабочий rich-text редактор (contentEditable) для Huntflow-композеров.
@@ -89,13 +90,21 @@ export function HuntflowRichInput({
   const [mOpen, setMOpen] = useState(false);
   const [mItems, setMItems] = useState<MentionMember[]>([]);
   const [mIndex, setMIndex] = useState(0);
-  const [mRect, setMRect] = useState<{ top: number; left: number } | null>(null);
+  const [mRect, setMRect] = useState<{ top: number; left: number; lineTop: number } | null>(null);
+  // Комментарий пишут внизу карточки: список под курсором уходил за край
+  // окна — тогда он открывается над строкой (см. utils/menuPlacement).
+  const mPlacement = useMenuPlacement(
+    mOpen && !!mRect,
+    () => (mRect ? { top: mRect.lineTop, bottom: mRect.top - 4 } : null),
+    ddRef,
+    [mRect, mItems.length],
+  );
 
   const applyMention = (
     open: boolean,
     items: MentionMember[],
     index: number,
-    rect: { top: number; left: number } | null,
+    rect: { top: number; left: number; lineTop: number } | null,
     info: { node: Node; start: number } | null,
   ) => {
     mOpenRef.current = open;
@@ -202,7 +211,7 @@ export function HuntflowRichInput({
   }, [onChange]);
 
   // --- @-mention detection / insert ---
-  const caretRect = (): { top: number; left: number } | null => {
+  const caretRect = (): { top: number; left: number; lineTop: number } | null => {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return null;
     const r = sel.getRangeAt(0).cloneRange();
@@ -210,9 +219,9 @@ export function HuntflowRichInput({
     const rect = r.getClientRects()[0] || r.getBoundingClientRect();
     if (!rect || (rect.top === 0 && rect.left === 0)) {
       const er = ref.current?.getBoundingClientRect();
-      return er ? { top: er.top + 22, left: er.left + 8 } : null;
+      return er ? { top: er.top + 22, left: er.left + 8, lineTop: er.top } : null;
     }
-    return { top: rect.bottom + 4, left: rect.left };
+    return { top: rect.bottom + 4, left: rect.left, lineTop: rect.top };
   };
 
   const detectMention = useCallback(() => {
@@ -593,7 +602,7 @@ export function HuntflowRichInput({
           <div
             ref={ddRef}
             className="hf-mention-dropdown"
-            style={{ top: mRect.top, left: mRect.left }}
+            style={{ top: mRect.top, left: mRect.left, ...placementStyle(mPlacement) }}
             onMouseDown={(e) => e.preventDefault()}
           >
             {mItems.length === 0 ? (

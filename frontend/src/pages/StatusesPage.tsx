@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import * as XLSX from "xlsx";
+import { placementStyle, useMenuPlacement } from "@/utils/menuPlacement";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
@@ -2729,6 +2730,10 @@ function useCellMenu() {
     };
   }, [open]);
 
+  // В нижних строках доски меню под кнопкой уходило за край окна — там оно
+  // открывается вверх (Мария, 05.11.2026).
+  const placement = useMenuPlacement(open, () => plusRef.current?.getBoundingClientRect(), menuRef);
+
   /** Открыть/закрыть, посчитав место под кнопкой. */
   const toggle = () => {
     if (open) { setOpen(false); return; }
@@ -2737,7 +2742,9 @@ function useCellMenu() {
     setOpen(true);
   };
 
-  return { open, pos, plusRef, menuRef, toggle, close: () => setOpen(false) };
+  const menuStyle = pos ? { top: pos.top, left: pos.left, ...placementStyle(placement) } : undefined;
+
+  return { open, pos, menuStyle, plusRef, menuRef, toggle, close: () => setOpen(false) };
 }
 
 /**
@@ -2808,7 +2815,7 @@ function SourcerCell({ row, catalog, onReload }: { row: BoardRow; catalog: Tag[]
         <Plus size={12} />
       </button>
       {menu.open && menu.pos && (
-        <div ref={menu.menuRef} className="hf-statuses-hr-menu" style={{ top: menu.pos.top, left: menu.pos.left }}>
+        <div ref={menu.menuRef} className="hf-statuses-hr-menu" style={menu.menuStyle}>
           <div className="hf-statuses-hr-menu-hint">Добавить сорсера</div>
           {options.length === 0 && (
             <div className="hf-statuses-hr-menu-hint">
@@ -2841,7 +2848,7 @@ function AssigneeCell({
   people: { user_id: number; user_name: string | null }[];
   onSave: (ids: number[]) => void;
 }) {
-  const { open, pos, plusRef, menuRef, toggle, close } = useCellMenu();
+  const { open, pos, menuStyle, plusRef, menuRef, toggle, close } = useCellMenu();
 
   const assignees = rowAssignees(row);
   const ids = assignees.map((a) => a.user_id);
@@ -2890,7 +2897,7 @@ function AssigneeCell({
         <Plus size={13} />
       </button>
       {open && pos && (
-        <div ref={menuRef} className="hf-statuses-hr-menu" style={{ top: pos.top, left: pos.left }}>
+        <div ref={menuRef} className="hf-statuses-hr-menu" style={menuStyle}>
           <div className="hf-statuses-hr-menu-hint">Добавить HR</div>
           {options.length === 0 && <div className="hf-statuses-hr-menu-hint">Все HR уже добавлены</div>}
           {options.map((p) => (

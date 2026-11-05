@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { escapeHtml } from '@/utils/linkify';
+import { placementStyle, useMenuPlacement } from '@/utils/menuPlacement';
 import { useLinkPrompt, wrapRangeWithLink } from '@/components/hr/LinkPrompt';
 
 // Части формы вакансии: редактор текста, календарь дедлайна, выпадающий
@@ -223,6 +224,9 @@ export function DeadlinePicker({
   const [open, setOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const calendarRef = useRef<HTMLDivElement>(null);
+  // Дедлайн внизу формы: календарь не влезал под поле — тогда открываем вверх.
+  const calendarPlacement = useMenuPlacement(open && !!menuPos, () => btnRef.current?.getBoundingClientRect(), calendarRef);
 
   const today = useMemo(() => {
     const t = new Date();
@@ -282,9 +286,10 @@ export function DeadlinePicker({
 
   const menu = open && menuPos ? createPortal(
     <div
+      ref={calendarRef}
       data-deadline-menu
       className="hf-vacancy-calendar-menu"
-      style={{ left: menuPos.left, top: menuPos.top }}
+      style={{ left: menuPos.left, top: menuPos.top, ...placementStyle(calendarPlacement) }}
     >
       <div className="hf-vacancy-calendar-header">
         <button
@@ -457,6 +462,14 @@ export function HfSelect({
   const menuRef = useRef<HTMLDivElement>(null);
   const isOpen = !!menuRect && !disabled;
   const close = () => setMenuRect(null);
+  // Список у нижнего края окна открывается вверх (см. utils/menuPlacement).
+  const placement = useMenuPlacement(
+    isOpen,
+    () => rootRef.current?.getBoundingClientRect(),
+    menuRef,
+    [options.length],
+    Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hf-vacancy-select-menu-top")) || 4,
+  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -475,7 +488,7 @@ export function HfSelect({
       ref={menuRef}
       className="hf-vacancy-select-menu"
       data-hf-select-menu
-      style={{ left: menuRect.left, top: menuRect.top }}
+      style={{ left: menuRect.left, top: menuRect.top, ...placementStyle(placement) }}
     >
       {options.map((option) => {
         const isSelected = String(option.value) === String(value);
