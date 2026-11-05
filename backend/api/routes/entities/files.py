@@ -296,13 +296,20 @@ def validate_file_upload(filename: str, content_type: str) -> tuple[bool, str]:
     if '\x00' in filename:
         return False, "Invalid filename"
 
-    # Check for path traversal attempts
-    if '..' in filename or '/' in filename or '\\' in filename:
+    # Check for path traversal attempts. Две точки подряд сами по себе не
+    # опасны: на диск файл ложится под uuid-именем, а исходное имя только
+    # показывается. Без разделителей пути выйти из папки нельзя, а «..»
+    # в обычном имени бывает: «Резюме Пищ П.С..docx» (инициалы + расширение)
+    # получал 400, и резюме не прикреплялось (New HR, 05.11.2026).
+    if '/' in filename or '\\' in filename:
         return False, "Invalid filename"
 
-    # Check for dangerous double extensions (e.g., resume.pdf.exe)
+    # Check for dangerous double extensions (e.g., resume.pdf.exe). Сверяем
+    # ЦЕЛЫЕ расширения, а не подстроку: иначе «nikita.sharov.pdf» ловился на
+    # «.sh», а «ivanov.company.pdf» — на «.com».
+    suffixes = Path(filename_lower).suffixes
     for pattern in DANGEROUS_PATTERNS:
-        if pattern in filename_lower:
+        if pattern in suffixes:
             return False, f"File type not allowed: {pattern}"
 
     # Get and validate extension

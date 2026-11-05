@@ -534,6 +534,19 @@ class TestDangerousPatterns:
             assert not is_valid, f"Path traversal {filename} should be rejected"
             assert "invalid filename" in error.lower()
 
+    @pytest.mark.parametrize("filename", [
+        "Резюме Пищ П.С..docx",       # инициалы + расширение (New HR, 05.11.2026)
+        "Иванов И.И..pdf",
+        "resume...final.pdf",
+        "nikita.sharov.pdf",          # «.sh» внутри фамилии — не расширение
+        "ivanov.company.pdf",         # «.com» — начало другого слова
+        "cv.jsmith.docx",             # «.js» внутри имени
+    ])
+    def test_ordinary_names_with_dots_allowed(self, filename):
+        """Точки внутри обычного имени файла — не атака и не опасное расширение."""
+        is_valid, error = validate_file_upload(filename, "application/octet-stream")
+        assert is_valid, f"{filename!r} rejected: {error}"
+
     def test_backslash_in_filename_rejected(self):
         """Test that backslash in filename is rejected."""
         filename = "folder\\document.pdf"
