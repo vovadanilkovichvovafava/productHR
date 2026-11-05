@@ -130,6 +130,29 @@ describe("buildResumeSources — текст резюме из формы", () =>
   it("пустой текст — не источник", () => {
     expect(buildResumeSources([], { resume_text: "   " })).toEqual([]);
   });
+
+  // 05.11.2026: загрузили docx — сервер положил его текст в resume_text, и в
+  // карточке стало «два резюме»: страницы файла и тот же текст с повторами.
+  const fromFile = (text: string, chars = [...text].length) => ({
+    resume_text: text,
+    resume_text_source: { file_id: 1, file_name: "Резюме.docx", chars },
+  });
+  it("текст, извлечённый из показанного файла, второй вкладкой не идёт", () => {
+    const page = file({ id: 2, file_name: "Резюме стр. 1.jpg", mime_type: "image/jpeg" });
+    expect(buildResumeSources([page], fromFile("Опыт работы 📌")).map((s) => s.kind)).toEqual([
+      "images",
+    ]);
+    const pdf = file({ id: 7, mime_type: "application/pdf" });
+    expect(buildResumeSources([pdf], fromFile("Опыт")).map((s) => s.kind)).toEqual(["pdf"]);
+  });
+  it("файл не показан (docx не сконвертировался) — текст из него остаётся", () => {
+    expect(buildResumeSources([], fromFile("Опыт")).map((s) => s.kind)).toEqual(["text"]);
+  });
+  it("текст поправили руками после загрузки — снова отдельная вкладка", () => {
+    const pdf = file({ id: 7, mime_type: "application/pdf" });
+    const out = buildResumeSources([pdf], fromFile("Опыт, дописано руками", 4));
+    expect(out.map((s) => s.kind)).toEqual(["pdf", "text"]);
+  });
 });
 
 describe("buildResumeSources", () => {

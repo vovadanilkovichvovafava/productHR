@@ -238,14 +238,28 @@ class DocumentParser:
             if para.text.strip():
                 paragraphs.append(para.text)
 
-        # Extract tables
+        # Extract tables. Объединённую ячейку python-docx отдаёт столько раз,
+        # сколько колонок (и строк) она занимает, — это один и тот же узел
+        # ``_tc``. Без отсева резюме-«анкета» в таблице превращалась в
+        # «Пищ | Пищ | Пищ | Пищ», а весь текст — в 26 тысяч знаков повторов,
+        # которые видны в карточке и идут в поиск дублей (05.11.2026).
         for table in doc.tables:
             tables_count += 1
             table_text = []
+            seen_cells = set()
             for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells]
-                table_text.append(" | ".join(cells))
-            paragraphs.append(f"[Table {tables_count}]\n" + "\n".join(table_text))
+                cells = []
+                for cell in row.cells:
+                    if cell._tc in seen_cells:
+                        continue
+                    seen_cells.add(cell._tc)
+                    text = cell.text.strip()
+                    if text:
+                        cells.append(text)
+                if cells:
+                    table_text.append(" | ".join(cells))
+            if table_text:
+                paragraphs.append(f"[Table {tables_count}]\n" + "\n".join(table_text))
 
         content = "\n\n".join(paragraphs)
 

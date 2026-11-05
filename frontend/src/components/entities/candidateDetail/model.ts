@@ -280,12 +280,8 @@ export function buildResumeSources(
     typeof extraData?.resume_text === "string" ? extraData.resume_text.trim() : "";
   const summary =
     typeof extraData?.summary === "string" ? extraData.summary.trim() : "";
-  const textSource =
-    resumeText && resumeText !== summary
-      ? [{ kind: "text" as const, text: resumeText }]
-      : [];
 
-  return [
+  const fileSources: ResumeSource[] = [
     ...(resumeDemos.length > 0 ? [{ kind: "parsed" as const }] : []),
     ...pdfFiles.map((file) => ({ kind: "pdf" as const, file })),
     ...(imageFiles.length > 0 &&
@@ -293,8 +289,34 @@ export function buildResumeSources(
     pdfFiles.length === 0
       ? [{ kind: "images" as const }]
       : []),
-    ...textSource,
   ];
+
+  // Загрузка файла резюме кладёт в тот же `resume_text` текст, вытащенный из
+  // файла (для поиска дублей), и помечает это в `resume_text_source`. Это тот же
+  // файл, что уже показан страницами, — второй вкладкой его не рисуем
+  // (05.11.2026: у кандидата из docx стало «два резюме»). Вписали текст руками
+  // после загрузки — длина разойдётся, и текст снова виден. Показан файл не
+  // будет (docx не сконвертировался) — текст остаётся единственным видом.
+  const textFromFile = isTextFromFile(extraData);
+  const textSource =
+    resumeText &&
+    resumeText !== summary &&
+    !(textFromFile && fileSources.length > 0)
+      ? [{ kind: "text" as const, text: resumeText }]
+      : [];
+
+  return [...fileSources, ...textSource];
+}
+
+/** `resume_text` — это текст, извлечённый сервером из файла, и его не правили. */
+function isTextFromFile(extraData: Record<string, unknown> | undefined): boolean {
+  const src = extraData?.resume_text_source as
+    | { chars?: unknown; empty?: unknown }
+    | undefined;
+  const raw = extraData?.resume_text;
+  if (!src || typeof raw !== "string" || src.empty) return false;
+  // Сервер считает символы по-питоновски (кодовые точки), а не UTF-16.
+  return typeof src.chars === "number" && [...raw].length === src.chars;
 }
 
 // ── Stage containers (pure part of the `containers` useMemo) ──

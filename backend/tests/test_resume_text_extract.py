@@ -152,3 +152,37 @@ async def test_page_markers_are_stripped(db_session, organization):
 @pytest.mark.asyncio
 async def test_extract_does_not_crash_on_garbage(db_session, organization):
     assert await extract_resume_text(b"not a pdf at all", "broken.pdf") == ""
+
+
+def _docx_with_merged_table() -> bytes:
+    """Резюме-«анкета» в таблице с объединёнными ячейками, как у «Пищ П.С.docx»."""
+    import io
+
+    from docx import Document
+
+    doc = Document()
+    table = doc.add_table(rows=4, cols=4)
+    title = table.cell(0, 0).merge(table.cell(0, 3))
+    title.text = "РЕЗЮМЕ"
+    table.cell(1, 0).text = "Фамилия:"
+    surname = table.cell(1, 1).merge(table.cell(1, 3))
+    surname.text = "Пищ"
+    body = table.cell(2, 0).merge(table.cell(3, 3))  # и по колонкам, и по строкам
+    body.text = "ОБРАЗОВАНИЕ\nМаркетинг"
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+async def test_docx_merged_cells_are_not_repeated():
+    """Объединённая ячейка — один раз, а не по разу на каждую колонку/строку.
+
+    05.11.2026 в карточке New HR: «Пищ | Пищ | Пищ | Пищ», 26 тысяч знаков
+    повторов вместо 4,5 тысячи текста резюме.
+    """
+    text = await extract_resume_text(_docx_with_merged_table(), "Резюме.docx")
+    assert text.count("РЕЗЮМЕ") == 1
+    assert text.count("Пищ") == 1
+    assert text.count("ОБРАЗОВАНИЕ") == 1
+    assert "Фамилия: | Пищ" in text
+    assert "| |" not in text  # пустые ячейки не дают строк из разделителей
