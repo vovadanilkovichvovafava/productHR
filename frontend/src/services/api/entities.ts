@@ -63,15 +63,16 @@ export const createEntity = async (entityData: {
 export const updateEntity = async (id: number, updates: {
   name?: string;
   status?: EntityStatus;
-  // Legacy single identifiers
-  phone?: string;
-  email?: string;
+  // Legacy single identifiers. null — стереть поле (PUT берёт только
+  // присланные ключи, undefined значит «не трогать»).
+  phone?: string | null;
+  email?: string | null;
   // Multiple identifiers
   telegram_usernames?: string[];
   emails?: string[];
   phones?: string[];
-  company?: string;
-  position?: string;
+  company?: string | null;
+  position?: string | null;
   tags?: string[];
   extra_data?: Record<string, unknown>;
   department_id?: number | null;

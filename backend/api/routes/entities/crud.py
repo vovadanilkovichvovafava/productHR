@@ -761,7 +761,13 @@ async def update_entity(
         # устаревший notes из спреда card.extra_data затрёт свежие комментарии.
         for _srv_key in _SERVER_OWNED_EXTRA_KEYS:
             _sent_extra.pop(_srv_key, None)
-        _merged_extra.update(_sent_extra)
+        # null — «стереть»: окно «Редактировать» шлёт его за очищенное поле.
+        # Ключ убираем, а не храним None — читатели ждут строку или её отсутствие.
+        for _key, _value in _sent_extra.items():
+            if _value is None:
+                _merged_extra.pop(_key, None)
+            else:
+                _merged_extra[_key] = _value
         entity.extra_data = _merged_extra
 
     for key, value in update_data.items():

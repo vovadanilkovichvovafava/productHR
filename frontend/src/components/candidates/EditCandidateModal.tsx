@@ -75,6 +75,11 @@ function buildEditResumeText(
     .join("\n\n");
 }
 
+/** Поле было заполнено, а теперь пустое → null («стереть»), иначе undefined. */
+export function clearedValue(before: string, now: string): null | undefined {
+  return !now.trim() && before.trim() ? null : undefined;
+}
+
 export function EditCandidateModal({
   card,
   onClose,
@@ -125,6 +130,17 @@ export function EditCandidateModal({
       ? saved
       : buildEditResumeText(card, resumeDemo);
   });
+  // Что было в полях при открытии окна. Пустое поле раньше уходило как
+  // undefined, а сервер правку дописывает к старому — стёртое значение
+  // оставалось («стираю текст резюме целиком — пишет „обновлён“, а текст на
+  // месте; оставлю одну букву — остаётся буква», 05.11.2026). Теперь поле,
+  // которое было заполнено и стало пустым, уходит как null — «стереть».
+  // Пустое с самого начала не шлём вовсе: некоторые поля окно собирает из
+  // производных значений, и пустота здесь не значит, что пусто в базе.
+  const [initial] = useState(() => ({
+    phone, email, telegram, position, company, salary, city, source,
+    birthDate, resumeText,
+  }));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -173,26 +189,32 @@ export function EditCandidateModal({
       const cleanTelegram = telegram.trim().replace(/^@/, "");
       const trimmedBirthDate = birthDate.trim();
       const extraData = {
-        salary: joinSalaryCurrency(salary, salaryCurrency) || undefined,
-        birth_date: trimmedBirthDate || undefined,
+        salary:
+          joinSalaryCurrency(salary, salaryCurrency) ||
+          clearedValue(initial.salary, salary),
+        birth_date: trimmedBirthDate || clearedValue(initial.birthDate, birthDate),
         // Возраст пересчитываем из точной даты рождения при каждом сохранении —
         // иначе (extra_data.age как отдельное несвязанное число) смена даты
         // рождения не двигала отображаемый возраст. Если дата не указана —
         // не трогаем age вообще (undefined выпадает при сериализации, PUT
         // мержит extra_data — старое значение от парсера hh.ru сохранится).
         age: trimmedBirthDate ? calculateAge(trimmedBirthDate) ?? undefined : undefined,
-        resume_text: resumeText.trim() || undefined,
-        source: source.trim() || undefined,
-        city: city.trim() || undefined,
+        resume_text: resumeText.trim() || clearedValue(initial.resumeText, resumeText),
+        source: source.trim() || clearedValue(initial.source, source),
+        city: city.trim() || clearedValue(initial.city, city),
         skills: skills.split(",").map((s) => s.trim()).filter(Boolean),
       };
       const saved = await updateEntity(card.id, {
         name: fullName,
-        phone: normalizedPhone,
-        email: email.trim() || undefined,
-        telegram_usernames: cleanTelegram ? [cleanTelegram] : undefined,
-        position: position.trim() || undefined,
-        company: company.trim() || undefined,
+        phone: normalizedPhone ?? clearedValue(initial.phone, phone),
+        email: email.trim() || clearedValue(initial.email, email),
+        telegram_usernames: cleanTelegram
+          ? [cleanTelegram]
+          : clearedValue(initial.telegram, telegram) === null
+            ? []
+            : undefined,
+        position: position.trim() || clearedValue(initial.position, position),
+        company: company.trim() || clearedValue(initial.company, company),
         extra_data: extraData,
         // Оптимистичная блокировка. Бэк умеет её с самого начала (PUT /entities
         // сверяет version и отдаёт 409), но фронт поле не слал — ветка не
@@ -214,9 +236,9 @@ export function EditCandidateModal({
         // этого handleCardUpdated мержил только extra_data, а видимый
         // card.salary/card.city оставался старым до следующего fetchBoard() —
         // «работает только после обновления страницы».
-        salary: extraData.salary,
-        city: extraData.city,
-        source: extraData.source,
+        salary: extraData.salary ?? undefined,
+        city: extraData.city ?? undefined,
+        source: extraData.source ?? undefined,
         age: extraData.age != null ? String(extraData.age) : undefined,
         // extra_data — ЦЕЛИКОМ из ответа сервера: он смержил правку с остальным
         // (заметки, резюме) и пересчитал плашку дубля. Раньше сюда клали только
