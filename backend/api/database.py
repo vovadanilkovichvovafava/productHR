@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from .models.database import Base
 from .utils.db_url import get_database_url
+from .utils.json_text import dumps as json_dumps
 
 
 database_url = get_database_url()
@@ -19,12 +20,14 @@ if is_postgresql:
         max_overflow=30,         # Extra connections during peak
         pool_recycle=3600,       # Recycle connections every hour
         pool_timeout=30,         # Wait up to 30s for available connection
+        json_serializer=json_dumps,  # русские буквы как есть — иначе поиск их не находит
     )
 else:
     # SQLite for testing - no pool configuration needed
     engine = create_async_engine(
         database_url,
         echo=False,
+        json_serializer=json_dumps,
     )
 
 AsyncSessionLocal = async_sessionmaker(

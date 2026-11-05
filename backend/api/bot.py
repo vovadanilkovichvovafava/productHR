@@ -63,7 +63,9 @@ def get_bot() -> Bot:
 
 
 # Database session
-engine = create_async_engine(get_database_url(), echo=False, pool_pre_ping=True)
+from .utils.json_text import dumps as _json_dumps  # noqa: E402
+
+engine = create_async_engine(get_database_url(), echo=False, pool_pre_ping=True, json_serializer=_json_dumps)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 

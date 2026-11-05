@@ -654,6 +654,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Resume contacts backfill failed (non-critical): {e}")
 
+    # JSON карточек, записанный кодами «з», — в буквы, иначе поиск по
+    # комментариям его не видит (05.11.2026, services/json_unescape.py).
+    try:
+        from ..services.json_unescape import unescape_entity_json
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await unescape_entity_json(session)
+    except Exception as e:
+        logger.warning(f"JSON unescape failed (non-critical): {e}")
+
     # Последним шагом сверяем модели с базой: если какая-то колонка так и не
     # доехала, это видно в логе деплоя сразу, а не по жалобам рекрутёров.
     await check_schema_drift(engine)
