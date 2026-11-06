@@ -11,7 +11,7 @@
 """
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -138,6 +138,7 @@ async def trash_card(
 async def trash_file(
     trash_id: int,
     file_id: int,
+    download: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -153,10 +154,17 @@ async def trash_file(
     if found is None:
         raise HTTPException(404, "Файла нет в корзине")
     data, name, mime = found
+    # Как у живой карточки: PDF и картинки — inline, чтобы вкладка «Резюме»
+    # показала их во вьюере; остальное и ?download=1 — скачиванием.
+    mime = (mime or "").lower() or "application/octet-stream"
+    inline = mime in {"application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"} and not download
     return Response(
         content=data,
-        media_type=mime or "application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name or 'file')}"},
+        media_type=mime,
+        headers={
+            "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(name or 'file')}",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

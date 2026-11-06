@@ -1,5 +1,5 @@
 import { copyOrShowLink } from '@/utils/copyOrShowLink';
-import { useState, useEffect, useCallback, useMemo, memo, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, memo, lazy, Suspense, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { AnimatePresence } from "framer-motion";
@@ -21,7 +21,13 @@ import toast from "react-hot-toast";
 import { buildStageContainers, buildStagePickerOptions, readSystemHrTags } from "@/components/entities/candidateDetail/model";
 
 import type { KanbanCard, KanbanColumn } from "@/services/api/candidates";
-import { updateEntity, createCandidateShareLink, archiveEntity } from "@/services/api/entities";
+import {
+  updateEntity,
+  createCandidateShareLink,
+  archiveEntity,
+  type VacancyActivityBlock,
+} from "@/services/api/entities";
+import type { Tag } from "@/services/api/tags";
 
 import type { ApplicationStage } from "@/types";
 import { APPLICATION_STAGE_LABELS, STATUS_TO_STAGE_MAP, type EntityStatus } from "@/types";
@@ -44,7 +50,7 @@ import {
 
 import CandidateVacancyCard from "@/components/entities/CandidateVacancyCard";
 
-import ResumeTab, { useResumeSources } from "@/components/entities/candidateDetail/ResumeTab";
+import ResumeTab, { EntityFilesContext, useResumeSources } from "@/components/entities/candidateDetail/ResumeTab";
 import { readParticipations } from "@/components/entities/candidateDetail/ImportedParticipations";
 
 import { useCardActions } from "@/components/entities/candidateDetail/useCardActions";
@@ -61,6 +67,22 @@ const AnketaDrawer = lazy(() =>
 // Панель кандидата справа на «Все кандидаты»: шапка, поля, стек воронок,
 // резюме и анкеты (вынесена из AllCandidatesPage, 20.10.2026).
 
+type DispatchRow = FormDispatchInfo & { source_entity_id?: number; source_name?: string | null };
+
+/**
+ * Удалённый кандидат из корзины рисуется ЭТОЙ ЖЕ панелью (владелец, 06.11.2026:
+ * «должно быть 1 в 1 как в обычной карточке»). Всё, что живая карточка грузит
+ * по номеру кандидата, приходит готовым из слепка (`/entities/trash/{id}/card`),
+ * файлы — через EntityFilesContext. Только просмотр: ряда кнопок нет, лента
+ * и блоки воронок — в режиме чтения (без смены этапа, комментариев, правки).
+ */
+export interface DeletedCardSource {
+  blocks: VacancyActivityBlock[];
+  dispatches: DispatchRow[];
+  tags: Tag[];
+  nameTags: Tag[];
+}
+
 export const InfoTab = memo(function InfoTab({
   card,
   status,
@@ -72,6 +94,7 @@ export const InfoTab = memo(function InfoTab({
   onEdit,
   onMerged,
   onRemovedFromVacancy,
+  deleted,
 }: {
   card: KanbanCard;
   status: string;
@@ -86,18 +109,22 @@ export const InfoTab = memo(function InfoTab({
   onMerged?: () => void;
   // Снятие кандидата с воронки → родитель обновляет доску и сбрасывает выбор.
   onRemovedFromVacancy?: () => void;
+  /** Карточка из корзины — см. DeletedCardSource. */
+  deleted?: DeletedCardSource;
 }) {
   const { user: currentUser } = useAuthStore();
   const navigate = useNavigate();
   // «Наблюдатель» (read-only): все изменяющие действия карточки заблокированы.
   // Просмотр (анкета/резюме, клики по тг/почте/ссылкам) и «Поделиться» — доступны.
-  const readonly = !!currentUser?.is_readonly;
+  // Удалённую карточку из корзины тоже только смотрят.
+  const readonly = !!currentUser?.is_readonly || !!deleted;
+  const fileSource = useContext(EntityFilesContext);
   const roStyle = readonly ? { opacity: 0.45, cursor: "not-allowed" as const } : undefined;
   // Сохранён только сеттер: action-бар сбрасывает (закрывает) меню действий.
   const [, setShowActionMenu] = useState(false);
   const [anketaOpen, setAnketaOpen] = useState(false);
   const anketaCount = useFormBadgeStore((s) => s.counts[card.id] ?? 0);
-  const priorRejections = useVisiblePriorRejections(card.id);
+  const priorRejections = useVisiblePriorRejections(deleted ? null : card.id);
   const setAnketaCount = useFormBadgeStore((s) => s.setCount);
   const clearAnketaBadge = useFormBadgeStore((s) => s.clear);
   // Источники резюме: каждое резюме — отдельная вкладка верхнего уровня рядом
@@ -125,10 +152,12 @@ export const InfoTab = memo(function InfoTab({
   // ПОСЛЕ вкладок импортных прохождений (индекс = participations.length), а не
   // дублируются под каждым прохождением. Фетчим здесь (в родителе), т.к. вкладке
   // нужно знать заранее, есть ли нативные анкеты, чтобы отрисовать саму вкладку.
-  const [nativeDispatches, setNativeDispatches] = useState<
-    (FormDispatchInfo & { source_entity_id?: number; source_name?: string | null })[]
-  >([]);
+  const [nativeDispatches, setNativeDispatches] = useState<DispatchRow[]>([]);
   useEffect(() => {
+    if (deleted) {
+      setNativeDispatches(deleted.dispatches);
+      return;
+    }
     let alive = true;
     const fetchRows = async () => {
       try {
@@ -147,18 +176,19 @@ export const InfoTab = memo(function InfoTab({
       alive = false;
       clearInterval(t);
     };
-  }, [card.id]);
+  }, [card.id, deleted]);
   const hasNativeAnketa = nativeDispatches.length > 0;
   const nativeTabIndex = participations.length;
   // Открытие вкладки нативной анкеты — отмечаем прочитанной + сбрасываем бейдж
   // (раньше это делалось при любом открытии «Анкеты», теперь — только когда
   // видна именно нативная вкладка).
   useEffect(() => {
+    if (deleted) return;
     if (detailSection === "anketa" && hasNativeAnketa && anketaIndex === nativeTabIndex) {
       markEntityDispatchesSeen(card.id).catch(() => {});
       clearAnketaBadge(card.id);
     }
-  }, [detailSection, hasNativeAnketa, anketaIndex, nativeTabIndex, card.id, clearAnketaBadge]);
+  }, [detailSection, hasNativeAnketa, anketaIndex, nativeTabIndex, card.id, clearAnketaBadge, deleted]);
   // Доп. контакты после склейки: у человека из импорта могут быть РАЗНЫЕ
   // телефоны/телеграмы/почты из разных записей — показываем все, кроме уже
   // выведенного «основного» (дедуп по цифрам телефона / нижнему регистру).
@@ -179,11 +209,11 @@ export const InfoTab = memo(function InfoTab({
   const [localTags, setLocalTags] = useState<string[]>(card.tags || []);
   // Бейдж непрочитанных анкет (entity-уровень).
   useEffect(() => {
-    if (!card.id) return;
+    if (!card.id || deleted) return;
     getEntityFormsUnreadCount(card.id)
       .then((r) => setAnketaCount(card.id, r.count))
       .catch(() => {});
-  }, [card.id, setAnketaCount]);
+  }, [card.id, setAnketaCount, deleted]);
   // Пикер собран из колонок доски, но «Вне воронки» (BOARD_OTHER_STATUS) —
   // НЕ этап: это служебная колонка «кандидат не в воронке». У заявки такого
   // этапа нет, поэтому её выбор ничего не сохранял, а карточка на экране всё
@@ -197,7 +227,10 @@ export const InfoTab = memo(function InfoTab({
   // заявок. Тянем сквозную ленту активности (по заявке) и рендерим ОТДЕЛЬНУЮ
   // интерактивную карточку на каждую вакансию. Если заявок нет —
   // activityBlocks пуст и ниже рендерится одиночная карточка как раньше.
-  const { activityBlocks, loadActivity, notesVersion, bumpNotes } = useCandidateActivity(card);
+  const { activityBlocks, loadActivity, notesVersion, bumpNotes } = useCandidateActivity(
+    card,
+    deleted?.blocks,
+  );
 
   // Лейбл статуса контейнера: сперва колонки доски (org-override), затем канон
   // STATUS_LABELS (EntityStatus), затем локальный CANDIDATE_VACANCY_STAGE_LABELS,
@@ -469,9 +502,14 @@ export const InfoTab = memo(function InfoTab({
           (strength === "text") — отдельного серого бейджа больше нет. */}
       {/* Одна плашка: «Уже был у нас — отказ …» + дубль + «Сравнить»
           (владелец, 22.10.2026 — две плашки занимали полэкрана). */}
-      <ShadowDuplicateBanner card={card} status={status} onResolved={onMerged} rejections={priorRejections} />
+      {!deleted && (
+        <ShadowDuplicateBanner card={card} status={status} onResolved={onMerged} rejections={priorRejections} />
+      )}
 
-      {/* ---- Top action buttons (Huntflow: Взять на вакансию | Редактировать) ---- */}
+      {/* ---- Top action buttons (Huntflow: Взять на вакансию | Редактировать) ----
+          У удалённой карточки ряда нет совсем: в корзине только просмотр
+          (владелец, 06.11.2026: «визуал как в основной карточке, но без кнопок»). */}
+      {!deleted && (
       <div className="hf-profile-action-bar">
         <button
           onClick={(event) => {
@@ -546,6 +584,7 @@ export const InfoTab = memo(function InfoTab({
           </button>
         )}
       </div>
+      )}
 
       {/* ---- Name + Contact info (left column) | Photo (right column) ---- */}
       <div className="hf-profile-summary">
@@ -562,7 +601,7 @@ export const InfoTab = memo(function InfoTab({
                 метка у одного человека ярлык, у другого — обычная.
                 Перетаскивание порядка убрано: в справочнике порядка нет,
                 список сортируется по имени — как у меток. */}
-            <TagPicker entityId={card.id} variant="headline" disabled={readonly} />
+            <TagPicker entityId={card.id} variant="headline" disabled={readonly} tags={deleted?.nameTags} />
           </div>
           {(card.position || card.company) && (
             <p className="hf-profile-subtitle">
@@ -746,7 +785,8 @@ export const InfoTab = memo(function InfoTab({
                 const label = `HR: ${hr.name}${hr.vacancy_title ? ` · ${hr.vacancy_title}` : ""}`;
                 const chipBase =
                   "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--hf-bg-panel)] text-[var(--hf-main-900)] border border-[color:var(--hf-main-200)] hf-dark-disabled:bg-[var(--hf-white-alpha-06)] hf-dark-disabled:text-[var(--hf-dark-200)] hf-dark-disabled:border-[color:var(--hf-white-alpha-10)]";
-                if (typeof hr.vacancy_id !== "number") {
+                // У удалённого кандидата вести в воронку некуда.
+                if (typeof hr.vacancy_id !== "number" || deleted) {
                   return (
                     <span
                       key={`hr-${hr.hr_id}`}
@@ -792,12 +832,14 @@ export const InfoTab = memo(function InfoTab({
                   className="group inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--hf-cyan-50)] hf-dark-disabled:bg-[var(--hf-accent-bg-15)] text-[var(--hf-cyan-700)] hf-dark-disabled:text-[var(--hf-accent)] border border-[var(--hf-cyan-200)] hf-dark-disabled:border-[color:var(--hf-accent-border-20)]"
                 >
                   {t}
-                  <button
-                    onClick={() => handleRemoveTag(t)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-[var(--hf-status-red)]"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+                  {!readonly && (
+                    <button
+                      onClick={() => handleRemoveTag(t)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-[var(--hf-status-red)]"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </span>
               ))}
               {/* Метки из справочника организации. Раньше их здесь можно было
@@ -805,7 +847,7 @@ export const InfoTab = memo(function InfoTab({
                   (например, кто его привёл) из общей базы было нельзя — а
                   ставят их чаще всего именно отсюда, когда кандидат ещё ни в
                   одной воронке. Компонент общий с воронкой. */}
-              <TagPicker entityId={card.id} disabled={readonly} />
+              <TagPicker entityId={card.id} disabled={readonly} tags={deleted?.tags} />
             </div>
           </InfoRow>
         </div>
@@ -879,9 +921,11 @@ export const InfoTab = memo(function InfoTab({
           onDeleteNote={cardActions.deleteNote}
           onEditNote={cardActions.editNote}
           onUploadFile={cardActions.uploadFile}
-          onAnketa={c.origin === "live" ? () => setAnketaOpen(true) : undefined}
-          onReact={c.origin === "live" ? cardActions.react : undefined}
+          onAnketa={c.origin === "live" && !deleted ? () => setAnketaOpen(true) : undefined}
+          onReact={c.origin === "live" && !deleted ? cardActions.react : undefined}
           files={c.files}
+          downloadFile={deleted ? (fileId) => fileSource.download(card.id, fileId) : undefined}
+          fileUrlOf={deleted ? (fileId) => fileSource.url(card.id, fileId) : undefined}
           onDeleteFile={c.origin === "live" && !readonly ? cardActions.deleteFile : undefined}
           // Карточка теперь одна НА ВОРОНКУ, поэтому в шапке — её собственный
           // этап и название воронки. Список «этапы по воронкам» и бейдж воронки
@@ -1021,6 +1065,7 @@ export const InfoTab = memo(function InfoTab({
             participations={participations}
             nativeDispatches={nativeDispatches}
             onDispatchDeleted={(id) => setNativeDispatches((prev) => prev.filter((d) => d.id !== id))}
+            readonly={!!deleted}
           />
         )}
       </div>

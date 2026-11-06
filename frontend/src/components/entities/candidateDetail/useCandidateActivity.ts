@@ -10,7 +10,12 @@ import { getEntity, getEntityActivity, type VacancyActivityBlock } from "@/servi
 // после правки нужен bumpNotes(): ссылка card не меняется, и без тика лента
 // не пересчитывалась (добавленный коммент появлялся только после F5).
 
-export function useCandidateActivity(card: KanbanCard) {
+// staticBlocks — готовые блоки без запросов и опроса: так их отдаёт удалённая
+// карточка из корзины (кандидата в базе нет, спрашивать сервер не о ком).
+export function useCandidateActivity(
+  card: KanbanCard,
+  staticBlocks?: VacancyActivityBlock[],
+) {
   const [activityBlocks, setActivityBlocks] = useState<VacancyActivityBlock[]>(
     [],
   );
@@ -29,7 +34,7 @@ export function useCandidateActivity(card: KanbanCard) {
   // воронке, не появлялся здесь без ручного F5/переоткрытия карточки (Мария).
   // Мутируем card.extra_data напрямую (как cardActions.patchExtra) + bumpNotes.
   useEffect(() => {
-    if (!card.id) return;
+    if (!card.id || staticBlocks) return;
     let cancelled = false;
     const poll = () => {
       if (document.visibilityState !== "visible") return;
@@ -62,8 +67,9 @@ export function useCandidateActivity(card: KanbanCard) {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [card, bumpNotes]);
+  }, [card, bumpNotes, staticBlocks]);
   const loadActivity = useCallback(async () => {
+    if (staticBlocks) return;
     if (!card.id) {
       setActivityBlocks([]);
       return;
@@ -74,9 +80,10 @@ export function useCandidateActivity(card: KanbanCard) {
     } catch {
       setActivityBlocks([]);
     }
-  }, [card.id]);
+  }, [card.id, staticBlocks]);
   useEffect(() => {
     let cancelled = false;
+    if (staticBlocks) return;
     if (!card.id) {
       setActivityBlocks([]);
       return;
@@ -91,7 +98,12 @@ export function useCandidateActivity(card: KanbanCard) {
     return () => {
       cancelled = true;
     };
-  }, [card.id]);
+  }, [card.id, staticBlocks]);
 
-  return { activityBlocks, loadActivity, notesVersion, bumpNotes };
+  return {
+    activityBlocks: staticBlocks ?? activityBlocks,
+    loadActivity,
+    notesVersion,
+    bumpNotes,
+  };
 }

@@ -29,8 +29,9 @@ from ..models.database import (
 )
 from ..services.auth import get_current_user, get_current_user_optional, get_user_org
 from ..services.form_answers import (
-    AnswerError, answer_fields, clean_answers, field_labels, form_problem, required_problem,
+    AnswerError, answer_fields, clean_answers, form_problem, required_problem,
 )
+from ..services.form_dispatch_view import build_dispatch_list
 from .entities.common import check_entity_access
 
 # File upload settings for public forms
@@ -938,103 +939,22 @@ async def list_entity_all_dispatches(entity_id: int, db: AsyncSession = Depends(
         select(FormDispatch).where(FormDispatch.entity_id.in_(entity_ids)).order_by(FormDispatch.created_at.desc())
     )).scalars().all()
 
-    # Названия и вопросы анкет. Вопросы ответа — его снимок на момент
-    # отправки (fields_snapshot), у старых ответов — текущие поля шаблона.
-    form_ids = {d.form_id for d in all_rows}
-    titles = {}
-    template_fields: dict = {}
-    if form_ids:
-        for fid, title, fields in (await db.execute(
-            select(FormTemplate.id, FormTemplate.title, FormTemplate.fields).where(FormTemplate.id.in_(form_ids))
-        )).all():
-            titles[fid] = title
-            template_fields[fid] = fields or []
-
-    subs: dict = {}
-    sub_ids = [d.submission_id for d in all_rows if d.submission_id]
-    if sub_ids:
-        for sub in (await db.execute(select(FormSubmission).where(FormSubmission.id.in_(sub_ids)))).scalars().all():
-            subs[sub.id] = sub
-
-    def fields_of(d) -> list:
-        sub = subs.get(d.submission_id)
-        return answer_fields(template_fields.get(d.form_id), sub.fields_snapshot if sub else None)
-
-    def file_field_ids(d) -> list:
-        return [f["id"] for f in fields_of(d) if isinstance(f, dict) and f.get("type") == "file" and f.get("id")]
-
-    # Резолв файлов анкеты: (entity_id, имя файла) → URL скачивания, чтобы поле
-    # типа «файл» в ответах было кликабельным (а не просто именем).
-    needed_files = []  # (entity_id, filename)
-    for d in all_rows:
-        sub = subs.get(d.submission_id)
-        data = (sub.data if sub else None) or {}
-        for ffid in file_field_ids(d):
-            val = data.get(ffid)
-            if isinstance(val, str) and val.strip():
-                needed_files.append((d.entity_id, val.strip()))
-    file_url_map = {}  # (entity_id, filename) → url
-    if needed_files:
+    async def file_urls(needed_files):
+        # (entity_id, имя файла) → URL скачивания файла анкеты.
         names = list({n for _, n in needed_files})
         eids = list({e for e, _ in needed_files})
+        out = {}
         for eid, file_id, fname in (await db.execute(
             select(EntityFile.entity_id, EntityFile.id, EntityFile.file_name)
             .where(EntityFile.entity_id.in_(eids), EntityFile.file_name.in_(names))
             .order_by(EntityFile.id.desc())
         )).all():
-            file_url_map.setdefault((eid, fname), f"/api/entities/{eid}/files/{file_id}/download")
+            out.setdefault((eid, fname), f"/api/entities/{eid}/files/{file_id}/download")
+        return out
 
-    # Карта: id диспатча → имя профиля-источника. После merge ВСЕ диспатчи висят на
-    # target (FormDispatch перепривязан, иначе CASCADE-delete стирал бы анкеты влитого
-    # профиля), поэтому различаем по id (захвачен в merged_from[].form_dispatch_ids),
-    # а не по entity_id.
-    _mf_list = merged_from if isinstance(merged_from, list) else []
-    dispatch_source = {}
-    for m in _mf_list:
-        if not isinstance(m, dict):
-            continue
-        nm = m.get("name") or (f"Профиль #{m.get('entity_id')}" if m.get("entity_id") else "Объединённый профиль")
-        for did in (m.get("form_dispatch_ids") or []):
-            dispatch_source[did] = nm
-
-    # Build response with source info (which profile filled it)
-    result = []
-    for d in all_rows:
-        source_name = dispatch_source.get(d.id)
-        if source_name is None:
-            # Легаси-путь: диспатч ещё висит на влитом профиле по entity_id
-            # (слияния до фикса form_dispatch_ids).
-            if d.entity_id != entity_id:
-                for m in _mf_list:
-                    if isinstance(m, dict) and m.get("entity_id") == d.entity_id:
-                        source_name = m.get("name") or f"Профиль #{d.entity_id}"
-                        break
-            if source_name is None:
-                source_name = "Текущий профиль"
-
-        d_sub = subs.get(d.submission_id)
-        d_data = (d_sub.data if d_sub else None) or {}
-        d_file_links = {}
-        for ffid in file_field_ids(d):
-            val = d_data.get(ffid)
-            if isinstance(val, str) and val.strip():
-                url = file_url_map.get((d.entity_id, val.strip()))
-                if url:
-                    d_file_links[ffid] = url
-
-        result.append({
-            "id": d.id, "form_id": d.form_id, "form_title": titles.get(d.form_id),
-            "token": d.token, "status": d.status, "seen_by_recruiter": d.seen_by_recruiter,
-            "submission_id": d.submission_id, "answers": d_sub.data if d_sub else None,
-            "field_labels": field_labels(fields_of(d)),
-            "file_links": d_file_links,  # field_id → URL скачивания файла
-            "created_at": d.created_at.isoformat() if d.created_at else None,
-            "submitted_at": d.submitted_at.isoformat() if d.submitted_at else None,
-            "source_entity_id": d.entity_id,
-            "source_name": source_name,  # Какой профиль заполнил
-        })
-
-    return result
+    return await build_dispatch_list(
+        db, all_rows, entity_id=entity_id, merged_from=merged_from, file_urls=file_urls,
+    )
 
 
 @router.get("/entity/{entity_id}/unread-count")

@@ -456,7 +456,88 @@ async def trash_card_view(db: AsyncSession, record: DeletedEntity) -> Dict[str, 
         card["photo_url"] = f"/api/entities/trash/{record.id}/files/{photo['id']}"
     elif isinstance(card["extra_data"].get("photo_url"), str):
         card["photo_url"] = card["extra_data"]["photo_url"]
-    return {"card": card, "blocks": blocks, "files": file_list}
+    tags, name_tags, dispatches = await _card_extras(db, record, kind, file_list)
+    return {
+        "card": card, "blocks": blocks, "files": file_list,
+        "tags": tags, "name_tags": name_tags, "dispatches": dispatches,
+    }
+
+
+async def _card_extras(
+    db: AsyncSession, record: DeletedEntity, kind: str, file_list: List[Dict[str, Any]],
+) -> Tuple[List[dict], List[dict], List[dict]]:
+    """Метки, теги у ФИО и анкеты — то, что живая карточка грузит отдельными
+    запросами (владелец, 06.11.2026: удалённая — «1 в 1 как обычная»).
+
+    У удалённого кандидата связи с метками/тегами и отправленные анкеты лежат в
+    слепке (их стёр каскад), сами справочники и ответы анкет — в базе. У «Удалить
+    с воронки» карточка живая — берём связи из базы."""
+    from sqlalchemy import select as _select
+    from ..models.database import (
+        EntityTag, FormDispatch, NameTag, entity_name_tag_association, entity_tag_association,
+    )
+    from .form_dispatch_view import build_dispatch_list
+
+    entity_id = record.entity_id
+    if kind == KIND_APPLICATION:
+        tag_ids = list((await db.execute(
+            _select(entity_tag_association.c.tag_id).where(entity_tag_association.c.entity_id == entity_id)
+        )).scalars().all())
+        name_tag_ids = list((await db.execute(
+            _select(entity_name_tag_association.c.tag_id).where(entity_name_tag_association.c.entity_id == entity_id)
+        )).scalars().all())
+        dispatch_rows: List[Any] = list((await db.execute(
+            _select(FormDispatch).where(FormDispatch.entity_id == entity_id).order_by(FormDispatch.created_at.desc())
+        )).scalars().all())
+        live = await db.get(Entity, entity_id)
+        merged_from = (live.extra_data or {}).get("merged_from") if live and isinstance(live.extra_data, dict) else []
+        trash_files = False
+    else:
+        tag_ids = [r.get("tag_id") for r in _rows(record, "entity_tags")]
+        name_tag_ids = [r.get("tag_id") for r in _rows(record, "entity_name_tags")]
+        dispatch_rows = sorted(
+            _rows(record, "form_dispatches"), key=lambda r: r.get("created_at") or "", reverse=True,
+        )
+        ent = (_rows(record, ROOT_TABLE) or [{}])[0]
+        extra = ent.get("extra_data") if isinstance(ent.get("extra_data"), dict) else {}
+        merged_from = extra.get("merged_from") or []
+        trash_files = True
+
+    async def tags_of(model, ids) -> List[dict]:
+        ids = [i for i in ids if i]
+        if not ids:
+            return []
+        rows = (await db.execute(_select(model).where(model.id.in_(ids)).order_by(model.name))).scalars().all()
+        return [{
+            "id": t.id, "org_id": t.org_id, "name": t.name, "color": t.color,
+            "created_by": t.created_by, "created_at": t.created_at.isoformat() if t.created_at else None,
+        } for t in rows]
+
+    async def file_urls(needed):
+        # Файл анкеты лежит в файлах кандидата — у удалённого это слепок.
+        if not trash_files:
+            from ..models.database import EntityFile
+            names = list({n for _, n in needed})
+            out: Dict[Tuple[Any, str], str] = {}
+            for eid, file_id, fname in (await db.execute(
+                _select(EntityFile.entity_id, EntityFile.id, EntityFile.file_name)
+                .where(EntityFile.entity_id == entity_id, EntityFile.file_name.in_(names))
+                .order_by(EntityFile.id.desc())
+            )).all():
+                out.setdefault((eid, fname), f"/api/entities/{eid}/files/{file_id}/download")
+            return out
+        by_name: Dict[str, int] = {}
+        for f in sorted(file_list, key=lambda f: f.get("id") or 0, reverse=True):
+            by_name.setdefault(f.get("file_name") or "", f["id"])
+        return {
+            (eid, name): f"/api/entities/trash/{record.id}/files/{by_name[name]}"
+            for eid, name in needed if name in by_name
+        }
+
+    dispatches = await build_dispatch_list(
+        db, dispatch_rows, entity_id=entity_id, merged_from=merged_from, file_urls=file_urls,
+    )
+    return await tags_of(EntityTag, tag_ids), await tags_of(NameTag, name_tag_ids), dispatches
 
 
 def trash_file_bytes(record: DeletedEntity, file_id: int):

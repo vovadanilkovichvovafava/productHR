@@ -9,6 +9,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 # Скачивание файла кандидата. Байты файла по его id НИКОГДА не меняются (новая
 # загрузка = новый id, удаление = 404), поэтому картинки отсюда можно кэшировать.
 _FILE_DOWNLOAD = re.compile(r"^/api/entities/\d+/files/\d+/download$")
+# То же у удалённого кандидата: файл из слепка корзины не меняется никогда.
+_TRASH_FILE = re.compile(r"^/api/entities/trash/\d+/files/\d+$")
 # Картинке — неделя в кэше ЭТОГО браузера (private: не для общих прокси).
 IMAGE_CACHE_CONTROL = "private, max-age=604800, immutable"
 
@@ -33,7 +35,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # относится.
             if (
                 response.status_code == 200
-                and _FILE_DOWNLOAD.match(path)
+                and (_FILE_DOWNLOAD.match(path) or _TRASH_FILE.match(path))
                 and response.headers.get("content-type", "").startswith("image/")
             ):
                 response.headers["Cache-Control"] = IMAGE_CACHE_CONTROL

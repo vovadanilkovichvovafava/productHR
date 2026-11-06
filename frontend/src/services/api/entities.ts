@@ -143,6 +143,11 @@ export interface TrashCardView {
   blocks: VacancyActivityBlock[];
   files: EntityFile[];
   trash: TrashItem;
+  /** Метки и теги у ФИО — то, что живая карточка грузит отдельно. */
+  tags?: import('./tags').Tag[];
+  name_tags?: import('./tags').Tag[];
+  /** Анкеты — в том же виде, что /forms/entity/{id}/all-dispatches. */
+  dispatches?: (import('./forms').FormDispatchInfo & { source_entity_id?: number; source_name?: string | null })[];
 }
 
 export const getTrashCard = async (trashId: number): Promise<TrashCardView> => {

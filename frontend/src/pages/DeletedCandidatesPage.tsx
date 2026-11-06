@@ -100,8 +100,9 @@ export default function DeletedCandidatesPage() {
   };
 
   if (openId) {
+    // Ширина — как у карточки справа на «Все кандидаты».
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6 max-w-[1248px] mx-auto">
         <button
           type="button"
           onClick={() => openCard(null)}

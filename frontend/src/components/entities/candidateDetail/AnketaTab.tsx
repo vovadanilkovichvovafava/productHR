@@ -10,6 +10,7 @@ export function AnketaTab({
   participations,
   nativeDispatches,
   onDispatchDeleted,
+  readonly,
 }: {
   activeIndex: number;
   participations: ReturnType<typeof readParticipations>;
@@ -18,6 +19,7 @@ export function AnketaTab({
     source_name?: string | null;
   })[];
   onDispatchDeleted?: (dispatchId: number) => void;
+  readonly?: boolean;
 }) {
   // Чистый рендерер: фетч диспатчей + отметка «просмотрено» теперь в родителе
   // (там же, где строится ряд вкладок) — вкладке нужно только знать, какая
@@ -25,12 +27,12 @@ export function AnketaTab({
   const hasNative = nativeDispatches.length > 0;
   const nativeTabIndex = participations.length;
   if (hasNative && activeIndex === nativeTabIndex) {
-    return <AnketaResponses dispatches={nativeDispatches} onDeleted={onDispatchDeleted} />;
+    return <AnketaResponses dispatches={nativeDispatches} onDeleted={onDispatchDeleted} readonly={readonly} />;
   }
   if (participations.length > 0) {
     const p = participations[Math.min(activeIndex, participations.length - 1)];
     return p ? <ImportedParticipations participations={[p]} /> : null;
   }
   // Ни прохождений, ни нативных анкет — пустое состояние.
-  return <AnketaResponses dispatches={nativeDispatches} onDeleted={onDispatchDeleted} />;
+  return <AnketaResponses dispatches={nativeDispatches} onDeleted={onDispatchDeleted} readonly={readonly} />;
 }

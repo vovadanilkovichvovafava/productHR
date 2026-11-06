@@ -181,3 +181,45 @@ async def test_recruiter_opens_deleted_card(client, db_session, organization, ad
 
     r = await client.post(f"/api/entities/trash/{tid}/restore", headers=H)
     assert r.status_code == 200, r.text
+
+
+async def test_deleted_card_has_tags_name_tags_and_forms(client, db_session, organization, admin_user, doomed):
+    """Владелец, 06.11.2026: удалённая карточка — «1 в 1 как обычная». Значит,
+    в ней те же метки, теги у ФИО и ответы анкет, что живая карточка грузит
+    отдельными запросами, а PDF резюме открывается во вьюере, а не скачивается."""
+    from api.models.database import (
+        EntityTag, FormDispatch, FormSubmission, FormTemplate, NameTag,
+        entity_name_tag_association, entity_tag_association,
+    )
+    e, v, app, call = doomed
+    eid = e.id
+    label = EntityTag(org_id=organization.id, name="Виктор", color="#3b82f6", kind="sourcer")
+    ntag = NameTag(org_id=organization.id, name="перфомер", color="var(--hf-status-pink)")
+    form = FormTemplate(org_id=organization.id, created_by=admin_user.id, title="Анкета трафика",
+                        slug="trash-card-form", fields=[{"id": "q1", "type": "text", "label": "Опыт?"}])
+    db_session.add_all([label, ntag, form])
+    await db_session.commit()
+    await db_session.execute(entity_tag_association.insert().values(entity_id=eid, tag_id=label.id))
+    await db_session.execute(entity_name_tag_association.insert().values(entity_id=eid, tag_id=ntag.id))
+    sub = FormSubmission(form_id=form.id, entity_id=eid, data={"q1": "два года"})
+    db_session.add(sub)
+    await db_session.commit()
+    db_session.add(FormDispatch(form_id=form.id, entity_id=eid, token="trash-card-token",
+                                status="submitted", submission_id=sub.id, created_by=admin_user.id))
+    await db_session.commit()
+    H = _h(admin_user)
+
+    tid = (await _delete(client, admin_user, eid))["trash_id"]
+    view = (await client.get(f"/api/entities/trash/{tid}/card", headers=H)).json()
+
+    assert [t["name"] for t in view["tags"]] == ["Виктор"]
+    assert [t["name"] for t in view["name_tags"]] == ["перфомер"]
+    d = view["dispatches"][0]
+    assert (d["form_title"], d["status"], d["answers"]) == ("Анкета трафика", "submitted", {"q1": "два года"})
+    assert d["field_labels"] == {"q1": "Опыт?"}
+
+    pdf = view["files"][0]
+    r = await client.get(f"/api/entities/trash/{tid}/files/{pdf['id']}", headers=H)
+    assert r.headers["content-disposition"].startswith("inline")
+    r = await client.get(f"/api/entities/trash/{tid}/files/{pdf['id']}?download=1", headers=H)
+    assert r.headers["content-disposition"].startswith("attachment")

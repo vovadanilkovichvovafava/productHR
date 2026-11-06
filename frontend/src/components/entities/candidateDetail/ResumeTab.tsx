@@ -6,7 +6,7 @@
 // один источник истины, идентичное поведение. Экспортирует также
 // useResumeSources (хук для подсчёта вкладок «Резюме» родителем).
 // ================================================================
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, memo, createContext, useContext } from "react";
 import type { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -35,6 +35,25 @@ import {
 // Единый рендер ответа анкеты: ClickUp-вложение (JSON) → кликабельная ссылка,
 // гео-JSON → адрес. Иначе объединённая анкета вываливает сырой JSON.
 import { renderAnswer, isBlankAnswer } from "./ImportedParticipations";
+
+// ---------- откуда берутся файлы ----------
+// Обычно — из живой карточки. Удалённую карточку корзина рисует тем же
+// компонентом (владелец, 06.11.2026: «1 в 1 как обычная»), а файлы у неё
+// лежат в слепке: она подменяет источник через EntityFilesContext.
+export interface EntityFilesSource {
+  list: (entityId: number) => Promise<EntityFile[]>;
+  download: (entityId: number, fileId: number) => Promise<Blob>;
+  /** Адрес для просмотра в браузере (PDF во вьюере). */
+  url: (entityId: number, fileId: number) => string;
+}
+
+export const liveEntityFiles: EntityFilesSource = {
+  list: getEntityFiles,
+  download: downloadEntityFile,
+  url: (entityId, fileId) => `/api/entities/${entityId}/files/${fileId}/download`,
+};
+
+export const EntityFilesContext = createContext<EntityFilesSource>(liveEntityFiles);
 
 // ---------- helpers (приватные копии — изоляция модуля) ----------
 
@@ -305,10 +324,11 @@ export function useResumeSources(
   const [files, setFiles] = useState<EntityFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [previewUrls, setPreviewUrls] = useState<Record<number, string>>({});
+  const fileSource = useContext(EntityFilesContext);
 
   useEffect(() => {
     setLoading(true);
-    getEntityFiles(card.id)
+    fileSource.list(card.id)
       .then((data) => {
         setFiles(data);
         // Generate preview URLs for image files
@@ -316,7 +336,7 @@ export function useResumeSources(
           .filter((f) => f.mime_type?.startsWith("image/"))
           .forEach(async (f) => {
             try {
-              const blob = await downloadEntityFile(card.id, f.id);
+              const blob = await fileSource.download(card.id, f.id);
               setPreviewUrls((prev) => ({
                 ...prev,
                 [f.id]: URL.createObjectURL(blob),
@@ -328,7 +348,7 @@ export function useResumeSources(
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [card.id, refreshKey]);
+  }, [card.id, refreshKey, fileSource]);
 
   const sources: ResumeSource[] = buildResumeSources(
     files,
@@ -366,6 +386,7 @@ const ResumeTab = memo(function ResumeTab({
   activeIndex: number;
 }) {
   const { files, sources, loading, previewUrls } = useResumeSources(card);
+  const fileSource = useContext(EntityFilesContext);
   const [currentResumeIndex, setCurrentResumeIndex] = useState(0);
 
   const resumeFiles = files.filter((f) => f.file_type === "resume");
@@ -410,7 +431,7 @@ const ResumeTab = memo(function ResumeTab({
 
   const handleDownload = async (file: EntityFile) => {
     try {
-      const blob = await downloadEntityFile(card.id, file.id);
+      const blob = await fileSource.download(card.id, file.id);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -891,7 +912,7 @@ const ResumeTab = memo(function ResumeTab({
           {/* #toolbar=0&navpanes=0 — прячем редакторскую панель Chrome PDF-вьюера: чистый просмотр. */}
           <iframe
             key={pdf.id}
-            src={`/api/entities/${card.id}/files/${pdf.id}/download#toolbar=0&navpanes=0`}
+            src={`${fileSource.url(card.id, pdf.id)}#toolbar=0&navpanes=0`}
             title={pdf.file_name}
             className="w-full min-h-[760px] rounded-lg border border-[color:var(--hf-white-alpha-06)] bg-white"
           />

@@ -86,9 +86,10 @@ export const TAG_PALETTE = [
 
 export default function TagPicker({
   entityId,
-  disabled = false,
+  disabled: disabledProp = false,
   onChange,
   variant = 'labels',
+  tags,
 }: {
   entityId: number | null | undefined;
   disabled?: boolean;
@@ -100,7 +101,13 @@ export default function TagPicker({
    *  - 'headline' — яркие теги у ФИО, свой справочник.
    */
   variant?: 'labels' | 'headline';
+  /**
+   * Готовый список вместо загрузки по entityId — только показ, без правки.
+   * Так рисует удалённую карточку корзина: кандидата в базе уже нет.
+   */
+  tags?: Tag[];
 }) {
+  const disabled = disabledProp || !!tags;
   const atName = variant === 'headline';
   const src = atName ? NAME_TAGS : LABELS;
   const [orgTags, setOrgTags] = useState<Tag[]>([]);
@@ -112,16 +119,21 @@ export default function TagPicker({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (tags) return;
     src.list().then(setOrgTags).catch(() => setOrgTags([]));
-  }, [src]);
+  }, [src, tags]);
 
   useEffect(() => {
+    if (tags) {
+      setEntityTags(tags);
+      return;
+    }
     if (!entityId) {
       setEntityTags([]);
       return;
     }
     src.ofEntity(entityId).then(setEntityTags).catch(() => setEntityTags([]));
-  }, [entityId, src]);
+  }, [entityId, src, tags]);
 
   useEffect(() => {
     if (!open) return;

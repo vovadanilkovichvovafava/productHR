@@ -20,9 +20,12 @@ function formatWhen(iso: string | null | undefined): string {
 export function AnketaResponses({
   dispatches,
   onDeleted,
+  readonly = false,
 }: {
   dispatches: (FormDispatchInfo & { source_entity_id?: number; source_name?: string | null })[];
   onDeleted?: (dispatchId: number) => void;
+  /** Удалённый кандидат: ссылки анкеты уже не работают, удалять нечего. */
+  readonly?: boolean;
 }) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -76,6 +79,7 @@ export function AnketaResponses({
               )}
             </div>
           </div>
+          {!readonly && (
           <div className="mt-1 flex items-center gap-3">
             <a
               href={`${window.location.origin}/form/${d.token}`}
@@ -98,6 +102,7 @@ export function AnketaResponses({
               <Trash2 className="w-3 h-3" /> {deletingId === d.id ? 'Удаляем…' : 'Удалить'}
             </button>
           </div>
+          )}
           {d.answers && (
             <div className="mt-3 border-t pt-2 space-y-1">
               {Object.entries(d.answers).map(([k, v]) => {

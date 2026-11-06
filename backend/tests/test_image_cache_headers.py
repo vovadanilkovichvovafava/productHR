@@ -37,6 +37,8 @@ app = Starlette(
         Route("/api/entities/7/files/44/download", _missing),
         Route("/api/entities/7", _json),
         Route("/api/entities/7/files/42/download/extra", _image),
+        Route("/api/entities/trash/3/files/42", _image),
+        Route("/api/entities/trash/3/card", _json),
     ]
 )
 app.add_middleware(SecurityHeadersMiddleware)
@@ -68,4 +70,12 @@ def test_missing_file_is_not_cached():
 
 def test_only_exact_download_path():
     r = client.get("/api/entities/7/files/42/download/extra")
+    assert "no-store" in r.headers["cache-control"]
+
+
+def test_deleted_candidate_photo_is_cached():
+    # Фото удалённого кандидата (корзина) — тоже неизменные байты слепка.
+    r = client.get("/api/entities/trash/3/files/42")
+    assert r.headers["cache-control"] == IMAGE_CACHE_CONTROL
+    r = client.get("/api/entities/trash/3/card")
     assert "no-store" in r.headers["cache-control"]
