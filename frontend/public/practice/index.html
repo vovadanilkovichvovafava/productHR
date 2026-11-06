@@ -77,7 +77,8 @@ h1 {
 .sub { margin: 40px 0 20px; font: 800 14px/1.25 var(--f-display); text-transform: uppercase; color: var(--ink); letter-spacing: .01em; }
 .big { font: 600 clamp(19px, 2.1vw, 24px)/1.38 var(--f-display); color: var(--ink); margin: 0 0 24px; }
 .soft { color: var(--muted); }
-em.hl { font-style: normal; color: var(--ink); background: linear-gradient(transparent 60%, var(--hl) 60%); padding: 0 .08em; }
+em.hl { font-style: normal; color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px; text-underline-offset: .32em; text-decoration-skip-ink: auto; }
 
 /* списки через тире с жирным началом */
 .dash { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 20px; }

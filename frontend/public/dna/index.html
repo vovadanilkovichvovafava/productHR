@@ -77,7 +77,8 @@ h1 {
 .sub { margin: 40px 0 20px; font: 800 14px/1.25 var(--f-display); text-transform: uppercase; color: var(--ink); letter-spacing: .01em; }
 .big { font: 600 clamp(19px, 2.1vw, 24px)/1.38 var(--f-display); color: var(--ink); margin: 0 0 24px; }
 .soft { color: var(--muted); }
-em.hl { font-style: normal; color: var(--ink); background: linear-gradient(transparent 60%, var(--hl) 60%); padding: 0 .08em; }
+em.hl { font-style: normal; color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px; text-underline-offset: .32em; text-decoration-skip-ink: auto; }
 
 /* списки через тире с жирным началом */
 .dash { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 20px; }
@@ -162,7 +163,7 @@ code { font: 500 .92em var(--f-mono); color: var(--ink); background: rgba(255, 7
   .two { grid-template-columns: minmax(0, 1fr); }
 }
 
-.helix-wrap { position: absolute; z-index: 0; pointer-events: none; top: 0; right: max(-160px, -10vw); width: clamp(420px, 50vw, 820px); height: min(1180px, 140vh);
+.helix-wrap { position: absolute; z-index: 0; pointer-events: none; top: 64px; right: max(-110px, -6vw); width: clamp(420px, 44vw, 720px); height: min(1120px, 130vh);
   -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
 #helix { width: 100%; height: 100%; display: block; }
 .art-bottom { bottom: -60px; right: max(-220px, -14vw); width: clamp(420px, 46vw, 760px); opacity: .85;
@@ -176,23 +177,24 @@ code { font: 500 .92em var(--f-mono); color: var(--ink); background: rgba(255, 7
 .lede-s { color: var(--ink); font-size: clamp(17px, 1.7vw, 19px); max-width: 46ch; }
 .pr { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 20px clamp(32px, 5vw, 72px); margin-top: clamp(64px, 8vw, 104px); max-width: 1100px; scroll-margin-top: 24px; }
 .pr-head { min-width: 0; }
-.pr-n { display: block; font: 800 clamp(64px, 8vw, 112px)/.85 var(--f-display); color: transparent; -webkit-text-stroke: 1.5px var(--accent); letter-spacing: -.03em; }
+.pr-n { display: flex; align-items: baseline; gap: 12px; font: 800 clamp(44px, 5vw, 68px)/.9 var(--f-display); color: var(--accent); letter-spacing: -.01em; }
+.pr-n small { font: 500 12px/1 var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .pr h3 { margin: 18px 0 0; font: 800 clamp(18px, 2vw, 24px)/1.15 var(--f-display); text-transform: uppercase; color: var(--ink); overflow-wrap: break-word; hyphens: auto; }
 .pr-body { min-width: 0; max-width: 620px; }
 .cycle { font: 700 clamp(14px, 1.5vw, 16px)/1.6 var(--f-display); color: var(--ink); text-transform: uppercase; }
 .cycle span { color: var(--accent); margin: 0 .35em; }
 .clock { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; margin: 0 0 28px; }
-.clock .day-big { color: var(--accent); font-variant-numeric: tabular-nums; }
+.clock .day-big { color: var(--accent); font-variant-numeric: tabular-nums; min-width: 5.2ch; }
 .clock p { margin: 0; max-width: 28ch; }
 b.ink { color: var(--ink); }
 .checks small { display: block; margin-top: 4px; font: 500 11px/1 var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .checks input:checked + span { color: var(--muted); }
 @media (max-width: 860px) {
-  .helix-wrap { width: 120vw; right: -62vw; height: 820px; opacity: .55; }
+  .helix-wrap { width: 110vw; right: -58vw; top: 40px; height: 760px; opacity: .5; }
   .art-bottom { width: 120vw; right: -50vw; opacity: .4; }
   .index { grid-template-columns: minmax(0, 1fr); }
   .pr { grid-template-columns: minmax(0, 1fr); }
-  .pr-n { font-size: 64px; }
+  .pr-n { font-size: 48px; }
 }
 </style>
 </head>
@@ -215,21 +217,21 @@ b.ink { color: var(--ink); }
     <div class="fact"><b>1</b><span>неделя на самопроверку</span></div>
   </div>
   <nav class="index" aria-label="Содержание"><div><p class="sub">Глава 1: Как мы думаем</p><ol class="toc"><li><a href="#p1"><span>01</span>Позиция ученика</a></li><li><a href="#p2"><span>02</span>Позиция экспериментатора</a></li><li><a href="#p3"><span>03</span>Тестируем много</a></li><li><a href="#p4"><span>04</span>Ошибаться можно и нужно</a></li></ol></div><div><p class="sub">Глава 2: Как мы действуем</p><ol class="toc"><li><a href="#p5"><span>05</span>Скорость = скорость решений</a></li><li><a href="#p6"><span>06</span>Сначала сам, потом к руководителю</a></li><li><a href="#p7"><span>07</span>Работаем на результат, а не по часам</a></li></ol></div><div><p class="sub">Глава 3: Как мы работаем вместе</p><ol class="toc"><li><a href="#p8"><span>08</span>Скорость ответа — до 5 минут</a></li><li><a href="#p9"><span>09</span>Усиливай команду</a></li><li><a href="#p10"><span>10</span>Открытость</a></li></ol></div></nav>
-  <section class="sec chapter" aria-labelledby="ch1"><div class="col"><div class="sh"><span class="n">Глава 1:</span><h2><span id="ch1">Как мы думаем</span></h2></div><p class="lede-s">Наша сфера меняется каждый день. Выигрывает тот, кто учится, пробует и не боится ошибиться.</p></div><article class="pr" id="p1"><div class="pr-head"><span class="pr-n">01</span><h3>Позиция ученика</h3></div><div class="pr-body"><p class="big">«Я уже всё знаю» — самая опасная фраза в нашей сфере.</p>
+  <section class="sec chapter" aria-labelledby="ch1"><div class="col"><div class="sh"><span class="n">Глава 1:</span><h2><span id="ch1">Как мы думаем</span></h2></div><p class="lede-s">Наша сфера меняется каждый день. Выигрывает тот, кто учится, пробует и не боится ошибиться.</p></div><article class="pr" id="p1"><div class="pr-head"><span class="pr-n"><small>Принцип</small>01</span><h3>Позиция ученика</h3></div><div class="pr-body"><p class="big">«Я уже всё знаю» — самая опасная фраза в нашей сфере.</p>
 <p>Будь открыт новой информации. Пропускай её через свой опыт и принимай взвешенные решения. Здесь каждый день что-то меняется, и <em class="hl">побеждает тот, кто учится не останавливаясь</em>.</p>
-<p class="callout">Чем больше мы знаем, тем больше понимаем, сколько ещё не знаем. Новые знания можно получать бесконечно.</p></div></article><article class="pr" id="p2"><div class="pr-head"><span class="pr-n">02</span><h3>Позиция экспериментатора</h3></div><div class="pr-body"><p class="big">Каждый день спрашивай себя: «Что изменить, чтобы стать лучше?»</p>
+<p class="callout">Чем больше мы знаем, тем больше понимаем, сколько ещё не знаем. Новые знания можно получать бесконечно.</p></div></article><article class="pr" id="p2"><div class="pr-head"><span class="pr-n"><small>Принцип</small>02</span><h3>Позиция экспериментатора</h3></div><div class="pr-body"><p class="big">Каждый день спрашивай себя: «Что изменить, чтобы стать лучше?»</p>
 <p>Мы постоянно улучшаем и докручиваем процессы. Работай с мыслью, что почти всё можно сделать эффективнее.</p>
-<p class="sub">Ищи, где именно:</p><ul class="dash"><li><b>В своих задачах:</b> что делаешь руками, а можно иначе.</li><li><b>В инструментах:</b> чем пользуешься и что есть лучше.</li><li><b>В подходе:</b> как думаешь о задаче с самого начала.</li></ul></div></article><article class="pr" id="p3"><div class="pr-head"><span class="pr-n">03</span><h3>Тестируем много</h3></div><div class="pr-body"><p class="big">Без большой пачки тестов в нашей сфере результата почти не достичь.</p>
+<p class="sub">Ищи, где именно:</p><ul class="dash"><li><b>В своих задачах:</b> что делаешь руками, а можно иначе.</li><li><b>В инструментах:</b> чем пользуешься и что есть лучше.</li><li><b>В подходе:</b> как думаешь о задаче с самого начала.</li></ul></div></article><article class="pr" id="p3"><div class="pr-head"><span class="pr-n"><small>Принцип</small>03</span><h3>Тестируем много</h3></div><div class="pr-body"><p class="big">Без большой пачки тестов в нашей сфере результата почти не достичь.</p>
 <p class="sub">Каждый тест проходит один цикл:</p>
-<p class="cycle">Что хотим улучшить <span>→</span> Гипотеза <span>→</span> Внедряем <span>→</span> Тестируем</p><ul class="dash"><li><b>Дало буст:</b> масштабируем.</li><li><b>Не сработало:</b> идём дальше, к следующей гипотезе.</li></ul></div></article><article class="pr" id="p4"><div class="pr-head"><span class="pr-n">04</span><h3>Ошибаться можно и нужно</h3></div><div class="pr-body"><p class="big">Ошибка — это тоже результат теста. Не ошибается только тот, кто ничего не пробует.</p>
+<p class="cycle">Что хотим улучшить <span>→</span> Гипотеза <span>→</span> Внедряем <span>→</span> Тестируем</p><ul class="dash"><li><b>Дало буст:</b> масштабируем.</li><li><b>Не сработало:</b> идём дальше, к следующей гипотезе.</li></ul></div></article><article class="pr" id="p4"><div class="pr-head"><span class="pr-n"><small>Принцип</small>04</span><h3>Ошибаться можно и нужно</h3></div><div class="pr-body"><p class="big">Ошибка — это тоже результат теста. Не ошибается только тот, кто ничего не пробует.</p>
 <p>Мы много тестируем, а значит, часть гипотез не сработает. Это нормально и это часть работы. Сама по себе ошибка не проблема. <em class="hl">Проблема — скрыть её или наступить на те же грабли дважды.</em></p>
 <div class="two"><div><p class="sub">Так делаем:</p><ul class="dash"><li><b>Рассказываем:</b> сразу, команде.</li><li><b>Разбираемся:</b> почему так вышло.</li><li><b>Делаем вывод:</b> и пробуем по-другому.</li></ul></div>
-<div class="no"><p class="sub">Так не делаем:</p><ul class="dash"><li><b>Молчим:</b> и надеемся, что никто не заметит.</li><li><b>Боимся:</b> и перестаём пробовать новое.</li><li><b>Повторяем:</b> ту же ошибку.</li></ul></div></div></div></article></section><section class="sec chapter" aria-labelledby="ch2"><div class="col"><div class="sh"><span class="n">Глава 2:</span><h2><span id="ch2">Как мы действуем</span></h2></div><p class="lede-s">Быстро решаем, сами ищем ответы и меряем работу результатом, а не часами.</p></div><article class="pr" id="p5"><div class="pr-head"><span class="pr-n">05</span><h3>Скорость = скорость решений</h3></div><div class="pr-body"><p class="big">Принял решение — действуй. Ошибся — попробуй по-новому.</p>
+<div class="no"><p class="sub">Так не делаем:</p><ul class="dash"><li><b>Молчим:</b> и надеемся, что никто не заметит.</li><li><b>Боимся:</b> и перестаём пробовать новое.</li><li><b>Повторяем:</b> ту же ошибку.</li></ul></div></div></div></article></section><section class="sec chapter" aria-labelledby="ch2"><div class="col"><div class="sh"><span class="n">Глава 2:</span><h2><span id="ch2">Как мы действуем</span></h2></div><p class="lede-s">Быстро решаем, сами ищем ответы и меряем работу результатом, а не часами.</p></div><article class="pr" id="p5"><div class="pr-head"><span class="pr-n"><small>Принцип</small>05</span><h3>Скорость = скорость решений</h3></div><div class="pr-body"><p class="big">Принял решение — действуй. Ошибся — попробуй по-новому.</p>
 <p>Скорость компании зависит не только от того, как быстро ты выполняешь задачи. Она зависит от того, <em class="hl">как быстро ты принимаешь решения</em>.</p>
-<p>Не откладывай в долгий ящик и не жди идеальных условий. Их не будет.</p></div></article><article class="pr" id="p6"><div class="pr-head"><span class="pr-n">06</span><h3>Сначала сам, потом к руководителю</h3></div><div class="pr-body"><p class="big">К руководителю приходим не с проблемой, а с вариантами решения.</p><ul class="dash"><li><b>Спроси себя:</b> «Как бы я поступил в этой ситуации?»</li><li><b>Не хватает экспертизы — разберись:</b> ИИ, интернет, форумы, профильные чаты.</li><li><b>Иди к руководителю с вариантами:</b> пара решений и то, как поступил бы ты сам.</li></ul>
-<p class="soft">Руководитель — не справочная служба. Его задача — задавать стратегию, цели и вектор и получать результат. Если приносишь только проблемы, ты не усиливаешь команду.</p></div></article><article class="pr" id="p7"><div class="pr-head"><span class="pr-n">07</span><h3>Работаем на результат, а не по часам</h3></div><div class="pr-body"><p class="big">У нас нет графика «с 10 до 6». Есть результат.</p>
+<p>Не откладывай в долгий ящик и не жди идеальных условий. Их не будет.</p></div></article><article class="pr" id="p6"><div class="pr-head"><span class="pr-n"><small>Принцип</small>06</span><h3>Сначала сам, потом к руководителю</h3></div><div class="pr-body"><p class="big">К руководителю приходим не с проблемой, а с вариантами решения.</p><ul class="dash"><li><b>Спроси себя:</b> «Как бы я поступил в этой ситуации?»</li><li><b>Не хватает экспертизы — разберись:</b> ИИ, интернет, форумы, профильные чаты.</li><li><b>Иди к руководителю с вариантами:</b> пара решений и то, как поступил бы ты сам.</li></ul>
+<p class="soft">Руководитель — не справочная служба. Его задача — задавать стратегию, цели и вектор и получать результат. Если приносишь только проблемы, ты не усиливаешь команду.</p></div></article><article class="pr" id="p7"><div class="pr-head"><span class="pr-n"><small>Принцип</small>07</span><h3>Работаем на результат, а не по часам</h3></div><div class="pr-body"><p class="big">У нас нет графика «с 10 до 6». Есть результат.</p>
 <p>Это не значит не спать, не отдыхать и не проводить время с близкими. Это значит <em class="hl">быть на связи, не пропадать, быстро отвечать</em> и уделять работе больше времени. Особенно в первые месяцы, когда ты доказываешь себе и команде, что пришёл всерьёз.</p><ul class="dash"><li><b>Включаются на полную:</b> результаты приходят в разы быстрее.</li><li><b>Закрывают ноутбук в 18:00:</b> раскрываются медленнее и, как показывает опыт, в нашей нише не задерживаются.</li></ul>
-<p class="callout">Честно: у нас правда сложно. Эта сфера идеально подходит трудоголикам.</p></div></article></section><section class="sec chapter" aria-labelledby="ch3"><div class="col"><div class="sh"><span class="n">Глава 3:</span><h2><span id="ch3">Как мы работаем вместе</span></h2></div><p class="lede-s">Мы все на удалёнке. Команда держится на том, что мы видим друг друга в чатах, помогаем и говорим открыто.</p></div><article class="pr" id="p8"><div class="pr-head"><span class="pr-n">08</span><h3>Скорость ответа — до 5 минут</h3></div><div class="pr-body">
+<p class="callout">Честно: у нас правда сложно. Эта сфера идеально подходит трудоголикам.</p></div></article></section><section class="sec chapter" aria-labelledby="ch3"><div class="col"><div class="sh"><span class="n">Глава 3:</span><h2><span id="ch3">Как мы работаем вместе</span></h2></div><p class="lede-s">Мы все на удалёнке. Команда держится на том, что мы видим друг друга в чатах, помогаем и говорим открыто.</p></div><article class="pr" id="p8"><div class="pr-head"><span class="pr-n"><small>Принцип</small>08</span><h3>Скорость ответа — до 5 минут</h3></div><div class="pr-body">
 <div class="clock"><div class="day-big" id="timer">05:00</div><p class="soft">Максимум на ответ в чате в рабочее время. Если ты за компьютером, ты на связи.</p></div>
 <p>Мы работаем удалённо, и единственный способ понять, что человек в строю, — его присутствие в чатах. <em class="hl">Тишина в чате = ты не работаешь.</em></p>
 <p><b class="ink">Утренний ритуал.</b> Каждое утро поздоровайся с командой в рабочем чате и напиши, что планируешь сделать сегодня. Так команда видит, в каком темпе и куда ты движешься.</p>
@@ -241,8 +243,8 @@ b.ink { color: var(--ink); }
 3. …
 Где нужна помощь: …</div>
 <button class="btn" id="copyBtn" type="button">Скопировать</button></div>
-<p class="soft" style="margin-top:28px">Возможно, для тебя эта сфера новая и многое ты делаешь впервые. Когда команда видит твой путь и твои мысли, ей проще подсказать и направить тебя.</p></div></article><article class="pr" id="p9"><div class="pr-head"><span class="pr-n">09</span><h3>Усиливай команду</h3></div><div class="pr-body"><p class="big">Идеально, когда люди в чём-то сильнее тебя.</p>
-<p>Каждый сотрудник должен усиливать руководителя и команду. Не будь обузой.</p><ul class="dash"><li><b>Приноси новые идеи:</b> даже сырые.</li><li><b>Копай глубже:</b> чем от тебя ждут.</li><li><b>Предлагай решения:</b> а не только вопросы.</li></ul></div></article><article class="pr" id="p10"><div class="pr-head"><span class="pr-n">10</span><h3>Открытость</h3></div><div class="pr-body"><p class="big">Что-то беспокоит — скажи. Чем раньше, тем проще решить.</p>
+<p class="soft" style="margin-top:28px">Возможно, для тебя эта сфера новая и многое ты делаешь впервые. Когда команда видит твой путь и твои мысли, ей проще подсказать и направить тебя.</p></div></article><article class="pr" id="p9"><div class="pr-head"><span class="pr-n"><small>Принцип</small>09</span><h3>Усиливай команду</h3></div><div class="pr-body"><p class="big">Идеально, когда люди в чём-то сильнее тебя.</p>
+<p>Каждый сотрудник должен усиливать руководителя и команду. Не будь обузой.</p><ul class="dash"><li><b>Приноси новые идеи:</b> даже сырые.</li><li><b>Копай глубже:</b> чем от тебя ждут.</li><li><b>Предлагай решения:</b> а не только вопросы.</li></ul></div></article><article class="pr" id="p10"><div class="pr-head"><span class="pr-n"><small>Принцип</small>10</span><h3>Открытость</h3></div><div class="pr-body"><p class="big">Что-то беспокоит — скажи. Чем раньше, тем проще решить.</p>
 <p>Приходи к своему лиду или HR и открыто говори о проблемах и о том, что тебя тревожит: задачи, нагрузка, процессы, отношения в команде. <em class="hl">Это не жалоба, а забота о результате.</em></p>
 <p class="soft">Мысли читать мы не умеем, но всегда готовы разобраться вместе.</p></div></article></section>
   <section class="sec col" aria-labelledby="chk">
@@ -275,8 +277,10 @@ function copyFrom(btn, el, label) {
 }
 
 (function () {
-  // Спираль ДНК: 3D-каркас на canvas, медленно вращается. Вне экрана и при
-  // «уменьшить движение» не перерисовывается.
+  // Спираль ДНК — объёмный каркас, как труба и тор в PDF MST: две нити-трубки
+  // (продольные линии + кольца-сечения), тонкие пары оснований с разрывом посередине,
+  // перспектива и наклон оси. Дальнее бледнее и тоньше. Медленно вращается; вне
+  // экрана и при «уменьшить движение» не перерисовывается.
   var canvas = document.getElementById('helix');
   var ctx = canvas.getContext('2d');
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -291,51 +295,82 @@ function copyFrom(btn, el, label) {
   window.addEventListener('resize', function () { resize(); if (reduce) draw(0); });
   resize();
 
-  var R = 1, TURNS = 2.4, STEPS = 220, RUNGS = 34;
-  function strand(t, phase, dr, dp, rot) {
-    var a = 2 * Math.PI * TURNS * t + phase + dp + rot, r = R + dr;
-    return [r * Math.cos(a), t * 2 - 1, r * Math.sin(a)];
+  var PI2 = Math.PI * 2, TURNS = 2.1, R = 1, TUBE = 0.14, HEIGHT = 5.9;
+  var STEPS = 160, AROUND = 12, RING_EVERY = 4, PAIRS = 24, CAM = 7;
+  var TX = 0.2, TZ = -0.24;                       // наклон оси: не плоская симметрия
+  var cx = Math.cos(TX), sx = Math.sin(TX), cz = Math.cos(TZ), sz = Math.sin(TZ);
+
+  function center(t, ph) {
+    var a = PI2 * TURNS * t + ph;
+    return [R * Math.cos(a), -HEIGHT / 2 + HEIGHT * t, R * Math.sin(a)];
   }
-  function project(p) {
-    var s = Math.min(W, H * 0.42) * 0.42, tilt = 0.32;
-    var x = p[0], y = p[1] * 2.35, z = p[2];
-    var y2 = y * Math.cos(tilt) - z * Math.sin(tilt), z2 = y * Math.sin(tilt) + z * Math.cos(tilt);
-    var k = 3.2 / (3.2 + z2 * 0.5);
-    return [W * 0.5 + x * s * k + y2 * s * 0.22, H * 0.5 + y2 * s * k, z2];
+  function norm(v) { var l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+  function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+
+  // геометрия в своей системе координат считается один раз
+  var tubes = [];
+  [0, Math.PI].forEach(function (ph) {
+    var rows = [];
+    for (var i = 0; i <= STEPS; i++) {
+      var t = i / STEPS, c = center(t, ph);
+      var a = center(Math.max(0, t - 0.002), ph), b = center(Math.min(1, t + 0.002), ph);
+      var T = norm([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+      var n = norm(cross(T, [0, 1, 0])), m = cross(n, T), row = [];
+      for (var j = 0; j <= AROUND; j++) {
+        var q = PI2 * j / AROUND, co = Math.cos(q) * TUBE, si = Math.sin(q) * TUBE;
+        row.push([c[0] + co * n[0] + si * m[0], c[1] + co * n[1] + si * m[1], c[2] + co * n[2] + si * m[2]]);
+      }
+      rows.push(row);
+    }
+    tubes.push(rows);
+  });
+  var pairs = [];
+  for (var k = 0; k < PAIRS; k++) {
+    var t = (k + 0.5) / PAIRS, A = center(t, 0), B = center(t, Math.PI);
+    var mid = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2], d = norm([B[0] - A[0], 0, B[2] - A[2]]);
+    var gap = 0.07, inA = TUBE * 0.9;
+    pairs.push([[A[0] + d[0] * inA, A[1], A[2] + d[2] * inA], [mid[0] - d[0] * gap, mid[1], mid[2] - d[2] * gap]]);
+    pairs.push([[mid[0] + d[0] * gap, mid[1], mid[2] + d[2] * gap], [B[0] - d[0] * inA, B[1], B[2] - d[2] * inA]]);
   }
-  function seg(a, b, w, f) {
-    var pa = project(a), pb = project(b), depth = (pa[2] + pb[2]) / 2;
-    ctx.globalAlpha = Math.max(0.12, Math.min(1, 0.6 - depth * 0.38)) * (f || 1);
-    ctx.lineWidth = w;
-    ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke();
-  }
+
+  var BUCKETS = 7;
   function draw(time) {
-    var rot = time * 0.00025;
+    var rot = time * 0.00018, cr = Math.cos(rot), sr = Math.sin(rot);
+    var S = Math.min(H / (HEIGHT * 1.18), W / 3.1);
+    function P(p) {
+      var x = p[0] * cr - p[2] * sr, z = p[0] * sr + p[2] * cr, y = p[1];
+      var y1 = y * cx - z * sx, z1 = y * sx + z * cx;           // наклон к зрителю
+      var x2 = x * cz - y1 * sz, y2 = x * sz + y1 * cz;          // наклон в плоскости
+      var k = CAM / (CAM + z1);
+      return [W * 0.5 + x2 * S * k, H * 0.5 + y2 * S * k, z1];
+    }
+    var lists = []; for (var b = 0; b < BUCKETS; b++) lists.push([[], []]);
+    function seg(pa, pb, kind) {
+      var z = (pa[2] + pb[2]) / 2, near = Math.max(0, Math.min(1, (1.35 - z) / 2.7));
+      lists[Math.min(BUCKETS - 1, Math.floor(near * BUCKETS))][kind].push(pa, pb);
+    }
+    tubes.forEach(function (rows) {
+      var pr = rows.map(function (row) { return row.map(P); });
+      for (var j = 0; j < AROUND; j += 1) for (var i = 0; i < STEPS; i++) seg(pr[i][j], pr[i + 1][j], 0);
+      for (var r = 0; r <= STEPS; r += RING_EVERY) for (var j2 = 0; j2 < AROUND; j2++) seg(pr[r][j2], pr[r][j2 + 1], 1);
+    });
+    pairs.forEach(function (pp) { seg(P(pp[0]), P(pp[1]), 1); });
+
     ctx.clearRect(0, 0, W, H);
     ctx.strokeStyle = accent; ctx.lineCap = 'round';
-    var offs = [[0, 0], [0.07, 0.04], [-0.07, -0.04], [0, 0.08], [0, -0.08]];
-    for (var ph = 0; ph < 2; ph++) {
-      for (var o = 0; o < offs.length; o++) {
-        var prev = strand(0, ph * Math.PI, offs[o][0], offs[o][1], rot);
-        for (var i = 1; i <= STEPS; i++) {
-          var cur = strand(i / STEPS, ph * Math.PI, offs[o][0], offs[o][1], rot);
-          seg(prev, cur, 1); prev = cur;
-        }
+    for (var bi = 0; bi < BUCKETS; bi++) {
+      var near = (bi + 0.5) / BUCKETS;
+      for (var kind = 0; kind < 2; kind++) {
+        var pts = lists[bi][kind]; if (!pts.length) continue;
+        ctx.globalAlpha = (kind ? 0.16 : 0.1) + (kind ? 0.8 : 0.62) * Math.pow(near, 1.4);
+        ctx.lineWidth = (kind ? 0.55 : 0.5) + (kind ? 0.95 : 0.7) * near;
+        ctx.shadowBlur = near > 0.8 ? 6 : 0; ctx.shadowColor = accent;
+        ctx.beginPath();
+        for (var p = 0; p < pts.length; p += 2) { ctx.moveTo(pts[p][0], pts[p][1]); ctx.lineTo(pts[p + 1][0], pts[p + 1][1]); }
+        ctx.stroke();
       }
     }
-    for (var k = 0; k < RUNGS; k++) {
-      var t = (k + 0.5) / RUNGS;
-      seg(strand(t, 0, 0, 0, rot), strand(t, Math.PI, 0, 0, rot), 1.6);
-    }
-    for (var c = 0; c < 11; c++) {
-      var y = c / 10, ring = [];
-      for (var j = 0; j <= 48; j++) {
-        var a = 2 * Math.PI * j / 48;
-        ring.push([(R + 0.22) * Math.cos(a), y * 2 - 1, (R + 0.22) * Math.sin(a)]);
-      }
-      for (var q = 1; q < ring.length; q++) seg(ring[q - 1], ring[q], 0.7, 0.3);
-    }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
   }
   var onScreen = true;
   if ('IntersectionObserver' in window) {
