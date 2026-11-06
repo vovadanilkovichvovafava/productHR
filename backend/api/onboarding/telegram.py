@@ -27,15 +27,22 @@ class AiogramMessenger:
     def __init__(self, bot: Bot):
         self.bot = bot
 
-    async def send(self, chat_id: int, text: str, buttons: Buttons | None = None, html: bool = False) -> None:
+    async def send(self, chat_id: int, text: str, buttons: Buttons | None = None, html: bool = False) -> int:
         markup = None
         if buttons:
             markup = InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in buttons]
             )
         try:
-            await self.bot.send_message(chat_id, text, reply_markup=markup, disable_web_page_preview=True,
-                                        parse_mode="HTML" if html else None)
+            message = await self.bot.send_message(chat_id, text, reply_markup=markup, disable_web_page_preview=True,
+                                                  parse_mode="HTML" if html else None)
+        except TelegramAPIError as exc:
+            raise SendError(str(exc)) from exc
+        return message.message_id
+
+    async def delete(self, chat_id: int, message_id: int) -> None:
+        try:
+            await self.bot.delete_message(chat_id, message_id)
         except TelegramAPIError as exc:
             raise SendError(str(exc)) from exc
 

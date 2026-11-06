@@ -192,6 +192,9 @@ class Handoff(Base):
     next_at = Column(DateTime, nullable=True, index=True)
     waiting_reason = Column(String(32), nullable=True)
     notified_reason = Column(String(32), nullable=True)  # о чём HR уже сказали — не повторяем
+    # Сообщение HR «допишите …»: данные появились — оно удаляется, вместо него «передан»
+    notice_chat_id = Column(BigInteger, nullable=True)
+    notice_message_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow)
 

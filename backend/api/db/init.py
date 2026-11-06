@@ -229,6 +229,11 @@ async def init_database():
          "onboarding_handoffs.transfer_sent_at"),
         ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS stop_sent_at TIMESTAMP",
          "onboarding_handoffs.stop_sent_at"),
+        # Сообщение HR «допишите»: удаляется, когда данные появились (06.11.2026)
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS notice_chat_id BIGINT",
+         "onboarding_handoffs.notice_chat_id"),
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS notice_message_id INTEGER",
+         "onboarding_handoffs.notice_message_id"),
         # Назначения: человек в отделе. Строка доски = назначение, поэтому без
         # таблицы доска не открывается вообще — заводим её здесь, не надеясь
         # на create_all.

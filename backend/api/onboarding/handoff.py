@@ -102,7 +102,7 @@ LABELS = (
     ("id", "id"), ("stage_title", "Этап"), ("full_name", "ФИО"), ("telegram", "Telegram"),
     ("phone", "Телефон"), ("practice_start", "Старт практики"), ("practice_lead", "Руководитель практики"),
     ("hrd", "HRD"), ("department", "Отдел"), ("lead", "Лид"), ("first_day", "Первый рабочий день"),
-    ("reason", "Причина"), ("timezone", "Часовой пояс"), ("hr", "HR"),
+    ("probation_end", "Испытательный срок до"), ("materials", "Материалы"), ("reason", "Причина"), ("timezone", "Часовой пояс"), ("hr", "HR"),
 )
 
 
@@ -110,6 +110,9 @@ class NullMessenger:
     """Без бота (только вебхук) — Telegram не нужен."""
 
     async def send(self, chat_id, text, buttons=None, html=False):
+        raise SendError("Telegram-бот не настроен")
+
+    async def delete(self, chat_id, message_id):
         raise SendError("Telegram-бот не настроен")
 
 
@@ -322,6 +325,12 @@ class HandoffService:
             event["lead"] = _pick(extra, MANAGER_KEYS)
             event["first_day"] = first_day.strftime("%d.%m.%Y")
             event["first_day_iso"] = first_day.isoformat()
+            # С перехода в отдел идёт испытательный срок (3 месяца, ТЗ раздел 4) — Владимир
+            # 06.11.2026: «не практика, а испытательный срок»
+            probation_end = sch.add_months(first_day, 3)
+            event["probation_end"] = probation_end.strftime("%d.%m.%Y")
+            event["probation_end_iso"] = probation_end.isoformat()
+            event["materials"] = self.settings.materials_url or None  # ДНК компании, staffwise.club/dna/
         if kind == "stage":
             stage = STAGES[row.stage_index]
             event["stage"] = stage.key
@@ -352,6 +361,11 @@ class HandoffService:
             await s.commit()
         logger.info("ONBOARDING handoff %s entity=%s → %s", event.get("stage") or kind, entity.id,
                     f"@{account.username}" if account else "webhook")
+        if kind in ("practice", "transfer"):
+            # HR видит, что передача прошла (Ильнар 06.11.2026: «бот тихо принимает»). Было
+            # «допишите …» — оно удаляется, «передан» приходит в тот же чат.
+            chat_id = await self._drop_notice(row) if row.notice_message_id else None
+            await self._confirm_hr(entity, self._confirm_text(entity, event), chat_id)
         return 1
 
     async def _stop(self, row: Handoff, entity: Entity) -> int:
@@ -369,6 +383,10 @@ class HandoffService:
             fresh.stop_sent_at = self.clock() if told else None
             fresh.updated_at = self.clock()
             await s.commit()
+        if row.notice_message_id:
+            await self._drop_notice(row)  # отказ, пока ждали данные: «допишите» уже не актуально
+        if told:
+            await self._confirm_hr(entity, self._confirm_text(entity, event))
         logger.info("ONBOARDING handoff stop entity=%s status=%s told=%s", entity.id, entity.status, bool(told))
         return 1 if told else 0
 
@@ -418,7 +436,7 @@ class HandoffService:
             fresh.waiting_reason = fresh.notified_reason = reason
             await s.commit()
         if notify:
-            await self._tell_hr(entity, reason)
+            await self._tell_hr(row, entity, reason)
 
     async def _postpone(self, row: Handoff, reason: str) -> None:
         async with self.sessions() as s:
@@ -489,12 +507,63 @@ class HandoffService:
             hr = await s.get(User, entity.created_by) if entity.created_by else None
         return department, (hr.name if hr else None)
 
-    async def _tell_hr(self, entity: Entity, reason: str) -> None:
+    def _name_html(self, entity: Entity) -> str:
         # ФИО — ссылка на Telegram кандидата, когда ник есть (просьба Ильнара 04.11.2026)
         nick = self._telegram(entity)
         name = html.escape(entity.name or "")
         if nick:
             name = f'<a href="https://t.me/{html.escape(nick.lstrip("@"), quote=True)}">{name}</a>'
+        return name
+
+    async def _save_notice(self, row_id: int, chat_id: Optional[int], message_id: Optional[int]) -> None:
+        async with self.sessions() as s:
+            fresh = await s.get(Handoff, row_id)
+            fresh.notice_chat_id, fresh.notice_message_id = chat_id, message_id
+            await s.commit()
+
+    async def _drop_notice(self, row: Handoff) -> Optional[int]:
+        """Удаляет прежнее «допишите …» у HR. Возвращает чат, где оно было."""
+        try:
+            await self.messenger.delete(row.notice_chat_id, row.notice_message_id)
+        except SendError as exc:  # старше 48 ч или HR удалил сам — не страшно
+            logger.info("ONBOARDING handoff HR notice not deleted entity=%s: %s", row.entity_id, exc)
+        await self._save_notice(row.id, None, None)
+        return row.notice_chat_id
+
+    def _confirm_text(self, entity: Entity, event: dict) -> str:
+        name = self._name_html(entity)
+        kind = event["event"]
+        if kind == "practice":
+            return f"{name} передан(а) HR-профилю: практика с {event['practice_start']}. Он напишет кандидату первым."
+        if kind == "transfer":
+            parts = [f"переход в отдел {html.escape(event['department'])}" if event.get("department")
+                     else "переход в отдел", f"первый рабочий день {event['first_day']}",
+                     f"испытательный срок до {event['probation_end']}"]
+            return f"{name} передан(а) HR-профилю: " + ", ".join(parts) + "."
+        return f"{name}: HR-профилю передан стоп — {html.escape(event.get('reason') or '')}."
+
+    async def _hr_targets(self, entity: Entity) -> list[int]:
+        """Кому из HR писать: тот, кто завёл карточку, иначе запасной чат."""
+        targets = []
+        if entity.created_by:
+            async with self.sessions() as s:
+                user = await s.get(User, entity.created_by)
+            if user and user.telegram_id:
+                targets.append(user.telegram_id)
+        if self.settings.hr_fallback_chat_id:
+            targets.append(self.settings.hr_fallback_chat_id)
+        return targets
+
+    async def _confirm_hr(self, entity: Entity, text: str, chat_id: Optional[int] = None) -> None:
+        for target in ([chat_id] if chat_id else await self._hr_targets(entity)):
+            try:
+                await self.messenger.send(target, text, html=True)
+                return
+            except SendError as exc:
+                logger.warning("ONBOARDING handoff HR confirm to %s failed: %s", target, exc)
+
+    async def _tell_hr(self, row: Handoff, entity: Entity, reason: str) -> None:
+        name = self._name_html(entity)
         text = {
             "no_telegram": (
                 f"{name}: в карточке нет Telegram и телефона — допишите, иначе HR-бот "
@@ -509,20 +578,18 @@ class HandoffService:
                 "на «Штате», от неё считаются первый рабочий день и этапы онбординга."
             ),
         }[reason]
-        targets = []
-        if entity.created_by:
-            async with self.sessions() as s:
-                user = await s.get(User, entity.created_by)
-            if user and user.telegram_id:
-                targets.append(user.telegram_id)
-        if self.settings.hr_fallback_chat_id:
-            targets.append(self.settings.hr_fallback_chat_id)
+        targets = await self._hr_targets(entity)
+        if row.notice_message_id:
+            await self._drop_notice(row)  # причина сменилась (дописали Telegram, нет даты) — одно сообщение
         for chat_id in targets:
             try:
-                await self.messenger.send(chat_id, text, html=True)
-                break
+                message_id = await self.messenger.send(chat_id, text, html=True)
             except SendError as exc:
                 logger.warning("ONBOARDING handoff HR notice to %s failed: %s", chat_id, exc)
+                continue
+            if message_id is not None:
+                await self._save_notice(row.id, chat_id, message_id)
+            break
         logger.info("ONBOARDING handoff waiting entity=%s reason=%s", entity.id, reason)
 
     async def _tell_fallback(self, text: str) -> None:

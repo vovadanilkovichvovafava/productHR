@@ -30,12 +30,22 @@ SETTINGS = dict(handoff_accounts=("hr_one", "hr_two"), hr_fallback_chat_id=FALLB
 @dataclass
 class FakeMessenger:
     sent: list = field(default_factory=list)
+    deleted: list = field(default_factory=list)
 
     async def send(self, chat_id, text, buttons=None, html=False):
-        self.sent.append(SimpleNamespace(chat_id=chat_id, text=text, html=html))
+        self.sent.append(SimpleNamespace(chat_id=chat_id, text=text, html=html, id=len(self.sent) + 1))
+        return len(self.sent)
+
+    async def delete(self, chat_id, message_id):
+        self.deleted.append((chat_id, message_id))
 
     def to(self, chat_id):
         return [m.text for m in self.sent if m.chat_id == chat_id]
+
+    def visible(self, chat_id):
+        """Что осталось в чате после удалений — то, что видит HR."""
+        gone = {mid for cid, mid in self.deleted if cid == chat_id}
+        return [m.text for m in self.sent if m.chat_id == chat_id and m.id not in gone]
 
 
 class Clock:
@@ -136,7 +146,8 @@ async def test_practice_transfer_stop_go_to_one_account(handoff, messenger, db_s
     await handoff.tick()
     transfer = messenger.to(ACC_ONE)[-1]  # тот же аккаунт, что вёл практику
     assert transfer.startswith("#onboarding_transfer")
-    for line in ("Отдел: SEO", "Лид: Мария", "Первый рабочий день: 12.11.2026"):
+    for line in ("Отдел: SEO", "Лид: Мария", "Первый рабочий день: 12.11.2026",
+                 "Испытательный срок до: 12.02.2027"):
         assert line in transfer
     assert "кошел" not in transfer.lower()
 
@@ -146,6 +157,14 @@ async def test_practice_transfer_stop_go_to_one_account(handoff, messenger, db_s
     stop = messenger.to(ACC_ONE)[-1]
     assert stop.startswith("#onboarding_stop") and "Причина: уволен" in stop
     assert messenger.to(ACC_TWO) == []
+    # HR получает «передан» на каждое событие (Ильнар 06.11.2026)
+    assert messenger.to(FALLBACK) == [
+        '<a href="https://t.me/ivan_p">Иван Петров</a> передан(а) HR-профилю: практика с 05.11.2026 10:00. '
+        "Он напишет кандидату первым.",
+        '<a href="https://t.me/ivan_p">Иван Петров</a> передан(а) HR-профилю: переход в отдел SEO, '
+        "первый рабочий день 12.11.2026, испытательный срок до 12.02.2027.",
+        '<a href="https://t.me/ivan_p">Иван Петров</a>: HR-профилю передан стоп — уволен.',
+    ]
 
 
 async def test_accounts_share_the_load(handoff, messenger, db_session, organization, admin_user):
@@ -192,6 +211,49 @@ async def test_missing_data_asks_hr_once(handoff, messenger, db_session, organiz
     assert "Telegram: @found_nick" in messenger.to(ACC_ONE)[0]
 
 
+async def test_hr_notice_replaced_when_data_added(handoff, messenger, db_session, organization, admin_user):
+    """Ильнар 06.11.2026: дописал Telegram — бот молчал. Теперь «допишите» удаляется,
+    вместо него — «передан»; сменилась причина — у HR одно актуальное сообщение."""
+    await _link(handoff)
+    await handoff.tick()
+    person = await _person(db_session, organization, admin_user, "Третий Тест", tg=None, practice=None)
+    await handoff.tick()
+    [notice] = messenger.visible(FALLBACK)
+    assert "нет Telegram и телефона" in notice
+
+    person.telegram_usernames = ["third"]
+    await db_session.commit()
+    await handoff.tick()
+    [notice] = messenger.visible(FALLBACK)  # прежнее удалено, осталось одно — про дату
+    assert "не указана дата выхода на практику" in notice
+
+    person.extra_data = {**person.extra_data, "practice_start_date": "2026-11-06"}
+    await db_session.commit()
+    await handoff.tick()
+    assert messenger.visible(FALLBACK) == [
+        '<a href="https://t.me/third">Третий Тест</a> передан(а) HR-профилю: практика с 06.11.2026 10:00. '
+        "Он напишет кандидату первым."
+    ]
+    assert "Telegram: @third" in messenger.to(ACC_ONE)[0]
+    async with handoff.sessions() as s:
+        row = await s.scalar(select(Handoff).where(Handoff.entity_id == person.id))
+    assert row.notice_message_id is None
+
+    await handoff.tick()  # дальше тишина: подтверждение одно
+    assert len(messenger.visible(FALLBACK)) == 1
+
+
+async def test_hr_notice_removed_on_stop_while_waiting(handoff, messenger, db_session, organization, admin_user):
+    await _link(handoff)
+    await handoff.tick()
+    person = await _person(db_session, organization, admin_user, "Без Ника", tg=None)
+    await handoff.tick()
+    person.status = EntityStatus.rejected
+    await db_session.commit()
+    await handoff.tick()
+    assert messenger.visible(FALLBACK) == []  # отказали, пока ждали: «допишите» убрано, нового нет
+
+
 async def test_transfer_without_first_day_waits(handoff, messenger, db_session, organization, admin_user):
     await _link(handoff)
     await handoff.tick()
@@ -200,7 +262,9 @@ async def test_transfer_without_first_day_waits(handoff, messenger, db_session, 
     person.status = EntityStatus.transferred  # дату выхода не поставили
     await db_session.commit()
     await handoff.tick()
-    assert "не указана дата выхода в отдел" in messenger.to(FALLBACK)[0]
+    practice_ok, waiting = messenger.to(FALLBACK)
+    assert "передан(а) HR-профилю: практика с 05.11.2026 10:00" in practice_ok
+    assert "не указана дата выхода в отдел" in waiting
     assert len(messenger.to(ACC_ONE)) == 1  # только практика
 
 
@@ -267,7 +331,8 @@ async def test_webhook_delivery_signed(async_engine, messenger, clock, db_sessio
     data = json.loads(body)
     assert data["event"] == "practice" and data["id"] == person.id
     assert data["practice_start_iso"] == "2026-11-05T10:00" and data["telegram"] == "@ivan_p"
-    assert messenger.sent == []  # в Telegram ничего
+    assert messenger.to(ACC_ONE) == [] and messenger.to(ACC_TWO) == []  # аккаунтам — ничего
+    assert "передан(а) HR-профилю" in messenger.to(FALLBACK)[0]  # HR видит, что передали
 
 
 async def test_webhook_failure_retries_later(async_engine, messenger, clock, db_session, organization, admin_user):

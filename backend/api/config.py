@@ -56,11 +56,13 @@ class Settings(BaseSettings):
     # данные кошельков кандидатов без шифрования не храним. Ключ — Fernet, как
     # PII_ENCRYPTION_KEY; потеря ключа = потеря сохранённых кошельков.
     onboarding_wallet_key: str = Field(default="", alias="ONBOARDING_WALLET_KEY")
-    onboarding_landing_url: str = Field(default="", alias="ONBOARDING_LANDING_URL")
-    onboarding_wallet_guide_url: str = Field(default="", alias="ONBOARDING_WALLET_GUIDE_URL")
+    # Страницы для кандидатов лежат во frontend/public (лендинги Владимира, 06.11.2026)
+    onboarding_landing_url: str = Field(default="https://staffwise.club/practice/", alias="ONBOARDING_LANDING_URL")
+    onboarding_wallet_guide_url: str = Field(default="https://staffwise.club/wallet/",
+                                             alias="ONBOARDING_WALLET_GUIDE_URL")
     onboarding_platform_invite_url: str = Field(default="", alias="ONBOARDING_PLATFORM_INVITE_URL")
-    # Материалы первого рабочего дня: миссия, правила, отпуска, реферальная программа, выплаты
-    onboarding_materials_url: str = Field(default="", alias="ONBOARDING_MATERIALS_URL")
+    # Материалы первого рабочего дня: ДНК компании (миссия и принципы)
+    onboarding_materials_url: str = Field(default="https://staffwise.club/dna/", alias="ONBOARDING_MATERIALS_URL")
     # Запасной чат для сигналов HR (id группы), если личка HR недоступна; 0 — нет
     onboarding_hr_fallback_chat_id: int = Field(default=0, alias="ONBOARDING_HR_FALLBACK_CHAT_ID")
     onboarding_default_tz: str = Field(default="Europe/Moscow", alias="ONBOARDING_DEFAULT_TZ")
