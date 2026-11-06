@@ -243,6 +243,49 @@ async def test_hr_notice_replaced_when_data_added(handoff, messenger, db_session
     assert len(messenger.visible(FALLBACK)) == 1
 
 
+async def test_hr_reminders_first_day_and_week(handoff, messenger, clock, db_session, organization, admin_user):
+    """Новая версия ТЗ Маши (06.11.2026): «АТС — напоминание эйчару о старте работы» и через
+    6 дней — запланировать встречу с новичком. 10:00 МСК, выходные — на понедельник."""
+    await _link(handoff)
+    await handoff.tick()
+    person = await _person(db_session, organization, admin_user, "Иван Петров", dept="SEO")
+    await handoff.tick()
+    await _transfer(db_session, person, first_day="2026-11-05")  # четверг
+    await handoff.tick()
+    before = len(messenger.to(FALLBACK))  # «передан» за практику и перевод
+
+    clock.now = datetime(2026, 11, 5, 6, 59)  # 09:59 МСК — рано
+    await handoff.tick()
+    assert len(messenger.to(FALLBACK)) == before
+    clock.now = datetime(2026, 11, 5, 7, 0)  # 10:00 МСК
+    await handoff.tick()
+    await handoff.tick()  # второй раз не шлём
+    [day1] = messenger.to(FALLBACK)[before:]
+    assert day1 == ('Сегодня у <a href="https://t.me/ivan_p">Иван Петров</a> первый рабочий день в отделе SEO. '
+                    "Спроси лида (Мария): установлена ли связь с новичком и назначен ли онбординг-звонок.")
+
+    clock.now = datetime(2026, 11, 10, 7, 0)  # 5 дней спустя — вторник 10.11, 10:00 МСК
+    await handoff.tick()
+    [week] = messenger.to(FALLBACK)[before + 1:]
+    assert week.startswith('У <a href="https://t.me/ivan_p">Иван Петров</a> шестой день в отделе SEO.')
+    assert "запланируй созвон" in week
+
+
+async def test_hr_reminders_skipped_when_transfer_is_late(handoff, messenger, db_session, organization,
+                                                         admin_user):
+    await _link(handoff)
+    await handoff.tick()
+    person = await _person(db_session, organization, admin_user, "Иван Петров")
+    await handoff.tick()
+    await _transfer(db_session, person, first_day="2026-10-01")  # перевели задним числом
+    await handoff.tick()
+    texts = " ".join(messenger.to(FALLBACK))
+    assert "первый рабочий день в отделе." not in texts and "шестой день" not in texts
+    async with handoff.sessions() as s:
+        row = await s.scalar(select(Handoff).where(Handoff.entity_id == person.id))
+    assert row.hr_day1_done and row.hr_week_done
+
+
 async def test_hr_notice_removed_on_stop_while_waiting(handoff, messenger, db_session, organization, admin_user):
     await _link(handoff)
     await handoff.tick()

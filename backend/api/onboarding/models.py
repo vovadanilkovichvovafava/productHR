@@ -195,6 +195,9 @@ class Handoff(Base):
     # Сообщение HR «допишите …»: данные появились — оно удаляется, вместо него «передан»
     notice_chat_id = Column(BigInteger, nullable=True)
     notice_message_id = Column(Integer, nullable=True)
+    # Напоминания HR после перехода в отдел: первый рабочий день и 6-й день (ТЗ, новая версия)
+    hr_day1_done = Column(Boolean, default=False, nullable=False, server_default="false")
+    hr_week_done = Column(Boolean, default=False, nullable=False, server_default="false")
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow)
 

@@ -53,6 +53,11 @@ logger = logging.getLogger("hr-analyzer.onboarding")
 
 BASELINE_MARK = "onboarding_handoff_baseline_v2_2026_11"
 RETRY_AFTER = timedelta(minutes=10)
+# Напоминания HR после перехода в отдел — новая версия ТЗ Маши (06.11.2026), чек-лист первого
+# дня: «АТС — напоминание эйчару о старте работы (!!!!)» и «за 6 дней бот приходит к HR,
+# напоминает о звонке». (ключ, день от первого рабочего, флаг в onboarding_handoffs)
+HR_REMINDERS = (("day1", 0, "hr_day1_done"), ("week", 5, "hr_week_done"))
+REMINDER_STALE = timedelta(days=1)  # перевели задним числом — старое напоминание не шлём
 PRACTICE = EntityStatus.probation       # «Практика»
 TRANSFER = EntityStatus.transferred     # «Перешёл в отдел»
 TRACKED = (PRACTICE, TRANSFER)
@@ -206,7 +211,9 @@ class HandoffService:
         await self._sync_id_accounts()
         await self._baseline_once()
         await self._pick_up()
-        return await self._process()
+        sent = await self._process()
+        await self._hr_reminders()
+        return sent
 
     # ------------------------------------------------------------- этапы прохода
 
@@ -265,6 +272,7 @@ class HandoffService:
             )).all()
             for row in returned:
                 row.status, row.baseline_status = "active", None
+                row.hr_day1_done = row.hr_week_done = False
                 row.practice_sent_at = row.transfer_sent_at = row.stop_sent_at = None
                 row.stage_index, row.next_at = 0, None
                 row.waiting_reason = row.notified_reason = None
@@ -367,6 +375,52 @@ class HandoffService:
             chat_id = await self._drop_notice(row) if row.notice_message_id else None
             await self._confirm_hr(entity, self._confirm_text(entity, event), chat_id)
         return 1
+
+    async def _hr_reminders(self) -> int:
+        """HR — в первый рабочий день и на 6-й день в отделе, в 10:00 (выходные — на понедельник)."""
+        now = self.clock()
+        async with self.sessions() as s:
+            rows = (await s.execute(
+                select(Handoff, Entity)
+                .join(Entity, Entity.id == Handoff.entity_id)
+                .where(
+                    Handoff.status == "active", Handoff.transfer_sent_at.is_not(None),
+                    Handoff.first_day.is_not(None), Entity.status == TRANSFER,
+                    Handoff.hr_day1_done.is_(False) | Handoff.hr_week_done.is_(False),
+                )
+            )).all()
+        sent = 0
+        for row, entity in rows:
+            for key, offset, flag in HR_REMINDERS:
+                if getattr(row, flag):
+                    continue
+                day = row.first_day + timedelta(days=offset)
+                if self.settings.skip_weekends:
+                    day = sch.next_workday(day)
+                due = sch.at_local(day, sch.STAFF_HOUR, self.settings.default_tz)
+                if now < due:
+                    continue
+                if now - due < REMINDER_STALE:
+                    await self._confirm_hr(entity, await self._reminder_text(entity, key))
+                    logger.info("ONBOARDING handoff HR reminder %s entity=%s", key, entity.id)
+                    sent += 1
+                async with self.sessions() as s:
+                    fresh = await s.get(Handoff, row.id)
+                    setattr(fresh, flag, True)
+                    await s.commit()
+        return sent
+
+    async def _reminder_text(self, entity: Entity, key: str) -> str:
+        name = self._name_html(entity)
+        department, _ = await self._department_and_hr(entity)
+        lead = _pick(entity.extra_data or {}, MANAGER_KEYS)
+        where = f" в отделе {html.escape(department)}" if department else " в отделе"
+        if key == "day1":
+            who = f"лида ({html.escape(str(lead))})" if lead else "лида"
+            return (f"Сегодня у {name} первый рабочий день{where}. Спроси {who}: установлена ли связь "
+                    "с новичком и назначен ли онбординг-звонок.")
+        return (f"У {name} шестой день{where}. В первую неделю HR проводит с новичком отдельную встречу — "
+                "запланируй созвон: пройтись по ответам опроса недели и по ДНК с демонстрацией экрана.")
 
     async def _stop(self, row: Handoff, entity: Entity) -> int:
         """Отказ/уход. Если ни одно событие не передавали — молча закрываем."""
