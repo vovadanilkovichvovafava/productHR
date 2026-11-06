@@ -224,6 +224,7 @@ function getBlockForPath(path: string): string | null {
       "/workspaces",
       "/my-funnels",
       "/form-builder",
+      "/form-answers",
       "/document-templates",
       "/email-templates",
       "/employees",
@@ -1061,14 +1062,14 @@ export default function Layout() {
                     />
                     Аналитика
                   </NavLink>
-                  {/* Standalone-вход к шаблонам анкет: раньше добраться до них
-                      можно было только из карточки кандидата (дровер «Анкета»). */}
+                  {/* Раздел «Анкеты»: «Ответы» (все анкеты и потерянные ответы,
+                      06.11.2026) и «Шаблоны» — пункт горит на обеих страницах. */}
                   <NavLink
-                    to="/form-builder"
-                    className={({ isActive }) =>
+                    to="/form-answers"
+                    className={() =>
                       clsx(
                         "hf-hr-nav-item",
-                        isActive && "hf-hr-nav-item-active",
+                        /^\/form-(answers|builder)/.test(location.pathname) && "hf-hr-nav-item-active",
                       )
                     }
                   >

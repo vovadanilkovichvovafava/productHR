@@ -17,6 +17,7 @@ import type { FormTemplate } from '@/services/api/forms';
 import { FormBuilder, nextFieldId, fieldWord, submissionWord } from '@/features/forms/FormBuilder';
 import { useAuthStore } from '@/stores/authStore';
 import HrConfirm from '@/components/hr/HrConfirm';
+import { FormsPageTabs } from '@/features/forms/FormsPageTabs';
 
 // ============================================================
 // List mode component
@@ -142,7 +143,10 @@ function FormListView() {
       )}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Анкеты</h1>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <h1 className="text-2xl font-bold text-white">Анкеты</h1>
+            <FormsPageTabs />
+          </div>
           <p className="text-dark-400 text-sm mt-1">
             Шаблоны анкет для кандидатов — создайте заранее и отправляйте из карточки кандидата
           </p>

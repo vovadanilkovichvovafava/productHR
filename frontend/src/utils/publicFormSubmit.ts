@@ -159,6 +159,9 @@ export function reportSubmitError(link: { token?: string; slug?: string }, info:
   const payload = JSON.stringify({
     // Ссылка — секрет кандидата: целиком её в лог не пишем, хватит начала.
     link: (link.token || link.slug || '').slice(0, 6),
+    // Полный токен — чтобы сервер нашёл ссылку и показал сбой на странице
+    // «Анкеты → Ответы»; в лог по-прежнему пишется только начало.
+    token: link.token || '',
     kind: info.kind,
     status: info.status ?? null,
     message: info.technical.slice(0, 500),

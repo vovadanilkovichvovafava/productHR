@@ -1684,6 +1684,27 @@ class FormDispatch(Base):
     entity = relationship("Entity")
 
 
+class FormClientError(Base):
+    """Браузер кандидата сообщил, что анкета не отправилась (06.11.2026).
+
+    Раньше такие отчёты были только строкой PUBLIC_FORM_CLIENT_ERROR в логе и
+    пропадали с перезапуском контейнера. Теперь их видно на странице «Анкеты →
+    Ответы» у ссылки, которую кандидат открыл и не смог отправить. Ссылка
+    находится по токену; не нашлась — строка остаётся с началом токена.
+    """
+    __tablename__ = "form_client_errors"
+
+    id = Column(Integer, primary_key=True)
+    dispatch_id = Column(Integer, ForeignKey("form_dispatches.id", ondelete="CASCADE"), nullable=True, index=True)
+    link_prefix = Column(String(8), nullable=True)
+    kind = Column(String(32), nullable=True)       # server_detail | server_status | network | client
+    status = Column(Integer, nullable=True)
+    message = Column(String(500), nullable=True)
+    online = Column(Boolean, nullable=True)
+    user_agent = Column(String(200), nullable=True)
+    created_at = Column(DateTime, default=func.now(), index=True)
+
+
 class CandidateShareLink(Base):
     """Публичная ссылка предпросмотра кандидата для заказчика (без авторизации).
 

@@ -100,6 +100,7 @@ ACTIONS: Tuple[Tuple[str, str, str], ...] = (
     # Метки, анкеты, доска «Штат»
     (".*", r"/api/tags/.*", "Метки / теги"),
     ("POST", rf"/api/forms/{_N}/dispatch", "Отправил анкету кандидату"),
+    ("POST", rf"/api/form-answers/submission/{_N}/attach", "Привязал ответ на анкету к кандидату"),
     (".*", r"/api/forms/public/.*", "Кандидат заполнил анкету"),
     (".*", r"/api/forms.*", "Анкеты"),
     ("PATCH", rf"/api/staff-board/rows/{_N}", "Доска «Штат»: изменил строку"),

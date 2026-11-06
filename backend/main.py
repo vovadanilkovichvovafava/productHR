@@ -440,6 +440,10 @@ except Exception as e:
     logger.error(f"FAILED to register forms router: {e}")
     raise
 
+# Страница «Анкеты → Ответы» (06.11.2026): все анкеты и ответы без кандидата.
+from api.routes import form_answers  # noqa: E402
+app.include_router(form_answers.router, prefix="/api/form-answers", tags=["forms"])
+
 logger.info("=== REGISTERING EMPLOYEES ROUTER ===")
 try:
     app.include_router(employees.router, prefix="/api/employees", tags=["employees"])

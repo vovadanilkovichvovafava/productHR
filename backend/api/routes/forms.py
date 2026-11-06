@@ -23,7 +23,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..limiter import PUBLIC_PAGE_LIMIT, PUBLIC_REPORT_LIMIT, PUBLIC_SUBMIT_LIMIT, limiter
 from ..models.database import (
-    FormTemplate, FormSubmission, FormVacancy, FormDispatch,
+    FormTemplate, FormSubmission, FormVacancy, FormDispatch, FormClientError,
     Entity, EntityFile, EntityFileType, AccessLevel,
     Vacancy, User, UserRole, Organization, OrgMember
 )
@@ -1160,6 +1160,7 @@ async def _store_public_uploads(db: AsyncSession, form, entity_id: int, accepted
 
 class PublicClientErrorSchema(BaseModel):
     link: str = ""
+    token: str = ""  # полный токен ссылки (с 06.11.2026) — в лог не пишется
     kind: str = ""
     status: Optional[int] = None
     message: str = ""
@@ -1168,14 +1169,18 @@ class PublicClientErrorSchema(BaseModel):
 
 @router.post("/public/client-error", status_code=204)
 @limiter.limit(PUBLIC_REPORT_LIMIT)
-async def report_public_form_client_error(request: Request, body: PublicClientErrorSchema):
+async def report_public_form_client_error(
+    request: Request, body: PublicClientErrorSchema, db: AsyncSession = Depends(get_db),
+):
     """Браузер кандидата сообщает, что отправка анкеты не удалась.
 
     17.10.2026 кандидат пять раз жал «Отправить» и видел ошибку, а у нас не
     осталось ни следа: запрос до сервера не дошёл. Этот отчёт страница анкеты
     шлёт в обход axios (sendBeacon), поэтому он доходит и тогда, когда сломался
     сам путь отправки. Ищется в логах по маркеру PUBLIC_FORM_CLIENT_ERROR.
-    Без авторизации и без записи в базу — только строка в лог, всё обрезано.
+    Без авторизации, всё обрезано. С 06.11.2026 отчёт ещё и сохраняется
+    (`form_client_errors`) и виден на странице «Анкеты → Ответы» у той ссылки;
+    сбой записи отчёту не мешает — строка в логе остаётся.
     """
     logger.warning(
         "PUBLIC_FORM_CLIENT_ERROR link=%s… kind=%s status=%s online=%s msg=%r ua=%r",
@@ -1186,7 +1191,40 @@ async def report_public_form_client_error(request: Request, body: PublicClientEr
         (body.message or "")[:500],
         (request.headers.get("user-agent") or "")[:200],
     )
+    try:
+        await _store_client_error(db, request, body)
+    except Exception as e:  # отчёт о сбое не должен сам падать
+        logger.warning("PUBLIC_FORM_CLIENT_ERROR store failed: %s", e)
     return Response(status_code=204)
+
+
+async def _store_client_error(db: AsyncSession, request: Request, body: PublicClientErrorSchema) -> None:
+    """Записать отчёт и связать со ссылкой: по полному токену, а у страниц до
+    06.11.2026 (шлют только 6 символов) — по началу, если оно однозначно."""
+    token = (body.token or "").strip()[:64]
+    prefix = (token or body.link or "").strip()[:6]
+    dispatch_id = None
+    if token:
+        dispatch_id = (await db.execute(
+            select(FormDispatch.id).where(FormDispatch.token == token)
+        )).scalar_one_or_none()
+    elif len(prefix) == 6:
+        like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        found = (await db.execute(
+            select(FormDispatch.id).where(FormDispatch.token.like(like, escape="\\")).limit(2)
+        )).scalars().all()
+        if len(found) == 1:
+            dispatch_id = found[0]
+    db.add(FormClientError(
+        dispatch_id=dispatch_id,
+        link_prefix=prefix or None,
+        kind=(body.kind or "")[:32] or None,
+        status=body.status,
+        message=(body.message or "")[:500] or None,
+        online=body.online,
+        user_agent=(request.headers.get("user-agent") or "")[:200] or None,
+    ))
+    await db.commit()
 
 
 @router.get("/public/d/{token}")
