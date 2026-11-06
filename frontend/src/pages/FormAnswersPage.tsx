@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
-import { Copy, Inbox, Link2, Search, X } from 'lucide-react';
+import { Copy, Inbox, Link2, Loader2, Search, X } from 'lucide-react';
 import { AnketaResponses } from '@/features/forms/AnketaResponses';
 import { FormsPageTabs } from '@/features/forms/FormsPageTabs';
 import HrConfirm from '@/components/hr/HrConfirm';
@@ -33,10 +33,10 @@ import {
  */
 
 const CHIP: Record<ChipTone, string> = {
-  ok: 'bg-green-500/15 text-green-600',
-  warn: 'bg-amber-500/15 text-amber-700',
-  muted: 'bg-dark-700 text-dark-300',
-  bad: 'bg-red-500/15 text-red-600',
+  ok: 'hf-forms-pill-ok',
+  warn: 'hf-forms-pill-warn',
+  muted: 'hf-forms-pill-muted',
+  bad: 'hf-forms-pill-bad',
 };
 
 const linkOf = (token: string) => `${window.location.origin}/form/${token}`;
@@ -84,133 +84,128 @@ export default function FormAnswersPage() {
   const items = data?.items ?? [];
   const counts = data?.counts;
 
+  const filtered = !!(search || filters.formId || filters.sentBy || filters.days || filters.status !== 'all');
+
   return (
-    <div className="p-6 max-w-[1248px] mx-auto">
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mb-2">
-        <h1 className="text-2xl font-bold text-white">Анкеты</h1>
-        <FormsPageTabs />
-      </div>
-      <p className="text-dark-400 text-sm mb-5">
-        Все отправленные анкеты: что заполнено, что открыто и не отправлено, и ответы, у которых нет карточки кандидата.
-      </p>
-
-      <div className="flex flex-wrap gap-2 mb-3" role="tablist" aria-label="Статус анкеты">
-        {STATUS_TABS.map((t) => {
-          const active = filters.status === t.key;
-          const n = counts?.[t.key];
-          const alarm = t.key === 'orphan' && !!n;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setParam('status', t.key === 'all' ? null : t.key)}
-              className={clsx(
-                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm transition-colors',
-                active ? 'border-white text-white font-semibold' : 'border-dark-700 text-dark-300 hover:border-dark-500',
-                alarm && !active && 'border-red-300 bg-red-500/10 text-red-600',
-                alarm && active && 'text-red-600',
-              )}
-            >
-              {t.label}
-              <span className="tabular-nums opacity-70">{n ?? '…'}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="flex flex-wrap gap-2 mb-4">
-        <label className="relative flex-1 min-w-[220px]">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-dark-400" />
-          <input
-            id="form-answers-search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') setSearch(''); }}
-            placeholder="Поиск по кандидату, анкете или тому, что он вписал"
-            className="w-full pl-9 pr-8 py-2 rounded-xl bg-dark-800 border border-dark-700 text-sm text-white placeholder:text-dark-400 focus:outline-none focus:border-accent-500"
-          />
-          {search && (
-            <button type="button" aria-label="Очистить поиск" onClick={() => setSearch('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-dark-400 hover:text-white">
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </label>
-        <select
-          id="form-answers-form"
-          value={filters.formId ?? ''}
-          onChange={(e) => setParam('form', e.target.value || null)}
-          className="px-3 py-2 rounded-xl bg-dark-800 border border-dark-700 text-sm text-white max-w-[260px]"
-          aria-label="Анкета"
-        >
-          <option value="">Анкета: все</option>
-          {(data?.forms ?? []).map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
-        </select>
-        <select
-          id="form-answers-sender"
-          value={filters.sentBy ?? ''}
-          onChange={(e) => setParam('sender', e.target.value || null)}
-          className="px-3 py-2 rounded-xl bg-dark-800 border border-dark-700 text-sm text-white"
-          aria-label="Кто отправил"
-        >
-          <option value="">Отправил: все</option>
-          {(data?.senders ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
-        <select
-          id="form-answers-period"
-          value={filters.days ?? ''}
-          onChange={(e) => setParam('days', e.target.value || null)}
-          className="px-3 py-2 rounded-xl bg-dark-800 border border-dark-700 text-sm text-white"
-          aria-label="Период"
-        >
-          {PERIODS.map((p) => <option key={p.label} value={p.days ?? ''}>{p.label}</option>)}
-        </select>
+    <div className="hf-forms-page">
+      <div className="hf-forms-header">
+        <div>
+          <div className="hf-forms-heading">
+            <h1 className="hf-forms-title">Анкеты</h1>
+            <FormsPageTabs />
+          </div>
+          <p className="hf-forms-subtitle">Отправленные анкеты и ответы кандидатов</p>
+        </div>
+        <div className="hf-forms-tools">
+          <div className="hf-forms-search">
+            <Search className="hf-forms-search-icon" size={15} />
+            <input
+              id="form-answers-search"
+              className="hf-forms-search-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setSearch(''); }}
+              placeholder="Поиск по кандидату, анкете…"
+            />
+            {search && (
+              <button type="button" className="hf-forms-search-clear" aria-label="Очистить поиск" onClick={() => setSearch('')}>
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <select
+            id="form-answers-form"
+            className={clsx('hf-forms-select', filters.formId && 'hf-forms-select-on')}
+            value={filters.formId ?? ''}
+            onChange={(e) => setParam('form', e.target.value || null)}
+            aria-label="Анкета"
+          >
+            <option value="">Анкета: все</option>
+            {(data?.forms ?? []).map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
+          </select>
+          <select
+            id="form-answers-sender"
+            className={clsx('hf-forms-select', filters.sentBy && 'hf-forms-select-on')}
+            value={filters.sentBy ?? ''}
+            onChange={(e) => setParam('sender', e.target.value || null)}
+            aria-label="Кто отправил"
+          >
+            <option value="">Отправил: все</option>
+            {(data?.senders ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+          <select
+            id="form-answers-period"
+            className={clsx('hf-forms-select', filters.days && 'hf-forms-select-on')}
+            value={filters.days ?? ''}
+            onChange={(e) => setParam('days', e.target.value || null)}
+            aria-label="Период"
+          >
+            {PERIODS.map((p) => <option key={p.label} value={p.days ?? ''}>{p.label}</option>)}
+          </select>
+        </div>
       </div>
 
-      {loading && !data ? (
-        <div className="py-16 flex justify-center">
-          <div className="w-8 h-8 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : failed && !data ? (
-        <div className="py-16 text-center text-dark-400">
-          Не удалось загрузить анкеты.{' '}
-          <button type="button" className="text-accent-500 hover:underline" onClick={() => void load()}>Повторить</button>
-        </div>
-      ) : items.length === 0 ? (
-        <div className="py-16 text-center text-dark-400">
-          <Inbox className="w-8 h-8 mx-auto mb-3 opacity-50" />
-          {search || filters.formId || filters.sentBy || filters.days || filters.status !== 'all'
-            ? 'По этим условиям анкет нет'
-            : 'Анкеты ещё не отправлялись'}
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-dark-700 bg-dark-800">
-          <table className="w-full min-w-[820px] text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-dark-400 border-b border-dark-700">
-                <th className="px-4 py-2.5 font-semibold">Кандидат</th>
-                <th className="px-4 py-2.5 font-semibold">Анкета</th>
-                <th className="px-4 py-2.5 font-semibold">Отправил</th>
-                <th className="px-4 py-2.5 font-semibold">Отправлена</th>
-                <th className="px-4 py-2.5 font-semibold">Статус</th>
-                <th className="px-4 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <AnswerRow
-                  key={openKey(item)}
-                  item={item}
-                  active={!!filters.open && openKey(filters.open) === openKey(item)}
-                  onOpen={() => setParam('open', openKey(item))}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="hf-forms-body">
+        <nav className="hf-forms-sidebar" aria-label="Статус анкеты">
+          {STATUS_TABS.map((t) => {
+            const n = counts?.[t.key];
+            return (
+              <button
+                key={t.key}
+                type="button"
+                aria-current={filters.status === t.key ? 'true' : undefined}
+                onClick={() => setParam('status', t.key === 'all' ? null : t.key)}
+                className={clsx(
+                  'hf-forms-folder',
+                  filters.status === t.key && 'hf-forms-folder-active',
+                  t.key === 'orphan' && !!n && 'hf-forms-folder-alarm',
+                )}
+              >
+                <span className="hf-forms-folder-name">{t.label}</span>
+                <span className="hf-forms-folder-count">{n ?? '…'}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {loading && !data ? (
+          <div className="hf-forms-spinner" style={{ flex: 1 }}><Loader2 className="animate-spin" size={26} /></div>
+        ) : failed && !data ? (
+          <div className="hf-forms-empty">
+            Не удалось загрузить анкеты. <button type="button" onClick={() => void load()}>Повторить</button>
+          </div>
+        ) : items.length === 0 ? (
+          <div className="hf-forms-empty">
+            <Inbox size={28} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+            {filtered ? 'По этим условиям анкет нет' : 'Анкеты ещё не отправлялись'}
+          </div>
+        ) : (
+          <div className="hf-forms-table-wrap">
+            <table className="hf-forms-table">
+              <thead>
+                <tr>
+                  <th className="hf-forms-th">Кандидат</th>
+                  <th className="hf-forms-th">Анкета</th>
+                  <th className="hf-forms-th">Отправил</th>
+                  <th className="hf-forms-th">Отправлена</th>
+                  <th className="hf-forms-th">Статус</th>
+                  <th className="hf-forms-th" aria-label="Действия" />
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <AnswerRow
+                    key={openKey(item)}
+                    item={item}
+                    active={!!filters.open && openKey(filters.open) === openKey(item)}
+                    onOpen={() => setParam('open', openKey(item))}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {filters.open && (
         <AnswerDrawer
@@ -228,51 +223,41 @@ export default function FormAnswersPage() {
 function AnswerRow({ item, active, onOpen }: { item: FormAnswerItem; active: boolean; onOpen: () => void }) {
   const chip = statusChip(item);
   const sentAt = item.kind === 'orphan' ? `ответ ${formatWhen(item.submitted_at)}` : formatWhen(item.created_at);
+  const hasAnswer = item.status === 'submitted' || item.status === 'orphan';
   return (
-    <tr className={clsx('border-b border-dark-700 last:border-0 align-middle', active && 'bg-accent-500/5', item.status === 'orphan' && 'bg-red-500/[0.03]')}>
-      <td className="px-4 py-3">
+    // Клик по строке открывает ответ (или подробности ссылки); ссылки и кнопки внутри — сами по себе.
+    <tr
+      className={clsx('hf-forms-row hf-forms-row-click', active && 'hf-forms-row-active')}
+      onClick={(e) => { if (!(e.target as HTMLElement).closest('a,button')) onOpen(); }}
+    >
+      <td className="hf-forms-td">
         {item.entity_id && item.entity_name ? (
-          <Link to={`/all-candidates?entity=${item.entity_id}`} className="font-semibold text-white hover:underline">
-            {item.entity_name}
-          </Link>
+          <Link to={`/all-candidates?entity=${item.entity_id}`} className="hf-forms-name hf-forms-nowrap">{item.entity_name}</Link>
         ) : (
-          <span className="font-semibold text-white">Кандидат не найден</span>
+          <span className="hf-forms-name">Кандидат не найден</span>
         )}
-        <div className="text-xs text-dark-400">
+        <div className="hf-forms-sub">
           {item.kind === 'orphan'
             ? (item.hint ? `в ответе: ${item.hint}` : 'имени в ответе нет')
             : item.entity_status}
         </div>
       </td>
-      <td className="px-4 py-3 text-white">{item.form_title || 'Анкета'}</td>
-      <td className="px-4 py-3 text-dark-300">{item.sent_by_name || '—'}</td>
-      <td className="px-4 py-3 text-dark-300 tabular-nums whitespace-nowrap">{sentAt}</td>
-      <td className="px-4 py-3">
-        <span className={clsx('inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap', CHIP[chip.tone])}>
-          {chip.label}
-        </span>
-        {item.error && <div className="text-xs text-red-600 mt-1 max-w-[320px]">{sendErrorText(item.error)}</div>}
+      <td className="hf-forms-td hf-forms-td-clip" title={item.form_title || undefined}>{item.form_title || 'Анкета'}</td>
+      <td className="hf-forms-td hf-forms-td-num">{item.sent_by_name || '—'}</td>
+      <td className="hf-forms-td hf-forms-td-num">{sentAt}</td>
+      <td className="hf-forms-td">
+        <span className={clsx('hf-forms-pill', CHIP[chip.tone])}>{chip.label}</span>
+        {item.error && <div className="hf-forms-error">{sendErrorText(item.error)}</div>}
       </td>
-      <td className="px-4 py-3 text-right whitespace-nowrap">
-        {item.status === 'submitted' || item.status === 'orphan' ? (
-          <button type="button" onClick={onOpen}
-            className="px-3 py-1.5 rounded-lg bg-accent-500 hover:bg-accent-600 text-white text-xs font-medium">
-            Ответы
+      <td className="hf-forms-td hf-forms-td-actions">
+        {hasAnswer ? (
+          <button type="button" className="hf-forms-action hf-forms-action-primary" onClick={onOpen}>Ответы</button>
+        ) : item.token ? (
+          <button type="button" className="hf-forms-action" title="Скопировать ссылку на анкету, чтобы переслать кандидату"
+            onClick={() => void copyOrShowLink(linkOf(item.token!), 'Ссылка скопирована')}>
+            <Copy size={13} /> Ссылка
           </button>
-        ) : (
-          <div className="inline-flex gap-2">
-            {item.token && (
-              <button type="button" onClick={() => void copyOrShowLink(linkOf(item.token!), 'Ссылка скопирована')}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-dark-600 text-white text-xs hover:bg-dark-700">
-                <Copy className="w-3.5 h-3.5" /> Скопировать ссылку
-              </button>
-            )}
-            <button type="button" onClick={onOpen}
-              className="px-3 py-1.5 rounded-lg border border-dark-600 text-white text-xs hover:bg-dark-700">
-              Подробно
-            </button>
-          </div>
-        )}
+        ) : null}
       </td>
     </tr>
   );
@@ -305,50 +290,46 @@ function AnswerDrawer({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 flex justify-end" {...backdropClose(onClose)}>
-      <aside className="h-full w-full max-w-[560px] bg-dark-800 shadow-2xl overflow-y-auto" aria-label="Ответ на анкету">
-        <div className="sticky top-0 bg-dark-800 border-b border-dark-700 px-5 py-4 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="font-semibold text-white truncate">{view?.form_title || 'Анкета'}</div>
+    <div className="hf-forms-drawer-backdrop" {...backdropClose(onClose)}>
+      <aside className="hf-forms-drawer" aria-label="Ответ на анкету">
+        <div className="hf-forms-drawer-head">
+          <div style={{ minWidth: 0 }}>
+            <div className="hf-forms-drawer-title">{view?.form_title || 'Анкета'}</div>
             {view && (
               view.entity_id && view.entity_name ? (
-                <Link to={`/all-candidates?entity=${view.entity_id}`} className="text-sm text-accent-500 hover:underline">
+                <Link to={`/all-candidates?entity=${view.entity_id}`} className="hf-forms-drawer-link">
                   {view.entity_name} — открыть карточку
                 </Link>
               ) : (
-                <div className="text-sm text-red-600">Карточки кандидата нет</div>
+                <div className="hf-forms-drawer-missing">Карточки кандидата нет</div>
               )
             )}
           </div>
-          <button type="button" onClick={onClose} aria-label="Закрыть" className="p-1 text-dark-400 hover:text-white">
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} aria-label="Закрыть" className="hf-forms-drawer-close">
+            <X size={18} />
           </button>
         </div>
-        {error && <div className="p-6 text-dark-400">{error}</div>}
-        {!view && !error && (
-          <div className="py-16 flex justify-center">
-            <div className="w-6 h-6 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        )}
+        {error && <div className="hf-forms-drawer-section hf-forms-note">{error}</div>}
+        {!view && !error && <div className="hf-forms-spinner"><Loader2 className="animate-spin" size={22} /></div>}
         {view && (
           <>
             {view.errors.length > 0 && (
-              <div className="mx-5 mt-4 rounded-xl border border-red-200 bg-red-500/5 p-3 text-sm">
-                <div className="font-semibold text-red-600 mb-1">У кандидата не отправилось</div>
-                <ul className="space-y-0.5 text-red-600/90">
+              <div className="hf-forms-drawer-section hf-forms-alert">
+                <div className="hf-forms-alert-title">У кандидата не отправилось</div>
+                <ul>
                   {view.errors.map((e, i) => <li key={i}>{sendErrorText(e)}</li>)}
                 </ul>
-                <div className="text-xs text-dark-400 mt-2">
+                <div className="hf-forms-alert-hint">
                   Ответы у кандидата сохранены на его устройстве: перешлите ему ту же ссылку, после обновления страницы они вернутся.
                 </div>
               </div>
             )}
             {view.status !== 'submitted' && view.token && (
-              <div className="mx-5 mt-4 flex items-center gap-3 text-sm">
-                <span className="text-dark-400">{view.status === 'opened' ? 'Открыта, ответа пока нет.' : 'Ссылку ещё не открывали.'}</span>
-                <button type="button" onClick={() => void copyOrShowLink(linkOf(view.token), 'Ссылка скопирована')}
-                  className="inline-flex items-center gap-1 text-accent-500 hover:underline">
-                  <Copy className="w-3.5 h-3.5" /> Скопировать ссылку
+              <div className="hf-forms-drawer-section hf-forms-note">
+                <span>{view.status === 'opened' ? 'Открыта, ответа пока нет.' : 'Ссылку ещё не открывали.'}</span>
+                <button type="button" className="hf-forms-action"
+                  onClick={() => void copyOrShowLink(linkOf(view.token), 'Ссылка скопирована')}>
+                  <Copy size={13} /> Скопировать ссылку
                 </button>
               </div>
             )}
@@ -394,7 +375,7 @@ function AttachPicker({ submissionId, onAttached }: { submissionId: number; onAt
   };
 
   return (
-    <div className="mx-5 mb-6 rounded-xl border border-dark-700 p-4">
+    <div className="hf-forms-attach">
       {target && (
         <HrConfirm
           title="Привязать ответ к кандидату?"
@@ -405,27 +386,24 @@ function AttachPicker({ submissionId, onAttached }: { submissionId: number; onAt
           onConfirm={() => void attach()}
         />
       )}
-      <div className="flex items-center gap-2 font-semibold text-white mb-1">
-        <Link2 className="w-4 h-4" /> Привязать к кандидату
-      </div>
-      <p className="text-xs text-dark-400 mb-3">Ответ появится во вкладке «Анкета» выбранной карточки.</p>
+      <div className="hf-forms-attach-title"><Link2 size={15} /> Привязать к кандидату</div>
+      <p className="hf-forms-attach-hint">Ответ появится во вкладке «Анкета» выбранной карточки.</p>
       <input
         id="form-answers-attach-search"
+        className="hf-forms-input"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Имя, телефон или почта кандидата"
-        className="w-full px-3 py-2 rounded-xl bg-dark-800 border border-dark-700 text-sm text-white placeholder:text-dark-400 focus:outline-none focus:border-accent-500"
       />
       {found.length > 0 && (
-        <ul className="mt-2 divide-y divide-dark-700 rounded-xl border border-dark-700">
+        <ul className="hf-forms-found">
           {found.map((c) => (
-            <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2">
-              <div className="min-w-0">
-                <div className="text-sm text-white truncate">{c.name}</div>
-                <div className="text-xs text-dark-400 truncate">{[c.phone, c.email].filter(Boolean).join(' · ')}</div>
+            <li key={c.id}>
+              <div style={{ minWidth: 0 }}>
+                <div className="hf-forms-name">{c.name}</div>
+                <div className="hf-forms-sub">{[c.phone, c.email].filter(Boolean).join(' · ')}</div>
               </div>
-              <button type="button" onClick={() => setTarget(c)}
-                className="shrink-0 px-3 py-1.5 rounded-lg bg-accent-500 hover:bg-accent-600 text-white text-xs font-medium">
+              <button type="button" className="hf-forms-action hf-forms-action-primary" onClick={() => setTarget(c)}>
                 Привязать
               </button>
             </li>
@@ -433,7 +411,7 @@ function AttachPicker({ submissionId, onAttached }: { submissionId: number; onAt
         </ul>
       )}
       {debounced.trim().length >= 2 && found.length === 0 && (
-        <div className="text-xs text-dark-400 mt-2">Никого не нашли</div>
+        <div className="hf-forms-sub" style={{ marginTop: 8 }}>Никого не нашли</div>
       )}
     </div>
   );

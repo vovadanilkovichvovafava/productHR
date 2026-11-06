@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import {
   Plus,
   Trash2,
   FileText,
+  Loader2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -120,16 +120,76 @@ function FormListView() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-accent-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  const templates = forms.filter(f => f.is_template);
+  const others = forms.filter(f => !f.is_template);
+
+  const renderTable = (list: FormTemplate[]) => (
+    <div className="hf-forms-table-wrap" style={{ alignSelf: 'stretch', flex: 'none' }}>
+      <table className="hf-forms-table" style={{ minWidth: 560 }}>
+        <thead>
+          <tr>
+            <th className="hf-forms-th">Название</th>
+            <th className="hf-forms-th">Вопросов</th>
+            <th className="hf-forms-th">Создана</th>
+            <th className="hf-forms-th" aria-label="Действия" />
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((form) => (
+            <tr key={form.id} className="hf-forms-row hf-forms-row-click" onClick={() => navigate(`/form-builder/${form.id}`)}>
+              <td className="hf-forms-td">
+                <span className="hf-forms-name">{form.title}</span>
+                {form.is_active === false && (
+                  <span className="hf-forms-pill hf-forms-pill-muted" style={{ marginLeft: 8 }}>Неактивна</span>
+                )}
+                {/* «Ответов» имеет смысл только для разовой анкеты конкретного
+                    кандидата (заполнил/нет). У шаблона это агрегат по ВСЕМ, кому
+                    его когда-либо отправляли — рядом с названием формы это число
+                    не читается и только сбивало с толку. Само поле submissions_count
+                    не трогаем — оно используется в защите от удаления шаблона
+                    с уже существующими ответами (handleDelete). */}
+                {!form.is_template && typeof form.submissions_count === 'number' && (
+                  <div className="hf-forms-sub">{form.submissions_count} {submissionWord(form.submissions_count)}</div>
+                )}
+              </td>
+              <td className="hf-forms-td hf-forms-td-num">{form.fields.length} {fieldWord(form.fields.length)}</td>
+              <td className="hf-forms-td hf-forms-td-num">
+                {form.created_at ? new Date(form.created_at).toLocaleDateString('ru') : '—'}
+              </td>
+              <td className="hf-forms-td hf-forms-td-actions">
+                {/* «Скопировать ссылку» убрана: публичный slug-сабмит намеренно
+                    отключён (403) — анкеты уходят персональной token-ссылкой. */}
+                {!form.is_template && !observer && (
+                  <button
+                    type="button"
+                    onClick={(e) => handlePromote(form.id, e)}
+                    className="hf-forms-action"
+                    title="Перенести в шаблоны — станет доступна в карточке кандидата"
+                  >
+                    В шаблоны
+                  </button>
+                )}
+                {!observer && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleDelete(form.id, e)}
+                    className="hf-forms-icon-btn"
+                    title="Удалить"
+                    aria-label={`Удалить «${form.title}»`}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="hf-forms-page">
       {pendingDelete && (
         <HrConfirm
           title="Удалить анкету?"
@@ -141,129 +201,53 @@ function FormListView() {
           onConfirm={confirmDelete}
         />
       )}
-      <div className="flex items-center justify-between mb-6">
+      <div className="hf-forms-header">
         <div>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <h1 className="text-2xl font-bold text-white">Анкеты</h1>
+          <div className="hf-forms-heading">
+            <h1 className="hf-forms-title">Анкеты</h1>
             <FormsPageTabs />
           </div>
-          <p className="text-dark-400 text-sm mt-1">
+          <p className="hf-forms-subtitle">
             Шаблоны анкет для кандидатов — создайте заранее и отправляйте из карточки кандидата
           </p>
         </div>
         {!observer && (
-        <button
-          onClick={handleCreate}
-          className="flex items-center gap-2 px-4 py-2.5 bg-accent-500 hover:bg-accent-600 text-white rounded-xl font-medium transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Создать шаблон
-        </button>
+          <div className="hf-forms-tools">
+            <button type="button" onClick={handleCreate} className="hf-forms-btn hf-forms-btn-primary">
+              <Plus size={15} />
+              Создать шаблон
+            </button>
+          </div>
         )}
       </div>
 
-      {(() => {
-        const templates = forms.filter(f => f.is_template);
-        const others = forms.filter(f => !f.is_template);
-
-        const renderCard = (form: FormTemplate) => (
-          <motion.div
-            key={form.id}
-            layout
-            onClick={() => navigate(`/form-builder/${form.id}`)}
-            className="bg-dark-800 border border-dark-700 rounded-xl p-4 hover:border-dark-600 cursor-pointer transition-colors group"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold text-white truncate">{form.title}</h3>
-                  {form.is_active === false && (
-                    <span className="px-2 py-0.5 text-xs rounded-full bg-dark-600 text-dark-400">
-                      Неактивна
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-4 mt-1 text-sm text-dark-400">
-                  <span>{form.fields.length} {fieldWord(form.fields.length)}</span>
-                  {/* «Ответов» имеет смысл только для разовой анкеты конкретного
-                      кандидата (заполнил/нет). У шаблона это агрегат по ВСЕМ, кому
-                      его когда-либо отправляли — рядом с названием формы это число
-                      не читается и только сбивало с толку. Само поле submissions_count
-                      не трогаем — оно используется в защите от удаления шаблона
-                      с уже существующими ответами (handleDelete в AnketaDrawer). */}
-                  {!form.is_template && typeof form.submissions_count === 'number' && (
-                    <span>{form.submissions_count} {submissionWord(form.submissions_count)}</span>
-                  )}
-                  {form.created_at && (
-                    <span>{new Date(form.created_at).toLocaleDateString('ru')}</span>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                {/* «Скопировать ссылку» убрана: публичный slug-сабмит намеренно
-                    отключён (403) — анкеты уходят персональной token-ссылкой. */}
-                {!form.is_template && !observer && (
-                  <button
-                    onClick={(e) => handlePromote(form.id, e)}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition-colors"
-                    title="Перенести в шаблоны — станет доступна в карточке кандидата"
-                  >
-                    В шаблоны
-                  </button>
-                )}
-                {!observer && (
-                <button
-                  onClick={(e) => handleDelete(form.id, e)}
-                  className="p-2 rounded-lg hover:bg-red-500/20 text-dark-400 hover:text-red-400 transition-colors"
-                  title="Удалить"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-                )}
-              </div>
+      {loading ? (
+        <div className="hf-forms-spinner"><Loader2 className="animate-spin" size={26} /></div>
+      ) : forms.length === 0 ? (
+        <div className="hf-forms-empty" style={{ alignSelf: 'stretch', flex: 'none' }}>
+          <FileText size={28} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+          Пока нет шаблонов. Создайте первый — он появится в карточке кандидата в «Шаблонах анкет».
+        </div>
+      ) : (
+        <div style={{ overflowY: 'auto', minHeight: 0 }}>
+          <div className="hf-forms-section-title">Шаблоны</div>
+          {templates.length === 0 ? (
+            <div className="hf-forms-sub" style={{ fontSize: 'var(--hf-fs-2xs)' }}>
+              {others.length > 0
+                ? 'Пока нет шаблонов — создайте новый или нажмите «В шаблоны» у анкеты ниже, чтобы сделать её переиспользуемой.'
+                : 'Пока нет шаблонов — создайте первый, он появится в карточке кандидата.'}
             </div>
-          </motion.div>
-        );
-
-        if (forms.length === 0) {
-          return (
-            <div className="text-center py-20 text-dark-400">
-              <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p className="text-lg">Пока нет шаблонов</p>
-              <p className="text-sm mt-1">Создайте первый шаблон — он появится в карточке кандидата в «Шаблонах анкет»</p>
-            </div>
-          );
-        }
-
-        return (
-          <>
-            <div className="text-sm font-medium text-dark-400 uppercase tracking-wide mb-3">
-              Шаблоны
-            </div>
-            {templates.length === 0 ? (
-              <div className="text-sm text-dark-400 mb-6">
-                {others.length > 0 ? (
-                  <>Пока нет шаблонов — создайте новый или нажмите «В шаблоны» на анкете ниже, чтобы сделать её переиспользуемой.</>
-                ) : (
-                  <>Пока нет шаблонов — создайте первый, он появится в карточке кандидата.</>
-                )}
-              </div>
-            ) : (
-              <div className="grid gap-3 mb-8">{templates.map(renderCard)}</div>
-            )}
-            {/* Остальные сохранённые анкеты: разовые/старые (созданные до этой
-                страницы, без is_template) — чтобы они не «терялись» из виду. */}
-            {others.length > 0 && (
-              <>
-                <div className="text-sm font-medium text-dark-400 uppercase tracking-wide mb-3">
-                  Остальные анкеты
-                </div>
-                <div className="grid gap-3">{others.map(renderCard)}</div>
-              </>
-            )}
-          </>
-        );
-      })()}
+          ) : renderTable(templates)}
+          {/* Остальные сохранённые анкеты: разовые/старые (созданные до этой
+              страницы, без is_template) — чтобы они не «терялись» из виду. */}
+          {others.length > 0 && (
+            <>
+              <div className="hf-forms-section-title">Остальные анкеты</div>
+              {renderTable(others)}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
