@@ -6,7 +6,7 @@ import hashlib
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_, case
+from sqlalchemy import select, update, and_, case, func
 from fastapi import Depends, HTTPException, status, Cookie, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -375,10 +375,32 @@ async def get_user_from_token(token: str, db: AsyncSession) -> Optional[User]:
     return user
 
 
+async def find_user_by_login_email(db: AsyncSession, email: str) -> Optional[User]:
+    """Аккаунт по почте для входа — без учёта регистра и пробелов по краям.
+
+    Корпоративные адреса HR (Мария, 09.11.2026: вход по почте @agency-mst.com)
+    часто вписывают как «Maria.Gol@…» — раньше вход сравнивал строку точно, и
+    человек с верным паролем получал «неверные данные». Если без регистра
+    совпали два старых аккаунта, берём только точное совпадение: угадывать,
+    в какой из них пускать, нельзя.
+    """
+    norm = (email or "").strip().lower()
+    if not norm:
+        return None
+    rows = (await db.execute(
+        select(User).where(func.lower(User.email) == norm).order_by(User.id)
+    )).scalars().all()
+    if len(rows) == 1:
+        return rows[0]
+    for u in rows:
+        if u.email == (email or "").strip():
+            return u
+    return None
+
+
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[User]:
     """Authenticate user with constant-time comparison to prevent timing attacks."""
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
+    user = await find_user_by_login_email(db, email)
 
     if user:
         # User exists - verify actual password

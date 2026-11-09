@@ -913,6 +913,9 @@ async def quick_add_member(
     if not is_org_admin and not is_lead and not is_sub:
         raise HTTPException(status_code=403, detail="Permission denied")
 
+    from ..services.email_domain import ensure_email_fits_org
+    await ensure_email_fits_org(db, org.id, data.email)
+
     # Check if user with this email already exists
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()

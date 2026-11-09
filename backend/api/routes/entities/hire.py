@@ -90,6 +90,8 @@ async def hire_entity(
     email = (data.email or "").strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="Нужен email для аккаунта")
+    from ...services.email_domain import ensure_email_fits_org
+    await ensure_email_fits_org(db, org.id, email)
 
     tg = _first_tg(ent)
 

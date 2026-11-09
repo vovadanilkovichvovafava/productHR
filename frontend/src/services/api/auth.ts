@@ -296,6 +296,28 @@ export const toggleMemberFullAccess = async (userId: number, hasFullAccess: bool
   return data;
 };
 
+// Вход только с корпоративной почтой (09.11.2026, services/email_domain.py).
+export interface EmailDomainMember { user_id: number; name: string; email: string }
+export interface EmailDomainState { domains: string[]; outside: EmailDomainMember[]; saved?: boolean }
+
+export const getEmailDomain = async (): Promise<EmailDomainState> => {
+  const { data } = await api.get<EmailDomainState>('/organizations/current/email-domain');
+  return data;
+};
+
+export const setEmailDomain = async (domains: string, dryRun = false): Promise<EmailDomainState> => {
+  const { data } = await api.put<EmailDomainState>('/organizations/current/email-domain', {
+    domains,
+    dry_run: dryRun,
+  });
+  return data;
+};
+
+export const updateMemberEmail = async (userId: number, email: string): Promise<{ email: string }> => {
+  const { data } = await api.patch<{ email: string }>(`/organizations/current/members/${userId}/email`, { email });
+  return data;
+};
+
 export const removeMember = async (userId: number): Promise<{ success: boolean }> => {
   const { data } = await debouncedMutation<{ success: boolean }>('delete', `/organizations/current/members/${userId}`);
   return data;

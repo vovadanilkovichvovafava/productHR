@@ -110,6 +110,18 @@ async def login(
     if not authenticated_user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Вход только с корпоративной почтой, если организация это включила
+    # (services/email_domain.py). Проверка ПОСЛЕ пароля: чужому отказ не
+    # подскажет, что такой аккаунт есть.
+    from ..services.email_domain import login_blocked_reason
+    blocked = await login_blocked_reason(db, authenticated_user)
+    if blocked:
+        import logging
+        logging.getLogger("hr-analyzer.auth").info(
+            "EMAIL_DOMAIN login refused: user=%s %s", authenticated_user.id, authenticated_user.email,
+        )
+        raise HTTPException(status_code=403, detail=blocked)
+
     # Successful login - reset failed attempts counter
     authenticated_user.failed_login_attempts = 0
     authenticated_user.locked_until = None
@@ -317,6 +329,16 @@ async def refresh_access_token(
             status_code=401,
             detail="User account is inactive"
         )
+
+    # Ограничение по домену почты включили, пока человек был в системе, —
+    # открытая вкладка закрывается на ближайшем обновлении сессии.
+    from ..services.email_domain import login_blocked_reason
+    blocked = await login_blocked_reason(db, user)
+    if blocked:
+        await revoke_refresh_token(db, new_refresh_token)
+        response.delete_cookie(key="access_token", path="/")
+        response.delete_cookie(key="refresh_token", path="/api/auth")
+        raise HTTPException(status_code=401, detail=blocked)
 
     # Create new short-lived access token
     access_token = create_short_lived_access_token(

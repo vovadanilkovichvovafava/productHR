@@ -186,6 +186,10 @@ async def create_invitation(
 
     # Check if email is already a member of the organization
     if data.email:
+        # Вход только с корпоративной почтой (services/email_domain.py):
+        # приглашение на другой адрес человек не смог бы использовать.
+        from ..services.email_domain import ensure_email_fits_org
+        await ensure_email_fits_org(db, org.id, data.email)
         result = await db.execute(select(User).where(User.email == data.email))
         existing_user = result.scalar_one_or_none()
         if existing_user:
@@ -398,6 +402,9 @@ async def accept_invitation(
                 status_code=400,
                 detail="Приглашение выписано на другой email",
             )
+
+        from ..services.email_domain import ensure_email_fits_org
+        await ensure_email_fits_org(db, invitation.org_id, data.email)
 
         # Check if email already exists
         result = await db.execute(select(User).where(User.email == data.email))

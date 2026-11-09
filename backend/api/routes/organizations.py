@@ -194,12 +194,74 @@ async def update_organization(
     if data.name:
         org.name = data.name
     if data.settings:
-        org.settings = {**(org.settings or {}), **data.settings}
+        # Домены почты меняются только через /current/email-domain — там
+        # проверка, что админ не запрёт сам себя, и список, кто потеряет вход.
+        incoming = {k: v for k, v in data.settings.items() if k != "allowed_email_domains"}
+        org.settings = {**(org.settings or {}), **incoming}
 
     await db.commit()
     await db.refresh(org)
 
     return await get_current_organization(org, db)
+
+
+class EmailDomainRequest(BaseModel):
+    # Строка «agency-mst.com» или список; пусто — снять ограничение.
+    domains: str = ""
+    dry_run: bool = False
+
+
+@router.get("/current/email-domain")
+async def get_email_domain(
+    db: AsyncSession = Depends(get_db),
+    auth: tuple = Depends(require_org_admin),
+):
+    """Ограничение входа по домену почты и кто ему сейчас не подходит."""
+    from ..services.email_domain import org_domains, members_outside
+    _, org, _ = auth
+    domains = org_domains(org)
+    return {"domains": domains, "outside": await members_outside(db, org.id, domains)}
+
+
+@router.put("/current/email-domain")
+async def set_email_domain(
+    data: EmailDomainRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: tuple = Depends(require_org_admin),
+):
+    """Включить/снять «вход только с корпоративной почтой» (services/email_domain.py).
+
+    dry_run — только посчитать, кто потеряет вход: окно показывает список
+    до сохранения. Себя запереть нельзя: сначала смените свою почту.
+    """
+    import logging
+    from sqlalchemy.orm.attributes import flag_modified
+    from ..services.email_domain import (
+        SETTING_KEY, normalize_domains, email_fits, members_outside, domains_text,
+    )
+    user, org, _ = auth
+    try:
+        domains = normalize_domains(data.domains)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if user.role != UserRole.superadmin and not email_fits(user.email, domains):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Ваша почта {user.email} не на {domains_text(domains)} — после сохранения вы "
+                "не смогли бы войти. Сначала смените свою почту на корпоративную."
+            ),
+        )
+    outside = await members_outside(db, org.id, domains)
+    if not data.dry_run:
+        org.settings = {**(org.settings or {}), SETTING_KEY: domains}
+        flag_modified(org, "settings")
+        await db.commit()
+        logging.getLogger("hr-analyzer.organizations").info(
+            "EMAIL_DOMAIN set: org=%s domains=%s by user=%s (%s), без доступа: %s",
+            org.id, domains or "—", user.id, user.name, [m["user_id"] for m in outside] or "—",
+        )
+    return {"domains": domains, "outside": outside, "saved": not data.dry_run}
 
 
 @router.get("/current/members", response_model=List[OrgMemberResponse])
@@ -356,8 +418,11 @@ async def invite_member(
     """Invite a new member to organization (creates user account)."""
     user, org, role = auth
 
+    from ..services.email_domain import ensure_email_fits_org
+    await ensure_email_fits_org(db, org.id, data.email)
+
     # Check if email already exists
-    result = await db.execute(select(User).where(User.email == data.email))
+    result = await db.execute(select(User).where(func.lower(User.email) == data.email.strip().lower()))
     existing_user = result.scalar_one_or_none()
 
     if existing_user:
@@ -376,7 +441,7 @@ async def invite_member(
     else:
         # Create new user with member role (access determined by OrgRole and DeptRole)
         new_user = User(
-            email=data.email,
+            email=data.email.strip().lower(),
             password_hash=hash_password(data.password),
             name=data.name,
             role=UserRole.member  # Regular user - access via OrgRole/DeptRole
@@ -504,6 +569,39 @@ async def update_member_role(
         "is_readonly": membership.is_readonly,
         "scope_vacancy_ids": membership.scope_vacancy_ids or [],
     }
+
+
+class UpdateMemberEmailRequest(BaseModel):
+    email: EmailStr
+
+
+@router.patch("/current/members/{user_id}/email")
+async def update_member_email(
+    user_id: int,
+    data: UpdateMemberEmailRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: tuple = Depends(require_org_admin),
+):
+    """Админ организации меняет почту (логин) участника — например, на
+    корпоративную (09.11.2026). Почту владельца меняет только владелец,
+    суперадмина — никто отсюда. Пароль остаётся прежним."""
+    from ..services.email_domain import change_user_email
+    current_user, org, current_role = auth
+    membership = (await db.execute(
+        select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == user_id)
+    )).scalar_one_or_none()
+    target = await db.get(User, user_id) if membership else None
+    if not membership or target is None:
+        raise HTTPException(status_code=404, detail="Участник не найден")
+    if target.role == UserRole.superadmin and current_user.role != UserRole.superadmin:
+        raise HTTPException(status_code=403, detail="Почту этого аккаунта меняет администратор платформы")
+    owner_roles = ("owner", OrgRole.owner)
+    if membership.role == OrgRole.owner and current_role not in owner_roles and target.id != current_user.id:
+        raise HTTPException(status_code=403, detail="Почту владельца может сменить только владелец")
+    changed = await change_user_email(db, target, str(data.email), actor=current_user)
+    if changed:
+        await db.commit()
+    return {"success": True, "user_id": target.id, "email": target.email}
 
 
 @router.put("/current/members/{user_id}/full-access")

@@ -277,6 +277,16 @@ async def create_user(
         if not dept_result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Department not found")
 
+    # Вход только с корпоративной почтой: человек попадёт в организацию отдела
+    # (ниже) — его почта должна ей подходить, иначе войти он не сможет.
+    if data.department_id and user_role != UserRole.superadmin:
+        from ..models.database import Department as _Dept
+        from ..services.email_domain import ensure_email_fits_org
+        dept_org_id = (await db.execute(
+            select(_Dept.org_id).where(_Dept.id == data.department_id)
+        )).scalar_one_or_none()
+        await ensure_email_fits_org(db, dept_org_id, data.email)
+
     user = User(
         email=data.email,
         password_hash=hash_password(data.password),
@@ -376,7 +386,10 @@ async def update_user(
             raise HTTPException(status_code=404, detail="Department not found")
 
     if data.email:
-        user.email = data.email
+        # Почта — это логин: одно правило с админом организации
+        # (services/email_domain.change_user_email).
+        from ..services.email_domain import change_user_email
+        await change_user_email(db, user, str(data.email))
     if data.name:
         user.name = data.name
     if new_role is not None:

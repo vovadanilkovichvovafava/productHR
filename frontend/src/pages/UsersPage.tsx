@@ -34,6 +34,8 @@ import toast from 'react-hot-toast';
 import { getErrorDetail } from '@/utils';
 import clsx from 'clsx';
 import { backdropClose } from '@/utils/backdropClose';
+import { getEmailDomain, type EmailDomainMember } from '@/services/api/auth';
+import { EmailDomainCard, MemberEmail } from '@/components/users/EmailDomainCard';
 
 const ORG_ROLE_CONFIG: Record<OrgRole, { label: string; icon: typeof Crown; color: string; description: string }> = {
   owner: { label: 'Владелец', icon: Crown, color: 'text-yellow-400 bg-yellow-500/20', description: 'Полный доступ, управление организацией' },
@@ -118,6 +120,9 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
   const [loading, setLoading] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showInvitationsTab, setShowInvitationsTab] = useState(false);
+  // Вход только с корпоративной почтой (EmailDomainCard).
+  const [emailDomains, setEmailDomains] = useState<string[]>([]);
+  const [emailOutside, setEmailOutside] = useState<EmailDomainMember[]>([]);
 
   // Check if current user's department has candidate_database feature
   const canManageFullAccess = hasFeature('candidate_database');
@@ -143,6 +148,14 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
       setInvitations(invitationsData);
       setMyDepartmentIds(myDepts.map(d => d.id));
       setMyManagedUserIds(managedUsers);
+      if (roleData.role === 'owner' || roleData.role === 'admin' || currentUser?.role === 'superadmin') {
+        getEmailDomain()
+          .then((d) => {
+            setEmailDomains(d.domains);
+            setEmailOutside(d.outside);
+          })
+          .catch(() => undefined);
+      }
     } catch (e) {
       console.error('Failed to load organization data:', e);
     } finally {
@@ -297,6 +310,10 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
       )}
 
       {/* Members List */}
+      {canManageUsers && !showInvitationsTab && (
+        <EmailDomainCard domains={emailDomains} outside={emailOutside} onChanged={loadData} />
+      )}
+
       {!showInvitationsTab && (
         <div className="space-y-3">
           {members.map((member) => {
@@ -334,7 +351,13 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-white/40">{member.user_email}</p>
+                      <MemberEmail
+                        userId={member.user_id}
+                        email={member.user_email}
+                        domains={emailDomains}
+                        canEdit={canManageUsers && (member.role !== 'owner' || isMe || myRole === 'owner' || currentUser?.role === 'superadmin')}
+                        onChanged={loadData}
+                      />
                     </div>
                   </div>
 
