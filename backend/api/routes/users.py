@@ -223,17 +223,18 @@ async def get_users(
     def _member_bits(user_id: int):
         m = memberships.get(user_id)
         if not m:
-            return None, False, []
+            return None, False, [], []
         role_value = m.role.value if hasattr(m.role, "value") else m.role
         scope = [int(v) for v in (m.scope_vacancy_ids or []) if str(v).lstrip("-").isdigit()]
-        return role_value, bool(m.is_readonly), scope
+        return role_value, bool(m.is_readonly), scope, list(m.scope_statuses or [])
 
     result_list = []
     for u in users:
-        org_role, is_readonly, scope = _member_bits(u.id)
+        org_role, is_readonly, scope, scope_statuses = _member_bits(u.id)
         result_list.append(UserResponse(
             id=u.id, email=u.email, name=u.name, role=u.role.value,
             org_role=org_role, is_readonly=is_readonly, scope_vacancy_ids=scope,
+            scope_statuses=scope_statuses,
             telegram_id=u.telegram_id, telegram_username=u.telegram_username,
             additional_emails=u.additional_emails or [],
             additional_telegram_usernames=u.additional_telegram_usernames or [],
@@ -497,6 +498,14 @@ async def update_user(
                 select(Vacancy.id).where(Vacancy.org_id == member.org_id, Vacancy.id.in_(wanted))
             )).scalars().all() if wanted else []
             member.scope_vacancy_ids = [int(v) for v in allowed] or None
+    # Скоуп по этапам (09.11.2026) — так же отдельно от роли.
+    if data.scope_statuses is not None:
+        from ..services.vacancy_scope import clean_scope_statuses
+        member = (await db.execute(
+            select(OrgMember).where(OrgMember.user_id == user_id)
+        )).scalar_one_or_none()
+        if member:
+            member.scope_statuses = clean_scope_statuses(data.scope_statuses)
 
     # Also sync department role when system role changes (не перетираем explicit dept_role)
     if new_role is not None and not data.department_id and explicit_dept_role is None:
@@ -551,6 +560,7 @@ async def update_user(
         org_role=org_role_value,
         is_readonly=bool(org_member.is_readonly) if org_member else False,
         scope_vacancy_ids=[int(v) for v in ((org_member.scope_vacancy_ids if org_member else None) or [])],
+        scope_statuses=list((org_member.scope_statuses if org_member else None) or []),
         department_id=dept_id,
         department_name=dept_name,
         department_role=dept_role_value,

@@ -172,8 +172,9 @@ async def login(
     org_role = None
     is_readonly = False
     scope_vacancy_ids: list[int] = []
+    scope_statuses: list[str] = []
     org_member_result = await db.execute(
-        select(OrgMember.role, OrgMember.is_readonly, OrgMember.scope_vacancy_ids).where(OrgMember.user_id == authenticated_user.id).order_by(*org_membership_priority())
+        select(OrgMember.role, OrgMember.is_readonly, OrgMember.scope_vacancy_ids, OrgMember.scope_statuses).where(OrgMember.user_id == authenticated_user.id).order_by(*org_membership_priority())
     )
     org_member = org_member_result.first()
     if org_member:
@@ -182,6 +183,7 @@ async def login(
         # Скоуп по воронкам: фронту нужен, чтобы честно подписать баннер
         # наблюдателя («доступ только к выбранным воронкам»).
         scope_vacancy_ids = [int(v) for v in (org_member[2] or [])]
+        scope_statuses = [str(v) for v in (org_member[3] or [])]
 
     # Get department membership
     department_id = None
@@ -215,6 +217,7 @@ async def login(
             org_role=org_role,
             is_readonly=is_readonly,
             scope_vacancy_ids=scope_vacancy_ids,
+            scope_statuses=scope_statuses,
             department_id=department_id,
             department_name=department_name,
             department_role=department_role,
@@ -449,8 +452,9 @@ async def get_me(
     org_role = None
     is_readonly = False
     scope_vacancy_ids: list[int] = []
+    scope_statuses: list[str] = []
     org_member_result = await db.execute(
-        select(OrgMember.role, OrgMember.is_readonly, OrgMember.scope_vacancy_ids).where(OrgMember.user_id == user.id).order_by(*org_membership_priority())
+        select(OrgMember.role, OrgMember.is_readonly, OrgMember.scope_vacancy_ids, OrgMember.scope_statuses).where(OrgMember.user_id == user.id).order_by(*org_membership_priority())
     )
     org_member = org_member_result.first()
     if org_member:
@@ -459,6 +463,7 @@ async def get_me(
         # Скоуп по воронкам: фронту нужен, чтобы честно подписать баннер
         # наблюдателя («доступ только к выбранным воронкам»).
         scope_vacancy_ids = [int(v) for v in (org_member[2] or [])]
+        scope_statuses = [str(v) for v in (org_member[3] or [])]
 
     # Get department membership
     department_id = None
@@ -484,6 +489,7 @@ async def get_me(
         org_role=org_role,
         is_readonly=is_readonly,
         scope_vacancy_ids=scope_vacancy_ids,
+        scope_statuses=scope_statuses,
         department_id=department_id,
         department_name=department_name,
         department_role=department_role,

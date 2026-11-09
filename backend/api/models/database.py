@@ -289,6 +289,12 @@ class OrgMember(Base):
     # кандидаты с заявкой в этих воронках, и сами воронки тоже только эти.
     # Задумано для наблюдателя-ментора из другого отдела: «вижу только Трафик».
     scope_vacancy_ids = Column(JSON, nullable=True)
+    # Скоуп по этапам (09.11.2026, Мария: «дать доступ к кандидатам Владу и
+    # Егору, только на этапе „практика“»): список статусов кандидата
+    # (EntityStatus.value). Пусто/NULL — ограничения нет; непустой — видны
+    # только кандидаты в этих статусах, а в воронках — только заявки на
+    # соответствующих этапах. Складывается со скоупом по воронкам («и»).
+    scope_statuses = Column(JSON, nullable=True)
     invited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=func.now())
 

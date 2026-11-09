@@ -44,12 +44,27 @@ def _snapshot_vacancy_ids(r: DeletedEntity) -> set:
     return {row.get("vacancy_id") for row in rows if row.get("vacancy_id") is not None}
 
 
+def _snapshot_status(r: DeletedEntity):
+    rows = ((r.snapshot or {}).get("tables") or {}).get("entities") or []
+    return rows[0].get("status") if rows and isinstance(rows[0], dict) else None
+
+
 def _in_scope(r: DeletedEntity, scope_ids) -> bool:
-    """Скоуп по воронкам: запись видна, только если касается разрешённой воронки."""
+    """Скоуп по воронкам: запись видна, только если касается разрешённой воронки.
+    Скоуп по этапам (09.11.2026): удалённая заявка — на разрешённом этапе,
+    удалённый кандидат — в разрешённом статусе."""
     if scope_ids is None:
         return True
+    from ...services.vacancy_scope import scope_stages, scope_statuses
+    statuses = scope_statuses(scope_ids)
     if (r.kind or "entity") == "application":
+        if statuses and r.stage not in {s.value for s in scope_stages(scope_ids)}:
+            return False
         return r.vacancy_id in scope_ids
+    if statuses and _snapshot_status(r) not in statuses:
+        return False
+    if getattr(scope_ids, "all_vacancies", False):
+        return True
     return bool(_snapshot_vacancy_ids(r) & set(scope_ids))
 
 

@@ -225,6 +225,13 @@ async def list_applications(
     if stage:
         query = query.where(VacancyApplication.stage == stage)
 
+    # Скоуп по этапам (09.11.2026): наблюдатель видит в воронке только заявки
+    # на разрешённых этапах («Практика»).
+    from ...services.vacancy_scope import application_scope_filter, get_scope_vacancy_ids as _gs
+    _app_cond = application_scope_filter(await _gs(current_user, db))
+    if _app_cond is not None:
+        query = query.where(_app_cond)
+
     # Умный поиск кандидата в воронке по имени (транслит + любой порядок слов +
     # опечатки через pg_trgm; при отсутствии pg_trgm — транслит-ILIKE).
     if search and search.strip():
@@ -351,10 +358,16 @@ async def list_application_recruiters(
         raise HTTPException(status_code=403, detail="Access denied to this vacancy")
 
     counts: dict[int, int] = {}
-    rows = (await db.execute(
+    _rq = (
         select(VacancyApplication.id, VacancyApplication.created_by)
         .where(VacancyApplication.vacancy_id == vacancy_id)
-    )).all()
+    )
+    # Скоуп по этапам: считаем только те заявки, которые человеку видны.
+    from ...services.vacancy_scope import application_scope_filter, get_scope_vacancy_ids
+    _app_cond = application_scope_filter(await get_scope_vacancy_ids(current_user, db))
+    if _app_cond is not None:
+        _rq = _rq.where(_app_cond)
+    rows = (await db.execute(_rq)).all()
     app_ids = [r.id for r in rows]
     co_by_app: dict[int, set[int]] = {}
     if app_ids:

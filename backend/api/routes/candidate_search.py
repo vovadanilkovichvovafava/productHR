@@ -48,7 +48,7 @@ from api.services.hr_stages import (
     BOARD_STATUSES, OTHER_STATUS, STATUS_LABELS, board_column, statuses_in_column,
 )
 from api.services.vacancy_scope import (
-    entity_scope_filter, filter_extra_for_scope, get_scope_vacancy_ids,
+    application_scope_filter, entity_scope_filter, filter_extra_for_scope, get_scope_vacancy_ids,
 )
 
 logger = logging.getLogger("hr-analyzer.candidate-search")
@@ -1079,7 +1079,9 @@ async def get_candidates_kanban(
                     # Скоуп по воронкам: чипы этапов и подпись воронки в строке
                     # списка считаются ТОЛЬКО по разрешённым воронкам — иначе у
                     # кандидата из двух воронок светилось название чужой.
-                    *([VacancyApplication.vacancy_id.in_(list(scope_ids))] if scope_ids else []),
+                    # Со скоупом по этапам — только заявки на разрешённых этапах.
+                    *([application_scope_filter(scope_ids)]
+                      if application_scope_filter(scope_ids) is not None else []),
                 )
             )
             from .vacancies.common import INACTIVE_STAGES as _INACTIVE

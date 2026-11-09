@@ -53,7 +53,9 @@ async def list_vacancies(
 
     # Скоуп по воронкам (01.10.2026): наблюдателю-ментору видны только его
     # воронки — и в сайдбаре, и в «Заявках», и в выпадающих списках.
-    from ...services.vacancy_scope import get_scope_vacancy_ids, vacancy_scope_filter
+    from ...services.vacancy_scope import (
+        application_scope_filter as _app_scope_cond, get_scope_vacancy_ids, vacancy_scope_filter,
+    )
     _scope_ids = await get_scope_vacancy_ids(current_user, db)
     if _scope_ids:
         query = query.where(vacancy_scope_filter(_scope_ids))
@@ -174,6 +176,8 @@ async def list_vacancies(
             func.count(VacancyApplication.id)
         )
         .where(VacancyApplication.vacancy_id.in_(vacancy_ids))
+        # Скоуп по этапам: счётчики — только по видимым заявкам.
+        .where(*([_cnt_cond] if (_cnt_cond := _app_scope_cond(_scope_ids)) is not None else []))
         .group_by(VacancyApplication.vacancy_id, stage_value)
     )
     # Build nested dict: {vacancy_id: {stage: count}}

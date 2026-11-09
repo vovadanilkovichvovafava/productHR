@@ -126,6 +126,11 @@ async def get_kanban_board(
 
     # Build base filter conditions
     base_filters = [VacancyApplication.vacancy_id == vacancy_id]
+    # Скоуп по этапам (09.11.2026): только заявки на разрешённых этапах.
+    from ...services.vacancy_scope import application_scope_filter, get_scope_vacancy_ids
+    _app_cond = application_scope_filter(await get_scope_vacancy_ids(current_user, db))
+    if _app_cond is not None:
+        base_filters.append(_app_cond)
     if created_by is not None and (is_admin_viewer or created_by == current_user.id):
         # Явный скоуп: админ — на любого рекрутёра, ЛЮБОЙ — на СЕБЯ («Только мои»),
         # даже на «Видна коллегам».
@@ -279,6 +284,10 @@ async def get_kanban_column(
         VacancyApplication.vacancy_id == vacancy_id,
         VacancyApplication.stage == stage,
     ]
+    from ...services.vacancy_scope import application_scope_filter, get_scope_vacancy_ids
+    _app_cond = application_scope_filter(await get_scope_vacancy_ids(current_user, db))
+    if _app_cond is not None:
+        col_filters.append(_app_cond)
     if created_by is not None and (is_admin_viewer or created_by == current_user.id):
         # Явный скоуп: админ — на любого, ЛЮБОЙ — на СЕБЯ («Только мои»).
         col_filters.append(applications_of_recruiter(vacancy, created_by))

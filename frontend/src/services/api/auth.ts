@@ -194,6 +194,9 @@ export interface AdminUserUpdate {
   telegram_username?: string | null;
   department_id?: number | null;
   is_active?: boolean;
+  scope_vacancy_ids?: number[];
+  // Этапы (статусы кандидата), которые видит наблюдатель; [] — без ограничения.
+  scope_statuses?: string[];
 }
 
 export const adminUpdateUser = async (userId: number, data: AdminUserUpdate): Promise<User> => {

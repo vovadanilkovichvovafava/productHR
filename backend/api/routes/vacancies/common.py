@@ -468,11 +468,14 @@ async def _ensure_path_in_org(request: Request, user: User, org_id: int, db: Asy
 
 
 async def _ensure_path_in_scope(request: Request, user: User, db: AsyncSession) -> None:
-    from ...services.vacancy_scope import ensure_vacancy_visible, get_scope_vacancy_ids
+    from ...services.vacancy_scope import (
+        application_in_scope, ensure_vacancy_visible, get_scope_vacancy_ids,
+    )
     params = request.path_params or {}
     if "vacancy_id" not in params and "application_id" not in params:
         return
-    if await get_scope_vacancy_ids(user, db) is None:
+    scope = await get_scope_vacancy_ids(user, db)
+    if scope is None:
         return
     vacancy_id = params.get("vacancy_id")
     if vacancy_id is None:
@@ -480,11 +483,15 @@ async def _ensure_path_in_scope(request: Request, user: User, db: AsyncSession) 
             app_id = int(params["application_id"])
         except (TypeError, ValueError):
             return
-        vacancy_id = (await db.execute(
-            select(VacancyApplication.vacancy_id).where(VacancyApplication.id == app_id)
-        )).scalar()
-        if vacancy_id is None:
+        app = (await db.execute(
+            select(VacancyApplication).where(VacancyApplication.id == app_id)
+        )).scalar_one_or_none()
+        if app is None:
             return  # заявки нет — ответит сама ручка (404)
+        # Скоуп по этапам: заявка на чужом этапе — так же «не найдено».
+        if not application_in_scope(app, scope):
+            raise HTTPException(status_code=404, detail="Заявка не найдена")
+        vacancy_id = app.vacancy_id
     try:
         await ensure_vacancy_visible(int(vacancy_id), user, db)
     except (TypeError, ValueError):

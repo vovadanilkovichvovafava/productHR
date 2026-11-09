@@ -185,10 +185,11 @@ async def get_entity_activity(
     # Скоуп по воронкам (01.10.2026): кандидат может быть в двух воронках, а
     # человек допущен до одной. Сам кандидат ему открыт, но блок чужой воронки
     # (этап, переписка, история) — нет.
-    from ...services.vacancy_scope import get_scope_vacancy_ids
+    # Скоуп по этапам (09.11.2026) — так же: только заявки на разрешённых этапах.
+    from ...services.vacancy_scope import application_in_scope, get_scope_vacancy_ids
     _scope_ids = await get_scope_vacancy_ids(current_user, db)
     if _scope_ids:
-        apps = [a for a in apps if a.vacancy_id in _scope_ids]
+        apps = [a for a in apps if application_in_scope(a, _scope_ids)]
     if not apps:
         return []
 

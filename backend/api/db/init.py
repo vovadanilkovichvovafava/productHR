@@ -193,6 +193,9 @@ async def init_database():
         # поэтому для всех существующих участников поведение не меняется.
         ("ALTER TABLE org_members ADD COLUMN IF NOT EXISTS scope_vacancy_ids JSON",
          "org_members.scope_vacancy_ids"),
+        # Скоуп по этапам (09.11.2026): пусто = ограничения нет.
+        ("ALTER TABLE org_members ADD COLUMN IF NOT EXISTS scope_statuses JSON",
+         "org_members.scope_statuses"),
         # Задачи из чата (25.09.2026, соседняя ветка работ). Их ALTER-ы лежали
         # в том же хвосте start.sh и на прод не доехали: 28.09 проверка
         # SCHEMA_DRIFT показала, что колонок нет, хотя модель их требует —

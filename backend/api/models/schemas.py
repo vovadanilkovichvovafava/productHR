@@ -119,6 +119,9 @@ class UserUpdate(BaseModel):
     # Скоуп по воронкам (01.10.2026): какие вакансии видит наблюдатель. Пустой
     # список снимает ограничение (видит весь пул, как раньше).
     scope_vacancy_ids: Optional[List[int]] = None
+    # Скоуп по этапам (09.11.2026): статусы кандидата, которые человек видит.
+    # Пустой список снимает ограничение.
+    scope_statuses: Optional[List[str]] = None
 
 
 class UserProfileUpdate(BaseModel):
@@ -138,6 +141,8 @@ class UserResponse(BaseModel):
     is_readonly: bool = False  # «Наблюдатель»: видит всё, но не может ничего менять
     # Воронки, которыми ограничена видимость кандидатов (пусто — не ограничена).
     scope_vacancy_ids: List[int] = []
+    # Этапы (статусы кандидата), которыми ограничена видимость (пусто — нет).
+    scope_statuses: List[str] = []
     department_id: Optional[int] = None
     department_name: Optional[str] = None
     department_role: Optional[str] = None  # lead, sub_admin, member

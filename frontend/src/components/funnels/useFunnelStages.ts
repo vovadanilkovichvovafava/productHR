@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getOrgStages } from "@/services/api/auth";
+import { useAuthStore } from "@/stores/authStore";
 import type { StageColumn } from "@/components/vacancies/StagesConfigModal";
 import type { Vacancy } from "@/types";
 import { STATUS_LABELS } from "@/types";
@@ -65,7 +66,40 @@ export function buildFunnelStagesConfig(
   };
 }
 
+/**
+ * Скоуп по этапам (09.11.2026, наставники видят только «Практику»): оставить
+ * вкладки, чей этап заявки соответствует разрешённым статусам кандидата.
+ * Сервер и так не отдаёт заявки других этапов — без этого воронка открывалась
+ * на пустом «Новом», а нужная вкладка пряталась среди пустых.
+ */
+export function limitFunnelStagesToStatuses(
+  config: FunnelStagesConfig,
+  allowedStatuses: readonly string[] | undefined,
+): FunnelStagesConfig {
+  if (!allowedStatuses || allowedStatuses.length === 0) return config;
+  const allowed = new Set(allowedStatuses);
+  const keyToEnum: Record<string, string> = {};
+  for (const [enumVal, keys] of Object.entries(config.enumToKeys)) {
+    for (const k of keys) keyToEnum[k] = enumVal;
+  }
+  const statusOf = (key: string) =>
+    (STATUS_BY_STAGE as Record<string, string>)[keyToEnum[key] || key];
+  const keys = config.keys.filter((k) => allowed.has(statusOf(k)));
+  if (keys.length === 0) return config; // нечего показать — не ломаем воронку
+  const keep = new Set(keys);
+  return {
+    keys,
+    labels: config.labels,
+    enumToKeys: Object.fromEntries(
+      Object.entries(config.enumToKeys)
+        .map(([e, ks]) => [e, ks.filter((k) => keep.has(k))] as const)
+        .filter(([, ks]) => ks.length > 0),
+    ),
+  };
+}
+
 export function useFunnelStages(selectedVacancy: Vacancy | undefined) {
+  const scopeStatuses = useAuthStore((s) => s.user?.scope_statuses);
   // Подписи этапов организации (те же, что у колонок «Все кандидаты»).
   const [orgStageOverrides, setOrgStageOverrides] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -84,11 +118,14 @@ export function useFunnelStages(selectedVacancy: Vacancy | undefined) {
 
   const stagesConfig = useMemo(
     () =>
-      buildFunnelStagesConfig(
-        selectedVacancy?.custom_stages?.columns as StageColumn[] | undefined,
-        orgStageOverrides,
+      limitFunnelStagesToStatuses(
+        buildFunnelStagesConfig(
+          selectedVacancy?.custom_stages?.columns as StageColumn[] | undefined,
+          orgStageOverrides,
+        ),
+        scopeStatuses,
       ),
-    [selectedVacancy, orgStageOverrides],
+    [selectedVacancy, orgStageOverrides, scopeStatuses],
   );
 
   // Контейнеры влитых (исторических) кандидатов хранят статус как статус

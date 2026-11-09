@@ -1,4 +1,5 @@
 import { Eye } from 'lucide-react';
+import { STAGE_LABEL_BY_STATUS } from '@/constants/hrStages';
 
 /**
  * Плашка «Наблюдатель» над HR-разделами (01.10.2026, вид переделан 21.10.2026 —
@@ -12,7 +13,14 @@ import { Eye } from 'lucide-react';
  * посмотреть кандидата. Запись ему запрещена (сервер и клиент), здесь только
  * честная подпись: при ограничении по воронкам «видите всё» было бы неправдой.
  */
-export default function ObserverBanner({ scoped }: { scoped: boolean }) {
+export default function ObserverBanner({ scoped, stages }: { scoped: boolean; stages?: string[] }) {
+  // Скоуп по этапам (09.11.2026): «вам открыты кандидаты на этапе „Практика“».
+  const stageNames = (stages || []).map((s) => `«${STAGE_LABEL_BY_STATUS[s] || s}»`);
+  const text = stageNames.length
+    ? `— вам открыты кандидаты на ${stageNames.length > 1 ? 'этапах' : 'этапе'} ${stageNames.join(', ')}${scoped ? ' в отдельных воронках' : ''}, менять ничего нельзя`
+    : scoped
+      ? '— вам открыты отдельные воронки, менять ничего нельзя'
+      : '— можно искать и открывать кандидатов и воронки, менять ничего нельзя';
   // Карточка на тех же линиях, что и полоса этапов под ней
   // (.hf-top-stage-shell: сверху и справа var(--hf-space-s), слева 0) — во
   // всю ширину без скругления она прилипала к сайдбару и уходила за край.
@@ -31,9 +39,7 @@ export default function ObserverBanner({ scoped }: { scoped: boolean }) {
         <Eye className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
         <span className="font-semibold">Только просмотр</span>
         <span className="min-w-0 truncate">
-          {scoped
-            ? '— вам открыты отдельные воронки, менять ничего нельзя'
-            : '— можно искать и открывать кандидатов и воронки, менять ничего нельзя'}
+          {text}
         </span>
       </div>
     </div>

@@ -42,10 +42,13 @@ class _Result:
 
 
 class _FakeDB:
-    """Отдаёт заранее заданное значение на любой SELECT."""
+    """Отдаёт заранее заданное значение на любой SELECT.
+
+    Скоуп читается одной строкой (воронки, этапы, организация) — значение
+    оборачиваем в такую строку."""
 
     def __init__(self, value):
-        self.value = value
+        self.value = None if value is None else (value, None, 1)
         self.calls = 0
 
     async def execute(self, statement):

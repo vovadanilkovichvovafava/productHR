@@ -29,6 +29,7 @@ import { getUsers, createUser, deleteUser, adminResetPassword, adminUpdateUser, 
 import type { OrgMember, OrgRole, Organization } from '@/services/api';
 import type { User } from '@/types';
 import { getVacancies } from '@/services/api/vacancies';
+import { HR_STAGES } from '@/constants/hrStages';
 import { useAuthStore } from '@/stores/authStore';
 import toast from 'react-hot-toast';
 import { getErrorDetail } from '@/utils';
@@ -1389,6 +1390,9 @@ function EditUserModal({
   // трафик, значит доступ только к трафику». Пусто = ограничения нет.
   const [scopeIds, setScopeIds] = useState<number[]>(user.scope_vacancy_ids || []);
   const [vacancies, setVacancies] = useState<{ id: number; title: string }[]>([]);
+  // Скоуп по этапам (09.11.2026, Мария: «доступ к кандидатам Владу и Егору,
+  // только на этапе „практика“»). Пусто = ограничения нет.
+  const [scopeStatuses, setScopeStatuses] = useState<string[]>(user.scope_statuses || []);
   const isObserver = orgRole === 'observer' || (!orgRole && !!user.is_readonly);
 
   useEffect(() => {
@@ -1421,6 +1425,10 @@ function EditUserModal({
       const prevScope = [...(user.scope_vacancy_ids || [])].sort().join(',');
       if (isObserver && scopeIds.slice().sort().join(',') !== prevScope) {
         payload.scope_vacancy_ids = scopeIds;
+      }
+      const prevStatuses = [...(user.scope_statuses || [])].sort().join(',');
+      if (isObserver && scopeStatuses.slice().sort().join(',') !== prevStatuses) {
+        payload.scope_statuses = scopeStatuses;
       }
       if (deptRole) payload.dept_role = deptRole;
 
@@ -1561,6 +1569,45 @@ function EditUserModal({
                 {scopeIds.length === 0
                   ? 'Ничего не отмечено — видит всех кандидатов организации.'
                   : `Видит только кандидатов этих воронок (${scopeIds.length}), остальные не откроются даже по ссылке.`}
+              </p>
+            </div>
+          )}
+
+          {/* Этапы наблюдателя: отмеченные сужают видимость до кандидатов в
+              этих статусах (в воронке — до заявок на этих этапах). Вместе с
+              воронками работает как «и». */}
+          {isObserver && (
+            <div>
+              <label className="block text-sm text-dark-400 mb-1">Какие этапы видит</label>
+              <div className="flex flex-wrap gap-1.5 rounded-xl glass-light p-2">
+                {HR_STAGES.map((s) => {
+                  const checked = scopeStatuses.includes(s.status);
+                  return (
+                    <label
+                      key={s.status}
+                      className={clsx(
+                        'flex items-center gap-1.5 px-2 py-1 rounded-lg cursor-pointer text-sm',
+                        checked ? 'bg-accent-500/20 text-white' : 'text-white/70 hover:bg-white/5',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setScopeStatuses((prev) =>
+                            checked ? prev.filter((v) => v !== s.status) : [...prev, s.status],
+                          )
+                        }
+                      />
+                      {s.label}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-white/30 mt-1">
+                {scopeStatuses.length === 0
+                  ? 'Ничего не отмечено — видит кандидатов на любом этапе.'
+                  : `Видит только кандидатов на этих этапах (${scopeStatuses.length}): остальные не откроются даже по ссылке, а в воронках видны только эти вкладки.`}
               </p>
             </div>
           )}

@@ -88,6 +88,7 @@ class UpdateMemberRoleRequest(BaseModel):
     # Скоуп по воронкам (01.10.2026): список id вакансий, которыми ограничена
     # видимость кандидатов. Пустой список — ограничения нет (видит весь пул).
     scope_vacancy_ids: Optional[List[int]] = None
+    scope_statuses: Optional[List[str]] = None
 
 
 # Helper to check org access
@@ -561,6 +562,9 @@ async def update_member_role(
             )
         )).scalars().all() if data.scope_vacancy_ids else []
         membership.scope_vacancy_ids = [int(v) for v in allowed] or None
+    if data.scope_statuses is not None:
+        from ..services.vacancy_scope import clean_scope_statuses
+        membership.scope_statuses = clean_scope_statuses(data.scope_statuses)
     await db.commit()
 
     return {
@@ -568,6 +572,7 @@ async def update_member_role(
         "role": new_role.value,
         "is_readonly": membership.is_readonly,
         "scope_vacancy_ids": membership.scope_vacancy_ids or [],
+        "scope_statuses": membership.scope_statuses or [],
     }
 
 

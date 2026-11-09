@@ -22,6 +22,9 @@ export interface User {
   // Скоуп по воронкам: если список непустой, человеку видны кандидаты только
   // этих вакансий (и сами вакансии тоже). Пусто — ограничения нет.
   scope_vacancy_ids?: number[];
+  // Скоуп по этапам (09.11.2026): статусы кандидата, которые человек видит
+  // («Практика» у наставников). Пусто — ограничения нет.
+  scope_statuses?: string[];
   department_id?: number;
   department_name?: string;
   department_role?: DeptRole;

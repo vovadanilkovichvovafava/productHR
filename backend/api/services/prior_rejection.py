@@ -91,6 +91,11 @@ async def rejections_by_entity(
     out: Dict[int, List[Dict[str, Any]]] = {i: [] for i in ids}
     if not ids:
         return out
+    # Скоуп по этапам (09.11.2026): человек видит только, например, «Практику» —
+    # отказы (другой этап) ему не показываем вовсе.
+    _statuses = getattr(scope_ids, "statuses", None)
+    if _statuses and "rejected" not in _statuses:
+        return out
     scope = set(scope_ids) if scope_ids else None
 
     # 1) Заявки на этапе «Отказ» в живых (не удалённых) воронках.

@@ -2241,7 +2241,10 @@ export default function Layout() {
             он действительно только смотрит. В своём рабочем домене (Практика/проекты)
             наблюдатель-практик-лид полноценно работает, поэтому там баннер не висит. */}
         {user?.is_readonly && (routeBlock === "hr" || routeBlock === "admin") && (
-          <ObserverBanner scoped={(user?.scope_vacancy_ids?.length ?? 0) > 0} />
+          <ObserverBanner
+            scoped={(user?.scope_vacancy_ids?.length ?? 0) > 0}
+            stages={user?.scope_statuses}
+          />
         )}
         {/* Вышла новая сборка, а вкладка открыта на старой — предложить обновить. */}
         <UpdateBanner />
