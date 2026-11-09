@@ -13,6 +13,12 @@
   «завели, а войти не может».
 - Суперадмина (платформа, разработчики) правило не касается: иначе включение
   запирало бы тех, кто его чинит.
+- Исключения по адресу — `organizations.settings["allowed_email_exceptions"]`
+  (09.11.2026, владелец: тестовый аккаунт рекрутёра на gmail). Нужны, чтобы не
+  выдавать суперадмина ради одного входа: тестовый аккаунт должен оставаться
+  обычным рекрутёром.
+- Текст отказа при входе НЕ называет домен (владелец, 09.11.2026): экран
+  входа видит кто угодно, подсказка «нужна почта @…» — лишняя информация.
 - Почта у человека одна — `users.email`: её показывают профиль, «Сотрудники»,
   список участников и бот. Сменили — поменялось везде.
 """
@@ -28,6 +34,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.database import Organization, OrgMember, User, UserRole
 
 SETTING_KEY = "allowed_email_domains"
+EXCEPTIONS_KEY = "allowed_email_exceptions"
+LOGIN_REFUSED = "Вход с этой почтой закрыт. Обратитесь к администратору."
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _DOMAIN_RE = re.compile(r"^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
@@ -48,6 +57,32 @@ def normalize_domains(raw: Iterable[str] | str | None) -> List[str]:
     return out
 
 
+def normalize_emails(raw: Iterable[str] | str | None) -> List[str]:
+    """«A@Gmail.com, b@x.ru» → ["a@gmail.com", "b@x.ru"]. Мусор — ValueError."""
+    if raw is None:
+        return []
+    items = re.split(r"[\s,;]+", raw) if isinstance(raw, str) else list(raw)
+    out: List[str] = []
+    for item in items:
+        e = str(item or "").strip().lower()
+        if not e:
+            continue
+        if not _EMAIL_RE.match(e):
+            raise ValueError(f"«{item}» — не похоже на адрес почты")
+        if e not in out:
+            out.append(e)
+    return out
+
+
+def org_exceptions(org: Optional[Organization]) -> List[str]:
+    if org is None:
+        return []
+    try:
+        return normalize_emails((org.settings or {}).get(EXCEPTIONS_KEY))
+    except ValueError:
+        return []
+
+
 def org_domains(org: Optional[Organization]) -> List[str]:
     if org is None:
         return []
@@ -61,8 +96,10 @@ def email_domain(email: str) -> str:
     return (email or "").strip().lower().rsplit("@", 1)[-1]
 
 
-def email_fits(email: str, domains: List[str]) -> bool:
-    return not domains or email_domain(email) in domains
+def email_fits(email: str, domains: List[str], exceptions: Iterable[str] = ()) -> bool:
+    if not domains:
+        return True
+    return email_domain(email) in domains or (email or "").strip().lower() in set(exceptions)
 
 
 def domains_text(domains: List[str]) -> str:
@@ -85,12 +122,8 @@ async def login_blocked_reason(db: AsyncSession, user: User) -> Optional[str]:
         .where(OrgMember.user_id == user.id)
     )).scalars().all()
     for org in orgs:
-        domains = org_domains(org)
-        if not email_fits(user.email, domains):
-            return (
-                f"Вход только по корпоративной почте {domains_text(domains)}. "
-                "Попросите администратора сменить адрес в вашем аккаунте."
-            )
+        if not email_fits(user.email, org_domains(org), org_exceptions(org)):
+            return LOGIN_REFUSED
     return None
 
 
@@ -100,7 +133,7 @@ async def ensure_email_fits_org(db: AsyncSession, org_id: Optional[int], email: 
         return
     org = await db.get(Organization, org_id)
     domains = org_domains(org)
-    if not email_fits(email, domains):
+    if not email_fits(email, domains, org_exceptions(org)):
         raise HTTPException(status_code=400, detail=wrong_domain_message(domains))
 
 
@@ -115,7 +148,9 @@ async def ensure_email_fits_user_orgs(db: AsyncSession, user: User, email: str) 
         await ensure_email_fits_org(db, org_id, email)
 
 
-async def members_outside(db: AsyncSession, org_id: int, domains: List[str]) -> List[dict]:
+async def members_outside(
+    db: AsyncSession, org_id: int, domains: List[str], exceptions: Iterable[str] = (),
+) -> List[dict]:
     """Кто из организации НЕ сможет войти при таких доменах (кроме суперадминов)."""
     if not domains:
         return []
@@ -128,7 +163,7 @@ async def members_outside(db: AsyncSession, org_id: int, domains: List[str]) -> 
     return [
         {"user_id": uid, "name": name, "email": email}
         for uid, name, email, role, active in rows
-        if role != UserRole.superadmin and active and not email_fits(email, domains)
+        if role != UserRole.superadmin and active and not email_fits(email, domains, exceptions)
     ]
 
 

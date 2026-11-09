@@ -124,6 +124,7 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
   // Вход только с корпоративной почтой (EmailDomainCard).
   const [emailDomains, setEmailDomains] = useState<string[]>([]);
   const [emailOutside, setEmailOutside] = useState<EmailDomainMember[]>([]);
+  const [emailExceptions, setEmailExceptions] = useState<string[]>([]);
 
   // Check if current user's department has candidate_database feature
   const canManageFullAccess = hasFeature('candidate_database');
@@ -154,6 +155,7 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
           .then((d) => {
             setEmailDomains(d.domains);
             setEmailOutside(d.outside);
+            setEmailExceptions(d.exceptions || []);
           })
           .catch(() => undefined);
       }
@@ -312,7 +314,12 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
 
       {/* Members List */}
       {canManageUsers && !showInvitationsTab && (
-        <EmailDomainCard domains={emailDomains} outside={emailOutside} onChanged={loadData} />
+        <EmailDomainCard
+          domains={emailDomains}
+          exceptions={emailExceptions}
+          outside={emailOutside}
+          onChanged={loadData}
+        />
       )}
 
       {!showInvitationsTab && (
@@ -356,6 +363,7 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
                         userId={member.user_id}
                         email={member.user_email}
                         domains={emailDomains}
+                        exceptions={emailExceptions}
                         canEdit={canManageUsers && (member.role !== 'owner' || isMe || myRole === 'owner' || currentUser?.role === 'superadmin')}
                         onChanged={loadData}
                       />

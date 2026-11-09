@@ -197,7 +197,10 @@ async def update_organization(
     if data.settings:
         # Домены почты меняются только через /current/email-domain — там
         # проверка, что админ не запрёт сам себя, и список, кто потеряет вход.
-        incoming = {k: v for k, v in data.settings.items() if k != "allowed_email_domains"}
+        incoming = {
+            k: v for k, v in data.settings.items()
+            if k not in ("allowed_email_domains", "allowed_email_exceptions")
+        }
         org.settings = {**(org.settings or {}), **incoming}
 
     await db.commit()
@@ -209,6 +212,9 @@ async def update_organization(
 class EmailDomainRequest(BaseModel):
     # Строка «agency-mst.com» или список; пусто — снять ограничение.
     domains: str = ""
+    # Адреса, которым вход разрешён вне домена (тестовые аккаунты). None — не
+    # менять сохранённый список; "" — очистить.
+    exceptions: Optional[str] = None
     dry_run: bool = False
 
 
@@ -218,10 +224,14 @@ async def get_email_domain(
     auth: tuple = Depends(require_org_admin),
 ):
     """Ограничение входа по домену почты и кто ему сейчас не подходит."""
-    from ..services.email_domain import org_domains, members_outside
+    from ..services.email_domain import org_domains, org_exceptions, members_outside
     _, org, _ = auth
     domains = org_domains(org)
-    return {"domains": domains, "outside": await members_outside(db, org.id, domains)}
+    exceptions = org_exceptions(org)
+    return {
+        "domains": domains, "exceptions": exceptions,
+        "outside": await members_outside(db, org.id, domains, exceptions),
+    }
 
 
 @router.put("/current/email-domain")
@@ -238,14 +248,18 @@ async def set_email_domain(
     import logging
     from sqlalchemy.orm.attributes import flag_modified
     from ..services.email_domain import (
-        SETTING_KEY, normalize_domains, email_fits, members_outside, domains_text,
+        EXCEPTIONS_KEY, SETTING_KEY, normalize_domains, normalize_emails, org_exceptions,
+        email_fits, members_outside, domains_text,
     )
     user, org, _ = auth
     try:
         domains = normalize_domains(data.domains)
+        exceptions = (
+            org_exceptions(org) if data.exceptions is None else normalize_emails(data.exceptions)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    if user.role != UserRole.superadmin and not email_fits(user.email, domains):
+    if user.role != UserRole.superadmin and not email_fits(user.email, domains, exceptions):
         raise HTTPException(
             status_code=400,
             detail=(
@@ -253,16 +267,17 @@ async def set_email_domain(
                 "не смогли бы войти. Сначала смените свою почту на корпоративную."
             ),
         )
-    outside = await members_outside(db, org.id, domains)
+    outside = await members_outside(db, org.id, domains, exceptions)
     if not data.dry_run:
-        org.settings = {**(org.settings or {}), SETTING_KEY: domains}
+        org.settings = {**(org.settings or {}), SETTING_KEY: domains, EXCEPTIONS_KEY: exceptions}
         flag_modified(org, "settings")
         await db.commit()
         logging.getLogger("hr-analyzer.organizations").info(
-            "EMAIL_DOMAIN set: org=%s domains=%s by user=%s (%s), без доступа: %s",
-            org.id, domains or "—", user.id, user.name, [m["user_id"] for m in outside] or "—",
+            "EMAIL_DOMAIN set: org=%s domains=%s exceptions=%s by user=%s (%s), без доступа: %s",
+            org.id, domains or "—", exceptions or "—", user.id, user.name,
+            [m["user_id"] for m in outside] or "—",
         )
-    return {"domains": domains, "outside": outside, "saved": not data.dry_run}
+    return {"domains": domains, "exceptions": exceptions, "outside": outside, "saved": not data.dry_run}
 
 
 @router.get("/current/members", response_model=List[OrgMemberResponse])

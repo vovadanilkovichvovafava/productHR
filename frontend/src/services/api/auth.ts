@@ -301,17 +301,29 @@ export const toggleMemberFullAccess = async (userId: number, hasFullAccess: bool
 
 // Вход только с корпоративной почтой (09.11.2026, services/email_domain.py).
 export interface EmailDomainMember { user_id: number; name: string; email: string }
-export interface EmailDomainState { domains: string[]; outside: EmailDomainMember[]; saved?: boolean }
+export interface EmailDomainState {
+  domains: string[];
+  // Адреса, которым вход разрешён вне домена (тестовые аккаунты).
+  exceptions?: string[];
+  outside: EmailDomainMember[];
+  saved?: boolean;
+}
 
 export const getEmailDomain = async (): Promise<EmailDomainState> => {
   const { data } = await api.get<EmailDomainState>('/organizations/current/email-domain');
   return data;
 };
 
-export const setEmailDomain = async (domains: string, dryRun = false): Promise<EmailDomainState> => {
+export const setEmailDomain = async (
+  domains: string,
+  dryRun = false,
+  exceptions?: string,
+): Promise<EmailDomainState> => {
   const { data } = await api.put<EmailDomainState>('/organizations/current/email-domain', {
     domains,
     dry_run: dryRun,
+    // undefined — сервер оставит сохранённый список исключений как есть.
+    ...(exceptions !== undefined ? { exceptions } : {}),
   });
   return data;
 };

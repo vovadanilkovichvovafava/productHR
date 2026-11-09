@@ -10,9 +10,11 @@ import { getErrorDetail } from '@/utils';
 // список показывается здесь — молча запереть коллег нельзя. Себя запереть
 // сервер не даст. Суперадминов правило не касается.
 
-export function emailFitsDomains(email: string, domains: string[]): boolean {
+export function emailFitsDomains(email: string, domains: string[], exceptions: string[] = []): boolean {
   if (!domains.length) return true;
-  const domain = (email || '').trim().toLowerCase().split('@').pop() || '';
+  const normalized = (email || '').trim().toLowerCase();
+  if (exceptions.includes(normalized)) return true;
+  const domain = normalized.split('@').pop() || '';
   return domains.includes(domain);
 }
 
@@ -39,15 +41,20 @@ function OutsideList({ people, title }: { people: EmailDomainMember[]; title: st
 
 export function EmailDomainCard({
   domains,
+  exceptions = [],
   outside,
   onChanged,
 }: {
   domains: string[];
+  exceptions?: string[];
   outside: EmailDomainMember[];
   onChanged: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
+  // Исключения по адресу (тестовые аккаунты, 09.11.2026): входят вне домена,
+  // роль у них прежняя — суперадмином их делать не нужно.
+  const [extra, setExtra] = useState('');
   const [preview, setPreview] = useState<{ domains: string[]; outside: EmailDomainMember[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,6 +63,7 @@ export function EmailDomainCard({
 
   const startEdit = () => {
     setValue(domains.join(', '));
+    setExtra(exceptions.join(', '));
     setPreview(null);
     setError(null);
     setEditing(true);
@@ -65,7 +73,7 @@ export function EmailDomainCard({
     setBusy(true);
     setError(null);
     try {
-      const res = await setEmailDomain(value, true);
+      const res = await setEmailDomain(value, true, extra);
       if (!res.domains.length) {
         setError('Впишите домен, например agency-mst.com');
         setPreview(null);
@@ -80,11 +88,11 @@ export function EmailDomainCard({
     }
   };
 
-  const save = async (raw: string) => {
+  const save = async (raw: string, rawExtra?: string) => {
     setBusy(true);
     setError(null);
     try {
-      const res = await setEmailDomain(raw);
+      const res = await setEmailDomain(raw, false, rawExtra);
       toast.success(res.domains.length ? `Вход только с почтой ${at(res.domains)}` : 'Ограничение снято');
       setEditing(false);
       setPreview(null);
@@ -106,7 +114,11 @@ export function EmailDomainCard({
           </h3>
           <p className="text-sm text-white/40 mt-1">
             {enabled
-              ? <>Включено: войти могут только адреса <span className="text-white/80">{at(domains)}</span>. Администраторов платформы это не касается.</>
+              ? <>
+                  Включено: войти могут только адреса <span className="text-white/80">{at(domains)}</span>
+                  {exceptions.length > 0 && <> и исключения: <span className="text-white/80">{exceptions.join(', ')}</span></>}
+                  . Администраторов платформы это не касается.
+                </>
               : 'Выключено: войти можно с любой почтой.'}
           </p>
         </div>
@@ -173,6 +185,21 @@ export function EmailDomainCard({
             </button>
           </div>
 
+          <div>
+            <label className="block text-xs text-white/40 mb-1">
+              Исключения — адреса, которым можно входить с другой почтой (например, тестовый аккаунт)
+            </label>
+            <input
+              value={extra}
+              onChange={(e) => {
+                setExtra(e.target.value);
+                setPreview(null);
+              }}
+              placeholder="test@gmail.com, другой@mail.ru"
+              className="w-full px-3 py-2 glass-light rounded-lg text-white text-sm"
+            />
+          </div>
+
           {error && <p className="text-sm text-red-400">{error}</p>}
 
           {preview && (
@@ -188,7 +215,7 @@ export function EmailDomainCard({
                 </p>
               )}
               <button
-                onClick={() => save(preview.domains.join(','))}
+                onClick={() => save(preview.domains.join(','), extra)}
                 disabled={busy}
                 className={clsx(
                   'mt-3 px-4 py-2 rounded-lg text-sm text-white flex items-center gap-2 disabled:opacity-50',
@@ -211,19 +238,21 @@ export function MemberEmail({
   userId,
   email,
   domains,
+  exceptions = [],
   canEdit,
   onChanged,
 }: {
   userId: number;
   email: string;
   domains: string[];
+  exceptions?: string[];
   canEdit: boolean;
   onChanged: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(email);
   const [busy, setBusy] = useState(false);
-  const fits = emailFitsDomains(email, domains);
+  const fits = emailFitsDomains(email, domains, exceptions);
 
   const save = async () => {
     const next = value.trim();

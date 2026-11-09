@@ -58,10 +58,12 @@ async def test_domain_restriction_end_to_end(
     r = await client.get("/api/organizations/current/email-domain", headers=_h(admin_token))
     assert r.json()["domains"] == [CORP]
 
-    # Не корпоративная почта — вход закрыт с понятным текстом, верный пароль не помогает.
+    # Не корпоративная почта — вход закрыт, верный пароль не помогает. Какой
+    # домен нужен, экран входа НЕ подсказывает (владелец, 09.11.2026).
     r = await _login(client, "user@test.com", "User123")
     assert r.status_code == 403
-    assert f"@{CORP}" in r.json()["detail"]
+    assert CORP not in r.json()["detail"]
+    assert "Обратитесь к администратору" in r.json()["detail"]
     # Неверный пароль по-прежнему 401: отказ «по домену» не выдаёт, что аккаунт есть.
     assert (await _login(client, "user@test.com", "Wrong123")).status_code == 401
     # Открытая до включения сессия не продлевается.
@@ -95,6 +97,25 @@ async def test_domain_restriction_end_to_end(
     assert r.status_code == 200
     r = await client.get("/api/organizations/current/email-domain", headers=_h(admin_token))
     assert r.json()["domains"] == [CORP]
+
+    # Исключение по адресу (тестовый аккаунт на gmail): входит, роль прежняя.
+    r = await client.put("/api/organizations/current/email-domain",
+                         json={"domains": CORP, "exceptions": "User2@Test.com", "dry_run": True},
+                         headers=_h(admin_token))
+    assert r.status_code == 200, r.text
+    assert second_user.id not in {m["user_id"] for m in r.json()["outside"]}
+    assert (await _login(client, "user2@test.com", "User123")).status_code == 403  # пробный — не сохранён
+    r = await client.put("/api/organizations/current/email-domain",
+                         json={"domains": CORP, "exceptions": "User2@Test.com"}, headers=_h(admin_token))
+    assert r.status_code == 200 and r.json()["exceptions"] == ["user2@test.com"]
+    assert (await _login(client, "user2@test.com", "User123")).status_code == 200
+    # Смена домена без поля exceptions список не теряет.
+    r = await client.put("/api/organizations/current/email-domain", json={"domains": CORP}, headers=_h(admin_token))
+    assert r.json()["exceptions"] == ["user2@test.com"]
+    # Мусор в исключениях — понятный отказ.
+    r = await client.put("/api/organizations/current/email-domain",
+                         json={"domains": CORP, "exceptions": "не почта"}, headers=_h(admin_token))
+    assert r.status_code == 400
 
     # Снять ограничение — пустое поле.
     r = await client.put("/api/organizations/current/email-domain", json={"domains": ""}, headers=_h(admin_token))
