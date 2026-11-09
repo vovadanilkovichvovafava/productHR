@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 import { HuntflowOptionsIcon } from "@/components/hr/HuntflowControls";
 import type { KanbanColumn } from "@/services/api/candidates";
+import { boardColumnOf } from "@/constants/hrStages";
 
 // Полоса этапов «Все кандидаты»: «Все», вкладки этапов со счётчиками, свёрнутые
 // группы пустых этапов, стрелки прокрутки и кнопка настроек списка
@@ -14,6 +15,22 @@ const HUNTFLOW_STAGE_LAYOUT_TRANSITION = {
   duration: 0.42,
   ease: [0.22, 1, 0.36, 1] as const,
 };
+
+/**
+ * Скоуп по этапам (09.11.2026): человеку, которому открыта только «Практика»,
+ * остальные вкладки ни к чему. Свёрнутые «7 этапов без кандидатов» и «5 этапов
+ * без кандидатов» по обе стороны от «Практики» читались как число людей
+ * (владелец: «в одном месте 7 кандидатов, в другом 5, а видно только 2»).
+ */
+export function limitBoardColumnsToStatuses(
+  columns: KanbanColumn[],
+  allowedStatuses: readonly string[] | undefined,
+): KanbanColumn[] {
+  if (!allowedStatuses || allowedStatuses.length === 0) return columns;
+  const allowed = new Set(allowedStatuses.map((s) => boardColumnOf(s)));
+  const kept = columns.filter((c) => allowed.has(c.status));
+  return kept.length ? kept : columns;
+}
 
 type TopStageNavItem =
   | { type: "stage"; column: KanbanColumn }

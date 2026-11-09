@@ -32,7 +32,10 @@ import { BulkSelectionBar } from "@/components/entities/BulkSelectionBar";
 import { useCandidateBoard } from "@/components/candidates/useCandidateBoard";
 import { useCandidateSelection } from "@/components/candidates/useCandidateSelection";
 import { useOpenedCandidateRefresh } from "@/components/candidates/useOpenedCandidateRefresh";
-import { CandidateStageTabs } from "@/components/candidates/CandidateStageTabs";
+import {
+  CandidateStageTabs,
+  limitBoardColumnsToStatuses,
+} from "@/components/candidates/CandidateStageTabs";
 import { CandidateListRow } from "@/components/candidates/CandidateListRow";
 
 import { useDebounce } from "@/hooks/useDebounce";
@@ -474,7 +477,7 @@ export default function AllCandidatesPage() {
           inline stage labels + counter pills bg var(--hf-bg-panel) var(--hf-main-600) 12/16/500 radius 56 pad 2-6.
           Активная вкладка: cyan-500 underline. */}
       <CandidateStageTabs
-        columns={board?.columns || []}
+        columns={limitBoardColumnsToStatuses(board?.columns || [], user?.scope_statuses)}
         activeTab={activeTab}
         totalCount={totalCandidateCount}
         searchOpen={showTopSearch}
