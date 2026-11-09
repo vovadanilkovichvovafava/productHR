@@ -92,6 +92,20 @@ export default function CandidatePreviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Страница открывается без входа: поисковикам её не индексировать, а адрес с
+  // токеном не отдавать сторонним сайтам в Referer (09.11.2026).
+  useEffect(() => {
+    const added: HTMLMetaElement[] = [];
+    for (const [name, content] of [['robots', 'noindex, nofollow'], ['referrer', 'no-referrer']]) {
+      const meta = document.createElement('meta');
+      meta.name = name;
+      meta.content = content;
+      document.head.appendChild(meta);
+      added.push(meta);
+    }
+    return () => added.forEach((m) => m.remove());
+  }, []);
+
   useEffect(() => {
     if (!token) return;
     getPublicCandidatePreview(token)

@@ -262,6 +262,37 @@ async def ensure_entity_visible(entity_id: int, user: Optional[User], db: AsyncS
         raise HTTPException(status_code=404, detail="Кандидат не найден")
 
 
+async def notes_scope_by_entity(entity_ids, scope, db: AsyncSession) -> dict:
+    """Скоуп для комментариев каждой карточки (`filter_extra_for_scope`).
+
+    Скоуп по воронкам режет комментарии по воронке — этого хватает. При скоупе
+    по этапам разрешены ВСЕ воронки организации, и комментарий из воронки, где
+    у кандидата отказ, проходил бы фильтр (у наблюдателя «только Практика» и на
+    публичной ссылке «Поделиться» — 09.11.2026). Поэтому для такого скоупа
+    разрешены только воронки, где у кандидата ВИДИМАЯ заявка. Без этапов —
+    скоуп как есть (без лишних запросов).
+    """
+    ids = [int(i) for i in entity_ids if i]
+    if scope is None or not scope_statuses(scope):
+        return {i: scope for i in ids}
+    out = {i: set() for i in ids}
+    if not ids:
+        return out
+    cond = application_scope_filter(scope)
+    q = select(VacancyApplication.entity_id, VacancyApplication.vacancy_id).where(
+        VacancyApplication.entity_id.in_(ids)
+    )
+    if cond is not None:
+        q = q.where(cond)
+    for eid, vid in (await db.execute(q)).all():
+        out[eid].add(vid)
+    return out
+
+
+async def notes_scope_for_entity(entity_id: int, scope, db: AsyncSession):
+    return (await notes_scope_by_entity([entity_id], scope, db))[int(entity_id)]
+
+
 def filter_extra_for_scope(extra: Optional[dict], scope_ids: Optional[Iterable[int]]) -> Optional[dict]:
     """Убрать из extra_data следы чужих воронок (метки «HR: Имя · Воронка»).
 
@@ -270,7 +301,9 @@ def filter_extra_for_scope(extra: Optional[dict], scope_ids: Optional[Iterable[i
     метки `system_hr_tags` и подписи к заметкам. Для скоупа это лишнее: сам факт
     чужой воронки (и её название) — тоже информация.
     """
-    if not scope_ids or not isinstance(extra, dict):
+    # None — ограничения нет. Пустое множество — «ни одной воронки»: следы
+    # всех воронок убираются (скоуп по этапам, у кандидата нет видимых заявок).
+    if scope_ids is None or not isinstance(extra, dict):
         return extra
     allowed = {int(v) for v in scope_ids}
     tags = extra.get("system_hr_tags")

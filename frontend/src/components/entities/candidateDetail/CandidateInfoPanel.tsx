@@ -555,13 +555,15 @@ export const InfoTab = memo(function InfoTab({
         >
           <Send className="hf-profile-action-icon" /> Отправить
         </button>
-        {/* «Поделиться» ВЫДАЁТ публичную ссылку (создаёт её на сервере) — это
-            запись, наблюдателю недоступна. */}
+        {/* «Поделиться» доступна и наблюдателю (владелец, 09.11.2026: показать
+            кандидата руководству). Ссылка создаётся на сервере, но показывает
+            не больше, чем видит сам поделившийся (entities/share_links.py).
+            Удалённому кандидату ссылку не выдаём. */}
         <button
           onClick={handleShareCandidate}
           className="hf-profile-action-btn"
-          disabled={readonly}
-          style={roStyle}
+          disabled={!!deleted}
+          style={deleted ? roStyle : undefined}
           title="Скопировать публичную ссылку предпросмотра для заказчика (действует 30 дней)"
         >
           <ExternalLink className="hf-profile-action-icon" /> Поделиться

@@ -204,3 +204,24 @@ async def test_superadmin_sets_and_clears_stage_scope(
     r = await client.patch(f"/api/users/{regular_user.id}", json={"scope_statuses": []}, headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["scope_statuses"] == []
+
+
+async def test_card_hides_comments_of_hidden_funnel(
+    client: AsyncClient, regular_user: User, practice_only, db_session: AsyncSession,
+):
+    """У практиканта отказ в «SEO»: её комментарий наблюдателю «только
+    Практика» не показываем — ни в карточке, ни в строке списка."""
+    trainee = practice_only["trainee"]
+    trainee.extra_data = {"notes": [
+        {"id": "a", "text": "по трафику", "vacancy_id": practice_only["traffic"].id},
+        {"id": "b", "text": "отказ в SEO", "vacancy_id": practice_only["seo"].id},
+        {"id": "c", "text": "общий"},
+    ]}
+    await db_session.commit()
+    h = _headers(regular_user)
+    r = await client.get(f"/api/entities/{trainee.id}", headers=h)
+    assert r.status_code == 200, r.text
+    assert [n["text"] for n in r.json()["extra_data"]["notes"]] == ["по трафику", "общий"]
+    board = (await client.get("/api/candidates/kanban?per_column=100", headers=h)).json()
+    row = next(c for col in board["columns"] for c in col["cards"] if c["id"] == trainee.id)
+    assert [n["text"] for n in (row.get("extra_data") or {}).get("notes", [])] == ["по трафику", "общий"]

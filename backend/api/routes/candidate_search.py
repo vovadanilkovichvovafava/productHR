@@ -1160,6 +1160,10 @@ async def get_candidates_kanban(
     except Exception as exc:
         logger.warning(f"Prior rejection query failed (non-critical): {exc}")
 
+    # Комментарии строки — по её видимым воронкам (скоуп по этапам, 09.11.2026).
+    from api.services.vacancy_scope import notes_scope_by_entity
+    _notes_scope = await notes_scope_by_entity([e.id for e in display_entities], scope_ids, db)
+
     # Group by status (display_entities уже обрезаны до per_column на колонку)
     grouped: dict[str, list] = {s: [] for s in BOARD_COLUMNS}
     for e in display_entities:
@@ -1205,7 +1209,7 @@ async def get_candidates_kanban(
                 funnels=funnels_map.get(e.id, []),
                 rejection_reason=rejection_map.get(e.id),
                 is_archived=bool(getattr(e, "is_archived", False)),
-                extra_data=filter_extra_for_scope(ed, scope_ids) if ed else None,
+                extra_data=filter_extra_for_scope(ed, _notes_scope.get(e.id, scope_ids)) if ed else None,
                 version=getattr(e, "version", None) or 1,
                 headline_tags=headline_map.get(e.id, []),
                 prior_rejection=prior_map.get(e.id),

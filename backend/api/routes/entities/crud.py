@@ -299,6 +299,10 @@ async def list_entities(
         logger.warning(f"Failed to fetch vacancy data: {e}")
         # Continue without vacancy data
 
+    # Комментарии каждой карточки — по её видимым воронкам (скоуп по этапам).
+    from ...services.vacancy_scope import notes_scope_by_entity
+    _notes_scope = await notes_scope_by_entity([e.id for e in entities], _scope_ids, db)
+
     # Build response using pre-fetched data
     response = []
     for entity in entities:
@@ -308,7 +312,7 @@ async def list_entities(
         row = entity_base_dict(
             entity,
             department_name=dept_names.get(entity.department_id) if entity.department_id else None,
-            scope_ids=_scope_ids,
+            scope_ids=_notes_scope.get(entity.id, _scope_ids),
         )
         row.update({
             "owner_name": owner_names.get(entity.created_by, "Unknown"),
@@ -415,11 +419,13 @@ async def create_entity(
         except Exception as e:
             logger.warning(f"resume-text-twin detect failed for new entity {entity.id}: {e}")
 
-    from ...services.vacancy_scope import get_scope_vacancy_ids
+    from ...services.vacancy_scope import get_scope_vacancy_ids, notes_scope_for_entity
     response_data = entity_base_dict(
         entity,
         department_name=department_name,
-        scope_ids=await get_scope_vacancy_ids(current_user, db),
+        scope_ids=await notes_scope_for_entity(
+            entity.id, await get_scope_vacancy_ids(current_user, db), db,
+        ),
     )
     response_data.update({
         "chats_count": 0,
@@ -590,10 +596,13 @@ async def get_entity(
 
     # Скоуп по воронкам: из карточки убираем следы чужих воронок (метки
     # «HR: Имя · Воронка» и заметки, привязанные к ним).
-    from ...services.vacancy_scope import get_scope_vacancy_ids
+    from ...services.vacancy_scope import get_scope_vacancy_ids, notes_scope_for_entity
     _scope_ids = await get_scope_vacancy_ids(current_user, db)
 
-    card = entity_base_dict(entity, department_name=department_name, scope_ids=_scope_ids)
+    card = entity_base_dict(
+        entity, department_name=department_name,
+        scope_ids=await notes_scope_for_entity(entity.id, _scope_ids, db),
+    )
     return {
         **card,
         # Transfer tracking
@@ -808,11 +817,13 @@ async def update_entity(
         dept_result = await db.execute(select(Department.name).where(Department.id == entity.department_id))
         department_name = dept_result.scalar()
 
-    from ...services.vacancy_scope import get_scope_vacancy_ids
+    from ...services.vacancy_scope import get_scope_vacancy_ids, notes_scope_for_entity
     response_data = entity_base_dict(
         entity,
         department_name=department_name,
-        scope_ids=await get_scope_vacancy_ids(current_user, db),
+        scope_ids=await notes_scope_for_entity(
+            entity.id, await get_scope_vacancy_ids(current_user, db), db,
+        ),
     )
 
     # Invalidate scoring cache if relevant fields changed

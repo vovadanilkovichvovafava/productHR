@@ -55,6 +55,9 @@ OBSERVER_WRITABLE_PATTERNS = (
     re.compile(r"^/api/employees/me(/|$)"),
     re.compile(r"^/api/employees/\d+/leave-request$"),
     re.compile(r"^/api/documents/\d+/sign$"),
+    # «Поделиться» кандидатом (09.11.2026, владелец): наблюдатель показывает
+    # кандидата руководству. Ссылка не шире его прав — см. entities/share_links.py.
+    re.compile(r"^/api/entities/\d+/share-link$"),
 )
 
 

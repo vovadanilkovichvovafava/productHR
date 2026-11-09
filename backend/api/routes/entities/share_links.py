@@ -4,6 +4,12 @@ POST /entities/{id}/share-link — авторизованный рекрутёр
 (30 дней) на карточку кандидата.
 GET /entities/public/candidate-preview/{token} — БЕЗ авторизации: заказчик
 видит только ФИО/контакты/резюме/комментарии HR — никакого CRM-интерфейса.
+
+Ссылка не шире прав того, кто поделился (09.11.2026): с ограничением по
+воронкам/этапам (наблюдатель «только Практика») страница показывает только
+его воронки — этап, историю, комментарии, оценку. Перестал видеть кандидата
+(тот ушёл с разрешённого этапа, ограничение сузили) — ссылка отвечает 404.
+Делиться может и наблюдатель: показать кандидата руководству.
 """
 import secrets
 from datetime import datetime, timedelta
@@ -72,6 +78,17 @@ async def _resolve_valid_link(db: AsyncSession, token: str) -> CandidateShareLin
     if link.expires_at and link.expires_at < datetime.utcnow():
         raise HTTPException(410, "Ссылка устарела")
     return link
+
+
+async def _sharer_scope(db: AsyncSession, link: CandidateShareLink):
+    """Скоуп того, кто поделился (None — без ограничений). Кандидат ему больше
+    не виден — 404: ссылка не шире прав поделившегося (09.11.2026)."""
+    from ...services.vacancy_scope import entity_in_scope, get_scope_vacancy_ids
+    sharer = await db.get(User, link.created_by) if link.created_by else None
+    scope = await get_scope_vacancy_ids(sharer, db) if sharer is not None else None
+    if scope is not None and not await entity_in_scope(link.entity_id, scope, db):
+        raise HTTPException(404, "Ссылка недействительна")
+    return scope
 
 
 async def _find_photo_file(db: AsyncSession, entity_id: int) -> EntityFile | None:
@@ -150,13 +167,23 @@ async def public_candidate_preview(
     if not entity:
         raise HTTPException(404, "Ссылка недействительна")
 
-    ed = dict(entity.extra_data or {})
+    # Права того, кто поделился: страница не показывает больше, чем видит он.
+    from ...services.vacancy_scope import (
+        application_scope_filter, filter_extra_for_scope, notes_scope_for_entity,
+    )
+    scope = await _sharer_scope(db, link)
+    app_cond = application_scope_filter(scope)
+    app_filters = [app_cond] if app_cond is not None else []
+
+    ed = dict(filter_extra_for_scope(
+        entity.extra_data or {}, await notes_scope_for_entity(entity.id, scope, db),
+    ) or {})
 
     # Текущий этап: свежая заявка кандидата + её вакансия (лейбл через кастомные
     # колонки воронки, если заданы).
     app_row = (await db.execute(
         select(VacancyApplication)
-        .where(VacancyApplication.entity_id == entity.id)
+        .where(VacancyApplication.entity_id == entity.id, *app_filters)
         .order_by(VacancyApplication.applied_at.desc())
         .limit(1)
     )).scalar_one_or_none()
@@ -242,6 +269,7 @@ async def public_candidate_preview(
         .where(
             VacancyApplication.entity_id == entity.id,
             VacancyApplication.rating.isnot(None),
+            *app_filters,
         )
         .order_by(VacancyApplication.updated_at.desc())
         .limit(1)
@@ -280,6 +308,7 @@ async def public_candidate_photo(
 ):
     """Фото кандидата для публичного предпросмотра (по тому же токену)."""
     link = await _resolve_valid_link(db, token)
+    await _sharer_scope(db, link)
     photo = await _find_photo_file(db, link.entity_id)
     if photo is None or not photo.file_data:
         raise HTTPException(404, "Фото не найдено")
@@ -301,6 +330,7 @@ async def public_candidate_file(
     ссылка не превращалась в раздачу произвольных файлов.
     """
     link = await _resolve_valid_link(db, token)
+    await _sharer_scope(db, link)
 
     f = (await db.execute(
         select(EntityFile).where(

@@ -76,6 +76,15 @@ export const attemptTokenRefresh = async (): Promise<boolean> => {
 /**
  * Redirect to login page (used after refresh token failure)
  */
+// Страницы без входа: гостя с них нельзя уводить на /login фоновым 401.
+// Предпросмотр кандидата («Поделиться») сюда забыли добавить — до 09.11.2026
+// ссылку не мог открыть никто, кроме вошедших в staffwise: страница сама
+// уходила на экран входа.
+export const PUBLIC_PAGE_PREFIXES = ['/login', '/invite', '/form/', '/miniapp', '/candidate-preview/'] as const;
+
+export const isPublicPage = (pathname: string): boolean =>
+  PUBLIC_PAGE_PREFIXES.some((p) => (p === '/login' ? pathname === p : pathname.startsWith(p)));
+
 const redirectToLogin = (): void => {
   // Clear any stored state before redirecting.
   // Public, no-auth pages (login, invite, candidate form links) must never be
@@ -86,12 +95,7 @@ const redirectToLogin = (): void => {
   // исключения любой фоновый 401 подменял приложение формой «Войдите в
   // систему» от веб-версии, и человек упирался в запрос пароля, которого у
   // него в Telegram быть не должно.
-  if (
-    window.location.pathname !== '/login' &&
-    !window.location.pathname.startsWith('/invite') &&
-    !window.location.pathname.startsWith('/form/') &&
-    !window.location.pathname.startsWith('/miniapp')
-  ) {
+  if (!isPublicPage(window.location.pathname)) {
     window.location.href = '/login';
   }
 };
@@ -318,6 +322,8 @@ export const OBSERVER_WRITABLE_PATTERNS: readonly RegExp[] = [
   /^\/employees\/me(\/|$)/,
   /^\/employees\/\d+\/leave-request$/,
   /^\/documents\/\d+\/sign$/,
+  // «Поделиться» кандидатом — наблюдателю тоже (09.11.2026).
+  /^\/entities\/\d+\/share-link$/,
 ];
 
 /** Сообщение, которое видит наблюдатель вместо молчаливого 403. */
