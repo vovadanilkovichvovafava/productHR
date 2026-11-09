@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import clsx from "clsx";
 import toast from "react-hot-toast";
 import {
-  Archive, Code2, Trash2, FileText, Filter, GitBranch, History, Layers, Link2, Mail, Palette, Puzzle, Search, Sparkles, User, Users, Wand2, X,
+  Archive, Code2, FileText, Filter, GitBranch, History, Layers, Link2, Mail, Palette, Puzzle, Search, Sparkles, User, Users, Wand2, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -35,15 +35,6 @@ const HR_SETTINGS_ORG_ITEMS: HrSettingsItem[] = [
     color: "text-[var(--hf-status-cyan)]",
     path: "/import",
     adminOnly: true,
-  },
-  {
-    // Корзина (20.10.2026): кто и когда удалял кандидатов, вернуть в течение 7 дней.
-    // С 23.10.2026 — всем рекрутёрам (владелец), удалённого можно открыть.
-    title: "Удалённые кандидаты",
-    description: "Кто и когда удалял; открыть и вернуть кандидата в течение 7 дней",
-    icon: Trash2,
-    color: "text-[var(--hf-red-500)]",
-    path: "/deleted-candidates",
   },
   {
     // Журнал действий (21.10.2026): кто что делал — каждое изменение в HR.

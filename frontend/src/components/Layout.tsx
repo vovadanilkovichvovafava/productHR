@@ -27,6 +27,7 @@ import {
   Volume2,
   VolumeX,
   Building2,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from "react";
@@ -715,6 +716,7 @@ export default function Layout() {
       { path: "/vacancies", icon: GitBranch, label: "Заявки" },
       { path: "/my-funnels", icon: Briefcase, label: "Мои вакансии" },
       { path: "/my-funnels?status=closed", icon: FolderKanban, label: "Закрытые вакансии" },
+      { path: "/deleted-candidates", icon: Trash2, label: "Корзина кандидатов" },
     ],
     [],
   );
@@ -1353,6 +1355,23 @@ export default function Layout() {
                     className="hf-hr-nav-icon"
                   />
                   <span className="min-w-0 flex-1">Закрытые вакансии</span>
+                </NavLink>
+
+                {/* Корзина (09.11.2026, владелец): была спрятана в «Настройках HR».
+                    Название «Корзина кандидатов», чтобы не путали с закрытыми
+                    вакансиями: тут удалённые и убранные из воронки, 7 дней на возврат. */}
+                <NavLink
+                  to="/deleted-candidates"
+                  title="Удалённые кандидаты и убранные из воронки. Можно открыть и вернуть в течение 7 дней"
+                  className={({ isActive }) =>
+                    clsx(
+                      "hf-hr-nav-item",
+                      isActive ? "hf-hr-nav-item-active" : "hf-hr-nav-item-white",
+                    )
+                  }
+                >
+                  <Trash2 className="hf-hr-nav-icon" strokeWidth={1.75} />
+                  <span className="min-w-0 flex-1">Корзина кандидатов</span>
                 </NavLink>
               </nav>
               )}

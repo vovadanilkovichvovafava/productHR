@@ -600,7 +600,7 @@ export function EditCandidateModal({
                 <p className="hf-confirm-modal-subtitle">«{card.name || "без имени"}»</p>
                 <p className="hf-confirm-modal-subtitle">
                   Он пропадёт из базы и воронок. 7 дней его можно вернуть целиком — с воронками,
-                  историей и файлами: «Настройки HR» → «Удалённые кандидаты».
+                  историей и файлами: «Корзина кандидатов» в меню слева.
                 </p>
               </div>
               <div className="hf-confirm-modal-actions">

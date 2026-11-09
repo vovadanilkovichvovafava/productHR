@@ -122,7 +122,7 @@ export default function DeletedCandidatesPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Удалённые кандидаты</h1>
+        <h1 className="text-2xl font-bold text-white">Корзина кандидатов</h1>
         <p className="text-dark-400 text-sm mt-1">
           Удалённый кандидат хранится 7 дней целиком — с воронками, историей, комментариями и
           файлами. Так же 7 дней хранится «Удалить с воронки»: этап, чей был кандидат и история
