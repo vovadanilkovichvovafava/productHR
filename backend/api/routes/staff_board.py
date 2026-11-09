@@ -40,6 +40,7 @@ from ..models.database import (
     EntityTag, entity_tag_association, OrgMember, OrgRole, UserRole,
     NameTag, entity_name_tag_association,
 )
+from ..services.board_catalog import canon_index, positions_for
 from ..services.auth import get_current_user, get_user_org
 from ..services.stage_change import log_moves
 from ..services.board_placements import DEFAULT_SANDBOX_KEY, place_current_practice
@@ -332,6 +333,12 @@ class BoardDept(BaseModel):
     # Скольких практикантов без отдела только что поставили сюда (ответ на
     # включение «по умолчанию»); в остальных ответах пусто.
     placed_now: Optional[int] = None
+    # Отдел из списка владельца (services/board_catalog.py): только такие
+    # предлагаются при переводе, а его должности — в выпадающем списке
+    # «Должность». У отделов вне списка и у песочниц — пусто.
+    canonical: bool = False
+    canon_order: Optional[int] = None
+    positions: List[str] = []
 
 
 DEPT_KINDS = ("sandbox", "team")
@@ -692,7 +699,17 @@ def _dept_out(d: BoardDepartment, default_id: Optional[int] = None) -> "BoardDep
         visibility=(d.visibility or "all"),
         visible_to=[v for v in ([_as_int(x) for x in (d.visible_to or [])]) if v is not None],
         is_default=(default_id is not None and d.id == default_id),
+        **_canon_fields(d),
     )
+
+
+def _canon_fields(d: BoardDepartment) -> Dict[str, Any]:
+    if (d.kind or "team") == "sandbox":
+        return {}
+    i = canon_index(d.name)
+    if i is None:
+        return {}
+    return {"canonical": True, "canon_order": i, "positions": positions_for(d.name)}
 
 
 async def _dept_role_fields(

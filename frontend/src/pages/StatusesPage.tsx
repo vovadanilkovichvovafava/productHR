@@ -17,7 +17,7 @@ import {
 } from "@/services/api/staffBoard";
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
 import {
-  getBoardPositions, getBoardManagers,
+  getBoardManagers,
   getBoardStatusViews, saveBoardStatusView,
 } from "@/services/api/staffBoard";
 import { getOrgMembers } from "@/services/api/accessHub";
@@ -403,7 +403,6 @@ export default function StatusesPage() {
   const [departments, setDepartments] = useState<BoardDepartment[]>([]);
   // Справочники для выпадающих списков: должности и руководители собираются
   // из уже существующих значений, HR — из участников организации.
-  const [positions, setPositions] = useState<string[]>([]);
   const [managers, setManagers] = useState<string[]>([]);
   const [people, setPeople] = useState<{ user_id: number; user_name: string | null }[]>([]);
   // Справочник сорсеров (те же метки кандидата) — для «+» в колонке «Сорсер».
@@ -575,7 +574,6 @@ export default function StatusesPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     getBoardDepartments().then(setDepartments).catch(() => setDepartments([]));
-    getBoardPositions().then(setPositions).catch(() => setPositions([]));
     getBoardStatusViews()
       .then(applyViews)
       .catch(() => { setStatusViews({}); setColumnViews({}); });
@@ -1310,7 +1308,6 @@ export default function StatusesPage() {
                           row={r}
                           columns={visibleColumns}
                           departments={departments}
-                          positions={positions}
                           managers={managers}
                           people={people}
                           sourcerTags={sourcerTags}
@@ -2092,14 +2089,13 @@ function DepartmentModal({
 // ============================================================
 
 function Row({
-  row, columns, departments, positions, managers, people, sourcerTags, saving,
+  row, columns, departments, managers, people, sourcerTags, saving,
   onPatch, onStatus, onPlace, onUnplace, onReload,
 }: {
   row: BoardRow;
   /** Колонки, которые показывает ЭТОТ пользователь на этой вкладке. */
   columns: typeof COLUMNS;
   departments: BoardDepartment[];
-  positions: string[];
   managers: string[];
   people: { user_id: number; user_name: string | null }[];
   sourcerTags: Tag[];
@@ -2163,12 +2159,12 @@ function Row({
       />
     ),
     sourcer: <SourcerCell row={row} catalog={sourcerTags} onReload={onReload} />,
-    // Должность вписывает HR — и на практике тоже: раньше здесь стояла
-    // несъёмная подпись «Сандбокс», а песочница теперь настоящий отдел.
+    // Должность — только из списка владельца (09.11.2026): должности отдела
+    // человека, а без отдела — все, по отделам.
     position: (
-      <PillCell
+      <PositionCell
         value={row.position}
-        options={positions}
+        groups={positionChoices(row, departments)}
         onSave={(v) => onPatch(row, { position: v })}
       />
     ),
@@ -2461,6 +2457,30 @@ export function rotationNote(
   return { short: `↻ ${last.name}${more}`, title: `Ротации:\n${lines.join("\n")}` };
 }
 
+/** Отделы из списка владельца — в его порядке. */
+export function canonicalTeams(departments: BoardDepartment[]): BoardDepartment[] {
+  return departments
+    .filter((d) => d.kind === "team" && d.canonical)
+    .sort((a, b) => (a.canon_order ?? 99) - (b.canon_order ?? 99) || a.id - b.id);
+}
+
+/** Выбор должности для строки. Отдел человека из списка — его должности одной
+ *  группой; отдела нет или он вне списка — все должности, по отделам. В строке
+ *  песочницы отдел человека — его рабочая команда (team_name). */
+export function positionChoices(
+  row: Pick<BoardRow, "department_id" | "department_is_sandbox" | "team_name">,
+  departments: BoardDepartment[],
+): { label: string; options: string[] }[] {
+  const team = row.department_is_sandbox
+    ? departments.find((d) => d.kind === "team" && d.name === row.team_name)
+    : departments.find((d) => d.id === row.department_id);
+  if (team?.positions?.length) return [{ label: team.name, options: team.positions }];
+  const seen = new Set<string>();
+  return canonicalTeams(departments)
+    .filter((d) => d.positions?.length && !seen.has(d.name) && seen.add(d.name))
+    .map((d) => ({ label: d.name, options: d.positions ?? [] }));
+}
+
 export const isBoardHr = (name: string | null | undefined) =>
   BOARD_HR_FIRST_NAMES.includes((name || "").trim().split(/\s+/)[0].toLowerCase());
 
@@ -2510,7 +2530,9 @@ function DepartmentCell({
   // Песочница у человека одна: выбрал другую — переехал. Команда из песочницы —
   // наоборот, добавление: практика остаётся.
   const sandboxes = options.filter((d) => d.kind === "sandbox");
-  const teams = options.filter((d) => d.kind === "team");
+  // Перевести можно только в отдел из списка владельца (09.11.2026). Старые
+  // отделы вне списка остаются у тех, кто в них стоит, но не предлагаются.
+  const teams = canonicalTeams(options);
   const teamsAdd = row.department_is_sandbox;
   const hint = row.department_id ? "Перевести или добавить в отдел" : "Поставить в отдел";
 
@@ -2681,6 +2703,67 @@ function PillCell({
         borderColor: `hsl(${hue} 60% 84%)`,
       }}
       title={value}
+    >
+      {value}
+    </button>
+  );
+}
+
+/** Должность — выбор из списка, вписать своё нельзя (владелец, 09.11.2026).
+ *  Старое значение не из списка показывается как было и в выборе помечено
+ *  «не из списка»: молча стирать вписанное раньше нельзя. */
+function PositionCell({
+  value, groups, onSave,
+}: {
+  value: string | null;
+  groups: { label: string; options: string[] }[];
+  onSave: (v: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const known = groups.some((g) => g.options.includes(value || ""));
+
+  if (editing) {
+    return (
+      <select
+        className="hf-statuses-input"
+        autoFocus
+        value={value || ""}
+        onBlur={() => setEditing(false)}
+        onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+        onChange={(e) => {
+          setEditing(false);
+          const next = e.target.value || null;
+          if (next !== (value || null)) onSave(next);
+        }}
+      >
+        <option value="">— не указана</option>
+        {value && !known && <option value={value}>{value} (не из списка)</option>}
+        {groups.map((g) => (
+          <optgroup key={g.label} label={g.label}>
+            {g.options.map((o) => <option key={o} value={o}>{o}</option>)}
+          </optgroup>
+        ))}
+      </select>
+    );
+  }
+
+  if (!value) {
+    return (
+      <button className="hf-statuses-empty-cell" onClick={() => setEditing(true)}>—</button>
+    );
+  }
+
+  const hue = pillHue(value);
+  return (
+    <button
+      className="hf-statuses-pill"
+      onClick={() => setEditing(true)}
+      style={{
+        background: `hsl(${hue} 70% 94%)`,
+        color: `hsl(${hue} 55% 32%)`,
+        borderColor: `hsl(${hue} 60% 84%)`,
+      }}
+      title={known ? value : `${value} — не из списка должностей`}
     >
       {value}
     </button>

@@ -647,6 +647,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Board team dates merge failed (non-critical): {e}")
 
+    # Отделы доски — к списку владельца (09.11.2026, services/board_catalog.py):
+    # похожие переименовать, недостающие создать. Одноразово.
+    try:
+        from ..services.board_catalog import canonize_board_departments_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await canonize_board_departments_once(session)
+    except Exception as e:
+        logger.warning(f"Board departments canon failed (non-critical): {e}")
+
     # Метка «HR: Имя» в карточке для уже назначенных на доске (20.10.2026,
     # services/board_placements.py). Одноразово: PATCH доски пишет её сам, но у
     # тех, кому HR поставили раньше, в карточке её нет.
