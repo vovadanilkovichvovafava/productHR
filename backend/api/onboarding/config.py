@@ -22,11 +22,25 @@ class Settings:
     send_thanks_on_fail: bool = False
     skip_weekends: bool = True
     handoff_accounts: tuple[str, ...] = ()
+    # Аккаунты по этапам (админ 10.11.2026): пребординг — практика, нагрузка делится (пусто —
+    # общий handoff_accounts); онбординг — переход в отдел уходит КАЖДОМУ (онбординг и
+    # испытательный срок; пусто — тому же аккаунту, что вёл практику).
+    handoff_practice_accounts: tuple[str, ...] = ()
+    handoff_onboarding_accounts: tuple[str, ...] = ()
     handoff_webhook_url: str = ""
     handoff_webhook_secret: str = ""
     handoff_stages: bool = False
     practice_start_time: str = "10:00"
     hrd: str = ""
+
+    def handoff_pool(self, role: str) -> tuple[str, ...]:
+        own = {"practice": self.handoff_practice_accounts, "onboarding": self.handoff_onboarding_accounts}[role]
+        return own or self.handoff_accounts
+
+    @property
+    def all_handoff_accounts(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(self.handoff_accounts + self.handoff_practice_accounts
+                                   + self.handoff_onboarding_accounts))
 
     @classmethod
     def from_app(cls, bot_username: str = "") -> "Settings":
@@ -45,6 +59,8 @@ class Settings:
             send_thanks_on_fail=app.onboarding_send_thanks_on_fail,
             skip_weekends=app.onboarding_skip_weekends,
             handoff_accounts=parse_accounts(app.onboarding_handoff_accounts),
+            handoff_practice_accounts=parse_accounts(app.onboarding_handoff_preboarding_accounts),
+            handoff_onboarding_accounts=parse_accounts(app.onboarding_handoff_onboarding_accounts),
             handoff_webhook_url=app.onboarding_handoff_webhook_url.strip(),
             handoff_webhook_secret=app.onboarding_handoff_webhook_secret,
             handoff_stages=app.onboarding_handoff_stages,

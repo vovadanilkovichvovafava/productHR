@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from api.models.database import BoardDepartment, BoardPlacement, Entity, EntityStatus, EntityType
 from api.onboarding import runtime
 from api.onboarding.config import Settings, parse_accounts
-from api.onboarding.handoff import HandoffService
+from api.onboarding.handoff import RETRY_AFTER, HandoffService
 from api.onboarding.messenger import SendError
 from api.onboarding.models import Handoff, HandoffAccount
 from tests.conftest import auth_headers
@@ -31,8 +31,11 @@ SETTINGS = dict(handoff_accounts=("hr_one", "hr_two"), hr_fallback_chat_id=FALLB
 class FakeMessenger:
     sent: list = field(default_factory=list)
     deleted: list = field(default_factory=list)
+    failing: set = field(default_factory=set)
 
     async def send(self, chat_id, text, buttons=None, html=False):
+        if chat_id in self.failing:
+            raise SendError("Forbidden: bot was blocked by the user")
         self.sent.append(SimpleNamespace(chat_id=chat_id, text=text, html=html, id=len(self.sent) + 1))
         return len(self.sent)
 
@@ -286,6 +289,69 @@ async def test_hr_reminders_skipped_when_transfer_is_late(handoff, messenger, db
     assert row.hr_day1_done and row.hr_week_done
 
 
+STAGED = dict(handoff_accounts=(), handoff_practice_accounts=("p_one", "p_two"),
+              handoff_onboarding_accounts=("onb", "prob"), hr_fallback_chat_id=FALLBACK)
+P_ONE, P_TWO, ONB, PROB = 601, 602, 603, 604
+
+
+async def _link_staged(svc):
+    for tg, name in ((P_ONE, "p_one"), (P_TWO, "p_two"), (ONB, "onb"), (PROB, "prob")):
+        assert await svc.register_account(tg, name)
+
+
+async def test_staged_accounts_route_events_by_stage(async_engine, messenger, clock, db_session,
+                                                     organization, admin_user):
+    """Админ 10.11.2026: пребординг — два аккаунта практики (нагрузка делится), онбординг — два
+    аккаунта (онбординг и испытательный), переход в отдел получает каждый."""
+    svc = _service(async_engine, messenger, clock, **STAGED)
+    await _link_staged(svc)
+    await svc.tick()
+    ivan = await _person(db_session, organization, admin_user, "Иван Петров", dept="SEO")
+    await svc.tick()
+    await _person(db_session, organization, admin_user, "Анна Смирнова", tg="anna")
+    await svc.tick()
+    assert [m.splitlines()[0] for m in messenger.to(P_ONE)] == ["#onboarding_practice"]
+    assert [m.splitlines()[0] for m in messenger.to(P_TWO)] == ["#onboarding_practice"]
+    assert messenger.to(ONB) == [] and messenger.to(PROB) == []
+
+    await _transfer(db_session, ivan)
+    await svc.tick()
+    assert messenger.to(ONB)[-1].startswith("#onboarding_transfer")
+    assert messenger.to(PROB)[-1].startswith("#onboarding_transfer")
+    assert len(messenger.to(P_ONE)) == 1  # аккаунту практики перехода нет
+
+    ivan.status = EntityStatus.dismissed
+    await db_session.commit()
+    await svc.tick()
+    # стоп — каждому, кто вёл Ивана, по одному разу; Анну вёл другой аккаунт практики
+    for chat in (P_ONE, ONB, PROB):
+        assert [m.splitlines()[0] for m in messenger.to(chat)].count("#onboarding_stop") == 1
+    assert all(not m.startswith("#onboarding_stop") for m in messenger.to(P_TWO))
+
+
+async def test_staged_retry_does_not_duplicate(async_engine, messenger, clock, db_session, organization,
+                                               admin_user):
+    svc = _service(async_engine, messenger, clock, **STAGED)
+    await _link_staged(svc)
+    await svc.tick()
+    ivan = await _person(db_session, organization, admin_user, "Иван Петров")
+    await svc.tick()
+    await _transfer(db_session, ivan)
+    messenger.failing.add(PROB)  # аккаунт испытательного недоступен
+    await svc.tick()
+    assert len(messenger.to(ONB)) == 1 and messenger.to(PROB) == []
+    messenger.failing.clear()
+    clock.now += RETRY_AFTER
+    await svc.tick()
+    assert len(messenger.to(ONB)) == 1  # онбордингу второй раз не шлём
+    assert messenger.to(PROB)[0].startswith("#onboarding_transfer")
+    async with svc.sessions() as s:
+        row = await s.scalar(select(Handoff).where(Handoff.entity_id == ivan.id))
+        names = {a.id: a.username for a in (await s.scalars(select(HandoffAccount))).all()}
+    assert row.transfer_sent_at and row.delivered is None
+    assert sorted(names[int(i)] for i in row.onboarding_account_ids.split(",")) == ["onb", "prob"]
+
+
 async def test_hr_notice_removed_on_stop_while_waiting(handoff, messenger, db_session, organization, admin_user):
     await _link(handoff)
     await handoff.tick()
@@ -396,7 +462,7 @@ async def test_no_linked_account_waits(handoff, messenger, clock, db_session, or
     await _person(db_session, organization, admin_user, "Иван Петров")
     await handoff.tick()
     await handoff.tick()
-    assert len(messenger.to(FALLBACK)) == 1 and "ни один HR-аккаунт" in messenger.to(FALLBACK)[0]
+    assert len(messenger.to(FALLBACK)) == 1 and "HR-аккаунт ещё не написал боту" in messenger.to(FALLBACK)[0]
     await handoff.register_account(ACC_ONE, "hr_one")
     clock.now = datetime(2026, 11, 3, 9, 11)
     await handoff.tick()
@@ -430,7 +496,8 @@ async def test_api_handoffs_overview(client, handoff, monkeypatch, db_session, o
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["delivery"] == "telegram"
-    assert data["accounts"] == [{"username": "@hr_one", "linked": True}, {"username": "@hr_two", "linked": False}]
+    assert data["accounts"] == [{"username": "@hr_one", "linked": True, "stages": []},
+                                {"username": "@hr_two", "linked": False, "stages": []}]
     by_name = {row["full_name"]: row for row in data["handoffs"]}
     assert "Уже На Практике" not in by_name  # baseline не показываем
     assert by_name["Без Ника"]["waiting_reason"] == "нет Telegram и телефона в карточке"

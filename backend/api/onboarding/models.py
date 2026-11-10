@@ -181,7 +181,13 @@ class Handoff(Base):
     org_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     entity_id = Column(Integer, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, unique=True)
     status = Column(String(16), nullable=False, index=True)
+    # Кто ведёт человека: account_id — практика (и всё, если аккаунты не разделены по этапам),
+    # onboarding_account_ids — онбординг-аккаунты, получившие переход в отдел («5,7»).
     account_id = Column(Integer, ForeignKey("onboarding_handoff_accounts.id", ondelete="SET NULL"), nullable=True)
+    onboarding_account_ids = Column(String(255), nullable=True)
+    # Кому из аккаунтов текущее событие уже ушло («transfer:onboarding,…») — при сбое одного
+    # аккаунта повтор не дублирует событие тем, кто его получил
+    delivered = Column(String(255), nullable=True)
     first_day = Column(Date, nullable=True)
     practice_date = Column(Date, nullable=True)
     baseline_status = Column(String(32), nullable=True)

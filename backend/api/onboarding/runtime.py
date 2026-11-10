@@ -29,7 +29,9 @@ def handoff_enabled() -> bool:
 
     return bool(
         settings.onboarding_handoff_webhook_url.strip()
-        or (settings.telegram_bot_token and settings.onboarding_handoff_accounts.strip())
+        or (settings.telegram_bot_token and any(v.strip() for v in (
+            settings.onboarding_handoff_accounts, settings.onboarding_handoff_preboarding_accounts,
+            settings.onboarding_handoff_onboarding_accounts)))
     )
 
 

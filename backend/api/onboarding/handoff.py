@@ -145,6 +145,10 @@ def _pick(extra: dict, keys) -> Optional[str]:
     return None
 
 
+def _ids(raw: Optional[str]) -> list[int]:
+    return [int(x) for x in (raw or "").split(",") if x.strip().isdigit()]
+
+
 def event_text(event: dict) -> str:
     lines = [TAGS[event["event"]]]
     for key, label in LABELS:
@@ -187,9 +191,10 @@ class HandoffService:
     async def register_account(self, tg_id: int, username: Optional[str]) -> bool:
         """/start от HR-аккаунта из списка (по @нику или по Telegram ID) — запоминаем, куда писать."""
         name = (username or "").lstrip("@").lower()
-        if name and name in self.settings.handoff_accounts:
+        listed = self.settings.all_handoff_accounts
+        if name and name in listed:
             pass
-        elif str(tg_id) in self.settings.handoff_accounts:
+        elif str(tg_id) in listed:
             name = str(tg_id)  # у купленных аккаунтов часто нет @ника — тогда в списке их ID
         else:
             return False
@@ -206,7 +211,7 @@ class HandoffService:
 
     async def tick(self) -> int:
         """Один проход воркера. Возвращает, сколько событий передано."""
-        if not (self.via_webhook or self.settings.handoff_accounts):
+        if not (self.via_webhook or self.settings.all_handoff_accounts):
             return 0
         await self._sync_id_accounts()
         await self._baseline_once()
@@ -220,7 +225,7 @@ class HandoffService:
     async def _sync_id_accounts(self) -> None:
         """Аккаунты, указанные числовым Telegram ID, подключены сразу: ID берут из того, что они
         уже написали боту, — значит Telegram даст боту им ответить."""
-        ids = [key for key in self.settings.handoff_accounts if key.isdigit()]
+        ids = [key for key in self.settings.all_handoff_accounts if key.isdigit()]
         if not ids:
             return
         async with self.sessions() as s:
@@ -273,6 +278,7 @@ class HandoffService:
             for row in returned:
                 row.status, row.baseline_status = "active", None
                 row.hr_day1_done = row.hr_week_done = False
+                row.delivered = None
                 row.practice_sent_at = row.transfer_sent_at = row.stop_sent_at = None
                 row.stage_index, row.next_at = 0, None
                 row.waiting_reason = row.notified_reason = None
@@ -344,14 +350,14 @@ class HandoffService:
             event["stage"] = stage.key
             event["stage_title"] = f"{stage.key} — {stage.title}"
 
-        account = await self._deliver(row, entity, event)
-        if account is False:
+        got = await self._deliver(row, entity, event, await self._targets(row, kind))
+        if got is False:
             return 0
         async with self.sessions() as s:
             fresh = await s.get(Handoff, row.id)
             fresh.status = "active"
-            if account is not None:
-                fresh.account_id = account.id
+            self._pin(fresh, got)
+            fresh.delivered = None
             fresh.waiting_reason = fresh.notified_reason = None
             fresh.next_at = None
             if kind == "practice":
@@ -368,7 +374,7 @@ class HandoffService:
             fresh.updated_at = self.clock()
             await s.commit()
         logger.info("ONBOARDING handoff %s entity=%s → %s", event.get("stage") or kind, entity.id,
-                    f"@{account.username}" if account else "webhook")
+                    ", ".join(f"@{a.username}" for _, a in got) or "webhook")
         if kind in ("practice", "transfer"):
             # HR видит, что передача прошла (Ильнар 06.11.2026: «бот тихо принимает»). Было
             # «допишите …» — оно удаляется, «передан» приходит в тот же чат.
@@ -429,12 +435,13 @@ class HandoffService:
             event = await self._event(entity, "stop")
             event["reason"] = STOP_REASONS[entity.status]
             event["status"] = entity.status.value
-            if await self._deliver(row, entity, event) is False:
+            if await self._deliver(row, entity, event, await self._targets(row, "stop")) is False:
                 return 0
         async with self.sessions() as s:
             fresh = await s.get(Handoff, row.id)
             fresh.status, fresh.next_at = "stopped", None
             fresh.stop_sent_at = self.clock() if told else None
+            fresh.delivered = None
             fresh.updated_at = self.clock()
             await s.commit()
         if row.notice_message_id:
@@ -456,8 +463,37 @@ class HandoffService:
             "hr": hr,
         }
 
-    async def _deliver(self, row: Handoff, entity: Entity, event: dict):
-        """Аккаунт (Telegram), None (вебхук) или False — не доставлено, повтор позже."""
+    # ------------------------------------------------------------- аккаунты по этапам
+    # Админ 10.11.2026: пребординг (практика) — свои аккаунты, нагрузка делится; онбординг —
+    # два аккаунта (онбординг и испытательный срок), переход в отдел нужен КАЖДОМУ из них
+    # (испытательный поздравляет с новым этапом). Без списков по этапам — один аккаунт на всё.
+
+    async def _targets(self, row: Handoff, kind: str) -> list[tuple[str, Optional[HandoffAccount]]]:
+        """[(ключ, аккаунт)] — кому отправить событие; ключ — для `delivered`."""
+        onboarding = self.settings.handoff_onboarding_accounts
+        if kind in ("transfer", "stage") and onboarding:
+            async with self.sessions() as s:
+                linked = {a.username: a for a in (await s.scalars(
+                    select(HandoffAccount).where(HandoffAccount.username.in_(onboarding),
+                                                 HandoffAccount.tg_id.is_not(None))
+                )).all()}
+            return [(name, linked.get(name)) for name in onboarding]
+        if kind == "stop":
+            return await self._stop_targets(row)
+        return [("main", await self._main_account(row))]
+
+    async def _stop_targets(self, row: Handoff) -> list[tuple[str, Optional[HandoffAccount]]]:
+        """Стоп — каждому аккаунту, который уже вёл человека, по одному разу."""
+        ids = ([row.account_id] if row.account_id else []) + _ids(row.onboarding_account_ids)
+        async with self.sessions() as s:
+            accounts = [await s.get(HandoffAccount, i) for i in dict.fromkeys(ids)]
+        targets = [(f"id{a.id}", a) for a in accounts if a and a.tg_id]
+        return targets or [("main", await self._main_account(row))]
+
+    async def _deliver(self, row: Handoff, entity: Entity, event: dict,
+                       targets: list[tuple[str, Optional[HandoffAccount]]]):
+        """[(ключ, аккаунт)] доставленных ([] при вебхуке) или False — не доставлено, повтор позже.
+        Аккаунты, которым событие уже ушло (`delivered`), при повторе пропускаются."""
         if self.via_webhook:
             body = json.dumps({**event, "sent_at": self.clock().isoformat() + "Z"}, ensure_ascii=False).encode()
             headers = {"Content-Type": "application/json", "X-Onboarding-Event": event["event"]}
@@ -470,18 +506,71 @@ class HandoffService:
                 logger.warning("ONBOARDING handoff webhook failed entity=%s: %s", entity.id, exc)
                 await self._postpone(row, "send_failed")
                 return False
-            return None
-        account = await self._account_for(row)
-        if account is None:
-            await self._postpone(row, "no_account")
-            return False
-        try:
-            await self.messenger.send(account.tg_id, event_text(event))
-        except SendError as exc:
-            logger.warning("ONBOARDING handoff send failed entity=%s @%s: %s", entity.id, account.username, exc)
-            await self._postpone(row, "send_failed")
-            return False
-        return account
+            return []
+        done = set(filter(None, (row.delivered or "").split(",")))
+        got: list[tuple[str, HandoffAccount]] = []
+        what = event.get("stage") or event["event"]
+        for key, account in targets:
+            mark = f"{what}:{key}"
+            if mark in done:
+                if account is not None:
+                    got.append((key, account))
+                continue
+            if account is None:
+                await self._save_progress(row, done, got)
+                await self._postpone(row, "no_account")
+                return False
+            try:
+                await self.messenger.send(account.tg_id, event_text(event))
+            except SendError as exc:
+                logger.warning("ONBOARDING handoff send failed entity=%s @%s: %s", entity.id, account.username, exc)
+                await self._save_progress(row, done, got)
+                await self._postpone(row, "send_failed")
+                return False
+            done.add(mark)
+            got.append((key, account))
+        return got
+
+    @staticmethod
+    def _pin(fresh: Handoff, got: list[tuple[str, HandoffAccount]]) -> None:
+        """Запоминает, кто ведёт человека: «main» — практика (или всё), остальные — онбординг."""
+        ids = _ids(fresh.onboarding_account_ids)
+        for key, account in got:
+            if key == "main":
+                fresh.account_id = account.id
+            elif not key.startswith("id") and account.id not in ids:
+                ids.append(account.id)
+        fresh.onboarding_account_ids = ",".join(map(str, ids)) or None
+
+    async def _save_progress(self, row: Handoff, done: set, got: list) -> None:
+        async with self.sessions() as s:
+            fresh = await s.get(Handoff, row.id)
+            fresh.delivered = ",".join(sorted(done)) or None
+            self._pin(fresh, got)
+            await s.commit()
+
+    async def _main_account(self, row: Handoff) -> Optional[HandoffAccount]:
+        """Закреплённый за человеком аккаунт практики, если он в списке и подключён; иначе —
+        подключённый из списка с наименьшей нагрузкой."""
+        pool = self.settings.handoff_pool("practice")
+        async with self.sessions() as s:
+            if row.account_id:
+                account = await s.get(HandoffAccount, row.account_id)
+                if account and account.tg_id and account.username in pool:
+                    return account
+            load = (
+                select(Handoff.account_id, func.count(Handoff.id).label("n"))
+                .where(Handoff.status == "active", Handoff.account_id.is_not(None))
+                .group_by(Handoff.account_id)
+                .subquery()
+            )
+            return await s.scalar(
+                select(HandoffAccount)
+                .outerjoin(load, load.c.account_id == HandoffAccount.id)
+                .where(HandoffAccount.tg_id.is_not(None), HandoffAccount.username.in_(pool))
+                .order_by(func.coalesce(load.c.n, 0), HandoffAccount.id)
+                .limit(1)
+            )
 
     async def _wait(self, row: Handoff, entity: Entity, reason: str) -> None:
         async with self.sessions() as s:
@@ -501,32 +590,8 @@ class HandoffService:
             await s.commit()
         if notify and reason == "no_account":
             await self._tell_fallback(
-                "Некому передать кандидата: ни один HR-аккаунт из ONBOARDING_HANDOFF_ACCOUNTS "
-                "не нажал Start у бота. Передача ждёт."
-            )
-
-    async def _account_for(self, row: Handoff) -> Optional[HandoffAccount]:
-        """Закреплённый аккаунт, если он в списке и подключён; иначе подключённый с наименьшей нагрузкой."""
-        async with self.sessions() as s:
-            if row.account_id:
-                account = await s.get(HandoffAccount, row.account_id)
-                if account and account.tg_id and account.username in self.settings.handoff_accounts:
-                    return account
-            load = (
-                select(Handoff.account_id, func.count(Handoff.id).label("n"))
-                .where(Handoff.status == "active", Handoff.account_id.is_not(None))
-                .group_by(Handoff.account_id)
-                .subquery()
-            )
-            return await s.scalar(
-                select(HandoffAccount)
-                .outerjoin(load, load.c.account_id == HandoffAccount.id)
-                .where(
-                    HandoffAccount.tg_id.is_not(None),
-                    HandoffAccount.username.in_(self.settings.handoff_accounts),
-                )
-                .order_by(func.coalesce(load.c.n, 0), HandoffAccount.id)
-                .limit(1)
+                "Некому передать кандидата: нужный HR-аккаунт ещё не написал боту (или его нет в "
+                "списках ONBOARDING_HANDOFF_*). Передача ждёт."
             )
 
     # ------------------------------------------------------------------ помощники

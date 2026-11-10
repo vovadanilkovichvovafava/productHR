@@ -242,6 +242,11 @@ async def init_database():
          "onboarding_handoffs.hr_day1_done"),
         ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS hr_week_done BOOLEAN NOT NULL DEFAULT FALSE",
          "onboarding_handoffs.hr_week_done"),
+        # Аккаунты по этапам (10.11.2026): онбординг-аккаунты, получившие переход, + что доставлено
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS onboarding_account_ids VARCHAR(255)",
+         "onboarding_handoffs.onboarding_account_ids"),
+        ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS delivered VARCHAR(255)",
+         "onboarding_handoffs.delivered"),
         # Назначения: человек в отделе. Строка доски = назначение, поэтому без
         # таблицы доска не открывается вообще — заводим её здесь, не надеясь
         # на create_all.

@@ -488,19 +488,37 @@ async def list_handoffs(
     current_user = await db.merge(current_user)
     org, _ = await _org_and_role(current_user, db)
     rows = (await db.execute(
-        select(Handoff, Entity, HandoffAccount)
+        select(Handoff, Entity)
         .join(Entity, Entity.id == Handoff.entity_id)
-        .outerjoin(HandoffAccount, HandoffAccount.id == Handoff.account_id)
         .where(Entity.org_id == org.id, Handoff.status != "baseline")
         .order_by(Handoff.id.desc())
         .limit(500)
     )).all()
-    configured = parse_accounts(app_settings.onboarding_handoff_accounts)
-    linked = {a.username: a for a in (await db.execute(select(HandoffAccount))).scalars().all()}
+    # Аккаунты по этапам (10.11.2026): у каждого — какой этап он ведёт
+    lists = {
+        "": parse_accounts(app_settings.onboarding_handoff_accounts),
+        "preboarding": parse_accounts(app_settings.onboarding_handoff_preboarding_accounts),
+        "onboarding": parse_accounts(app_settings.onboarding_handoff_onboarding_accounts),
+    }
+    configured: dict[str, list[str]] = {}
+    for role, names in lists.items():
+        for name in names:
+            configured.setdefault(name, [])
+            if role:
+                configured[name].append(role)
+    known = (await db.execute(select(HandoffAccount))).scalars().all()
+    linked = {a.username: a for a in known}
+    by_id = {a.id: a for a in known}
+
+    def nick(account_id):
+        account = by_id.get(account_id) if account_id else None
+        return f"@{account.username}" if account else None
+
     return {
         "accounts": [
-            {"username": name if name.isdigit() else f"@{name}", "linked": bool(linked.get(name) and linked[name].tg_id)}
-            for name in configured
+            {"username": name if name.isdigit() else f"@{name}",
+             "linked": bool(linked.get(name) and linked[name].tg_id), "stages": roles}
+            for name, roles in configured.items()
         ],
         "delivery": "webhook" if app_settings.onboarding_handoff_webhook_url.strip() else "telegram",
         "handoffs": [
@@ -515,9 +533,11 @@ async def list_handoffs(
                 "transfer_sent_at": row.transfer_sent_at,
                 "first_day": row.first_day,
                 "stop_sent_at": row.stop_sent_at,
-                "account": f"@{account.username}" if account else None,
+                "account": nick(row.account_id),
+                "onboarding_accounts": [n for n in (nick(int(i)) for i in (row.onboarding_account_ids or "").split(",")
+                                                     if i.isdigit()) if n],
             }
-            for row, entity, account in rows
+            for row, entity in rows
         ],
     }
 

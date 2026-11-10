@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     # @ники или числовые Telegram ID через запятую. Пусто — передача выключена. Аккаунт по нику
     # один раз жмёт Start у бота; по ID — подключён сразу (ID берут из того, что он написал боту).
     onboarding_handoff_accounts: str = Field(default="", alias="ONBOARDING_HANDOFF_ACCOUNTS")
+    # Аккаунты по этапам (админ 10.11.2026). Пребординг — практика, нагрузка делится между
+    # аккаунтами (пусто = общий список выше). Онбординг — переход в отдел уходит КАЖДОМУ аккаунту
+    # списка: онбординг и испытательный срок (пусто = тому, кто вёл практику). Стоп — всем, кто вёл.
+    onboarding_handoff_preboarding_accounts: str = Field(default="", alias="ONBOARDING_HANDOFF_PREBOARDING_ACCOUNTS")
+    onboarding_handoff_onboarding_accounts: str = Field(default="", alias="ONBOARDING_HANDOFF_ONBOARDING_ACCOUNTS")
     # Вместо Telegram — JSON на адрес их системы, подпись HMAC-SHA256 в X-Onboarding-Signature
     onboarding_handoff_webhook_url: str = Field(default="", alias="ONBOARDING_HANDOFF_WEBHOOK_URL")
     onboarding_handoff_webhook_secret: str = Field(default="", alias="ONBOARDING_HANDOFF_WEBHOOK_SECRET")
