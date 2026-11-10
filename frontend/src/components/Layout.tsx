@@ -524,6 +524,32 @@ export default function Layout() {
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
 
+  // На «Штате» панель прячется и выезжает поверх доски при наведении на левый
+  // край, а уходит, когда курсор её покидает (владелец, 10.11.2026): доске
+  // нужна вся ширина. Пока открыто меню или окно из самой панели, она не
+  // уезжает — иначе меню осталось бы висеть без неё.
+  const autoHideSidebar = isHrSidebar && location.pathname.startsWith("/statuses");
+  const [sidebarHover, setSidebarHover] = useState(false);
+  const sidebarHideTimer = useRef<number | undefined>(undefined);
+  const sidebarHeld =
+    showHrFabActions || showHrFunnelsPicker || showHrUserMenu || showNotifications ||
+    showFabVacancyForm || showFabParserModal || showHrSettingsModal ||
+    isHrSidebarResizing || sidebarVacancy !== null;
+  const sidebarShown = !autoHideSidebar || sidebarHover || sidebarHeld;
+  const peekSidebar = useCallback(() => {
+    window.clearTimeout(sidebarHideTimer.current);
+    setSidebarHover(true);
+  }, []);
+  const unpeekSidebar = useCallback(() => {
+    window.clearTimeout(sidebarHideTimer.current);
+    sidebarHideTimer.current = window.setTimeout(() => setSidebarHover(false), 250);
+  }, []);
+  useEffect(() => {
+    window.clearTimeout(sidebarHideTimer.current);
+    setSidebarHover(false);
+  }, [location.pathname]);
+  useEffect(() => () => window.clearTimeout(sidebarHideTimer.current), []);
+
   const fetchUnreadCount = useCallback(async () => {
     try {
       const result = await notificationsApi.getUnreadCount();
@@ -909,13 +935,21 @@ export default function Layout() {
         )}
       </AnimatePresence>
       {/* Desktop Sidebar */}
+      {autoHideSidebar && (
+        /* Полоска у левого края: навёл — панель выезжает. */
+        <div className="hf-hr-sidebar-hotzone" onMouseEnter={peekSidebar} aria-hidden="true" />
+      )}
       <aside
         style={isHrSidebar ? { width: hrSidebarWidth } : undefined}
+        onMouseEnter={autoHideSidebar ? peekSidebar : undefined}
+        onMouseLeave={autoHideSidebar ? unpeekSidebar : undefined}
         className={clsx(
           "hidden lg:flex h-screen min-h-0 flex-col",
           isHrSidebar
             ? "hf-hr-sidebar"
             : "w-64 app-sidebar-default glass border-r border-[color:var(--hf-workspace-divider)]",
+          autoHideSidebar && "hf-hr-sidebar--autohide",
+          autoHideSidebar && sidebarShown && "is-shown",
         )}
         role="navigation"
         aria-label="Main navigation"

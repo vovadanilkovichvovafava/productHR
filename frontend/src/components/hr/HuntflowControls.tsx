@@ -160,12 +160,16 @@ export function HuntflowOptionsIcon({ className }: { className?: string }) {
 export function HuntflowInfoRow({
   label,
   children,
+  wrapLabel,
 }: {
   label: string;
   children: ReactNode;
+  /** Длинная подпись («Причина отказа») переносится на две строки, а не
+   *  наезжает на значение: колонка подписей узкая и фиксированная. */
+  wrapLabel?: boolean;
 }) {
   return (
-    <div className="hf-info-row group">
+    <div className={clsx("hf-info-row group", wrapLabel && "hf-info-row--wrap")}>
       <span className="hf-info-label">
         <span className="hf-info-label-text">{label}</span>
         <span className="hf-info-label-line" />

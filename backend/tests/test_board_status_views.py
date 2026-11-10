@@ -95,7 +95,7 @@ async def test_empty_or_full_selection_resets_to_all(
     await client.put(
         "/api/staff-board/status-views",
         json={"scope_key": "all",
-              "statuses": ["transferred", "dismissed", "probation", "hired"]},
+              "statuses": ["transferred", "dismissed", "quit", "probation", "hired"]},
         headers=_h(admin_user),
     )
     assert await _views(client, admin_user) == {}
@@ -173,3 +173,26 @@ async def test_all_columns_or_none_resets(
         headers=_h(admin_user),
     )
     assert await _cols(client, admin_user) == {"all": ["position"]}
+
+
+@pytest.mark.asyncio
+async def test_old_dismissed_view_gets_quit_section(db_session, organization, admin_user, second_user):
+    """«Уволился» отделился от «Уволен» (10.11.2026): у кого в наборе был
+    «Уволен», уволившиеся не должны молча пропасть — секция дописывается."""
+    from api.models.database import BoardStatusView
+    from api.services.board_placements import split_quit_section_once
+
+    db_session.add_all([
+        BoardStatusView(user_id=admin_user.id, org_id=organization.id, scope_key="all",
+                        statuses=["transferred", "dismissed"], column_keys=[]),
+        BoardStatusView(user_id=second_user.id, org_id=organization.id, scope_key="all",
+                        statuses=["probation"], column_keys=[]),
+    ])
+    await db_session.commit()
+    await split_quit_section_once(db_session)
+    await split_quit_section_once(db_session)   # второй раз — ничего
+
+    from sqlalchemy import select
+    rows = {r.user_id: r.statuses for r in (await db_session.execute(select(BoardStatusView))).scalars()}
+    assert rows[admin_user.id] == ["transferred", "dismissed", "quit"]
+    assert rows[second_user.id] == ["probation"]

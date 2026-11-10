@@ -1643,7 +1643,9 @@ class BoardStatusViewUpdate(BaseModel):
 
 
 # Ключи секций доски — те же, что у фронта (STATUSES в StatusesPage).
-BOARD_SECTIONS = ("transferred", "dismissed", "probation", "hired")
+# «quit» — отдельная секция «Уволился» с 10.11.2026 (до этого была внутри
+# «dismissed»; старые наборы дополнены разово, см. split_quit_section_once).
+BOARD_SECTIONS = ("transferred", "dismissed", "quit", "probation", "hired")
 
 # Ключи КОЛОНОК таблицы — те же, что в COLUMNS на фронте. Колонку «Сотрудник»
 # скрыть нельзя (без имени строка бессмысленна), поэтому её здесь нет.

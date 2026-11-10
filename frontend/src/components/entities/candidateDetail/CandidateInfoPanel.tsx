@@ -19,6 +19,7 @@ import clsx from "clsx";
 import toast from "react-hot-toast";
 
 import { buildStageContainers, buildStagePickerOptions, readSystemHrTags } from "@/components/entities/candidateDetail/model";
+import { htmlToPlainText } from "@/components/entities/candidateDetail/timelineParts";
 
 import type { KanbanCard, KanbanColumn } from "@/services/api/candidates";
 import {
@@ -402,12 +403,19 @@ export const InfoTab = memo(function InfoTab({
         // Чип этапа в строке списка рисуется из card.funnels — правим и его,
         // иначе справа «Перешёл в отдел», а в списке ещё «Практика».
         if (appId > 0 && appStage) patchFunnelStage(appId, appStage);
+        // Отказ с комментарием — это и есть «Причина отказа»: сервер её уже
+        // записал, показываем сразу, не дожидаясь перечитывания карточки.
+        const reason = stage === "rejected" && comment ? htmlToPlainText(comment) : "";
+        if (reason) {
+          card.extra_data = { ...(card.extra_data || {}), rejection_reason: reason };
+          bumpNotes();
+        }
         onStatusChange(res.entityStatus ?? stage);
       }
       await loadActivity();
       return res.ok;
     },
-    [onStatusChange, loadActivity, patchFunnelStage, getStackStageLabel, cardActions],
+    [onStatusChange, loadActivity, patchFunnelStage, getStackStageLabel, cardActions, card, bumpNotes],
   );
 
   const cardRemoveFromVacancy = useCallback(
@@ -763,6 +771,16 @@ export const InfoTab = memo(function InfoTab({
               )}
             </InfoRow>
           )}
+          {/* «Причина отказа» — комментарий, с которым перевели в «Отказ»
+              (владелец, 10.11.2026). Пишет сервер, правится в «Редактировать». */}
+          {typeof card.extra_data?.rejection_reason === "string" &&
+            card.extra_data.rejection_reason.trim() && (
+              <InfoRow label="Причина отказа" wrapLabel>
+                <span className="whitespace-pre-wrap break-words text-[var(--hf-main-900)] hf-dark-disabled:text-[var(--hf-dark-200)]">
+                  {card.extra_data.rejection_reason.trim()}
+                </span>
+              </InfoRow>
+            )}
           {/* «О себе» — краткое описание кандидата (extra_data.summary), которое
               достаёт парсер резюме или пишет рекрутёр в модалке «Парсинг резюме».
               Раньше сохранялось «в никуда» (на карточке не показывалось). */}

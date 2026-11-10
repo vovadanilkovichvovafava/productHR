@@ -411,3 +411,32 @@ async def backfill_board_hr_tags_once(db) -> int:
     await db.commit()
     logger.info(f"BOARD_HR_TAGS: метка HR собрана у {done} карточек")
     return done
+
+
+QUIT_SECTION_MARK = "board_quit_section_2026_11_10"
+
+
+async def split_quit_section_once(db) -> None:
+    """Разово: секция «Уволился» отделилась от «Уволен» (10.11.2026).
+
+    До этого «dismissed» в личном наборе секций означал «Уволен / Уволился»
+    вместе. Чтобы у тех, кто его отметил, уволившиеся молча не пропали,
+    дописываем им новую секцию «quit». У кого «dismissed» не было, — не
+    трогаем: уволившихся они не видели и раньше.
+    """
+    from ..models.database import BoardStatusView, DataMigrationMark
+
+    if await db.get(DataMigrationMark, QUIT_SECTION_MARK) is not None:
+        return
+    rows = (await db.execute(select(BoardStatusView))).scalars().all()
+    touched = 0
+    for r in rows:
+        statuses = list(r.statuses or [])
+        if "dismissed" in statuses and "quit" not in statuses:
+            statuses.insert(statuses.index("dismissed") + 1, "quit")
+            r.statuses = statuses
+            flag_modified(r, "statuses")
+            touched += 1
+    db.add(DataMigrationMark(key=QUIT_SECTION_MARK))
+    await db.commit()
+    logger.info(f"BOARD_SECTIONS quit split: дополнено наборов {touched}")

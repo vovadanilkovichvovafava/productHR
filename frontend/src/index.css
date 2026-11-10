@@ -219,6 +219,36 @@
   color: var(--hf-white);
 }
 
+/* «Штат»: панель спрятана и выезжает поверх доски при наведении на левый
+   край (Layout: autoHideSidebar). Только на десктопе — на узком экране своё
+   мобильное меню. */
+.hf-hr-sidebar-hotzone { display: none; }
+@media (min-width: 1024px) {
+  .hf-hr-sidebar--autohide {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .hf-hr-sidebar--autohide.is-shown {
+    transform: translateX(0);
+    box-shadow: 12px 0 32px rgba(15, 23, 42, 0.18);
+  }
+  .hf-hr-sidebar-hotzone {
+    display: block;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 39;
+    width: 12px;
+    background: linear-gradient(to right, rgba(15, 23, 42, 0.08), transparent);
+  }
+}
+
 .hf-hr-sidebar-card {
   position: relative;
   display: flex;
@@ -7089,6 +7119,10 @@ body.performance-mode .glass-card:hover {
   border-bottom: var(--hf-border-xs) dotted var(--hf-main-300);
 }
 
+.hf-info-row--wrap .hf-info-label { height: auto; }
+.hf-info-row--wrap .hf-info-label-text { white-space: normal; }
+.hf-info-row--wrap .hf-info-label-line { display: none; }
+
 .hf-info-value {
   min-width: 0;
   flex: 1 1 0;
@@ -9381,11 +9415,6 @@ body.performance-mode .glass-card:hover {
   font-weight: var(--hf-fw-semibold);
   line-height: 1.2;
   color: var(--hf-main-900);
-}
-.hf-statuses-subtitle {
-  margin-top: var(--hf-space-xxs);
-  font-size: var(--hf-fs-3xs);
-  color: var(--hf-main-600);
 }
 .hf-statuses-tools {
   display: flex;

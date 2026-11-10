@@ -118,6 +118,11 @@ export function EditCandidateModal({
   const [birthDate, setBirthDate] = useState(
     (card.extra_data?.birth_date as string | undefined) || "",
   );
+  // «Причина отказа» сама берётся из комментария при переводе в «Отказ»
+  // (владелец, 10.11.2026), а здесь её можно поправить.
+  const [rejectionReason, setRejectionReason] = useState(
+    (card.extra_data?.rejection_reason as string | undefined) || "",
+  );
   const resumeDemo = card.extra_data?.resume_demo as
     | EditResumeDemoData
     | undefined;
@@ -139,7 +144,7 @@ export function EditCandidateModal({
   // производных значений, и пустота здесь не значит, что пусто в базе.
   const [initial] = useState(() => ({
     phone, email, telegram, position, company, salary, city, source,
-    birthDate, resumeText,
+    birthDate, resumeText, rejectionReason,
   }));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -203,6 +208,8 @@ export function EditCandidateModal({
         source: source.trim() || clearedValue(initial.source, source),
         city: city.trim() || clearedValue(initial.city, city),
         skills: skills.split(",").map((s) => s.trim()).filter(Boolean),
+        rejection_reason:
+          rejectionReason.trim() || clearedValue(initial.rejectionReason, rejectionReason),
       };
       const saved = await updateEntity(card.id, {
         name: fullName,
@@ -466,6 +473,20 @@ export function EditCandidateModal({
               onChange={setBirthDate}
               clearable
             />
+            {/* Многострочное: причина приходит из комментария при отказе и
+                бывает в несколько строк — однострочное поле склеило бы их. */}
+            <div>
+              <label className="mb-[var(--hf-edit-label-mb)] block text-[length:var(--hf-edit-label-fs)] font-semibold leading-[var(--hf-edit-label-lh)] text-[var(--hf-main-900)] hf-dark-disabled:text-[var(--hf-white)]">
+                Причина отказа
+              </label>
+              <textarea
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                rows={3}
+                className="w-full resize-y rounded-[var(--hf-edit-field-radius)] border border-[color:var(--hf-black-alpha-16)] bg-transparent px-[var(--hf-space-l)] py-[var(--hf-space-s)] text-[length:var(--hf-edit-field-fs)] font-normal leading-[var(--hf-edit-field-lh)] tracking-normal text-[var(--hf-main-900)] outline-none placeholder:text-[var(--hf-main-500)] focus:border-[var(--hf-cyan-500)] hf-dark-disabled:border-[color:var(--hf-white-alpha-10)] hf-dark-disabled:text-[var(--hf-white)]"
+                placeholder="заполняется из комментария при отказе"
+              />
+            </div>
           </div>
 
           <div className="min-w-0 flex-1 overflow-y-auto border-l border-[var(--hf-ui-divider)] py-[var(--hf-edit-column-py)] pl-[var(--hf-space-xxl)] hf-dark-disabled:border-[color:var(--hf-white-alpha-10)]">

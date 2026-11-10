@@ -20,7 +20,9 @@
 """
 from __future__ import annotations
 
+import html as _html
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -60,6 +62,44 @@ class StageMove:
     vacancy_id: int
     from_stage: Optional[ApplicationStage]
     to_stage: ApplicationStage
+
+
+REJECTION_REASON_KEY = "rejection_reason"
+
+
+def comment_plain_text(comment: Optional[str]) -> str:
+    """Комментарий из окна смены этапа — HTML из редактора; для поля нужен
+    простой текст с переносами строк."""
+    raw = comment or ""
+    raw = re.sub(r"<br\s*/?>", "\n", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"</(p|div|li|h[1-6])>", "\n", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"<li[^>]*>", "• ", raw, flags=re.IGNORECASE)
+    text = _html.unescape(re.sub(r"<[^>]+>", "", raw)).replace("\xa0", " ")
+    lines = [ln.strip() for ln in text.splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def remember_rejection_reason(
+    entity: Optional[Entity],
+    application: Optional[VacancyApplication],
+    comment: Optional[str],
+) -> None:
+    """Перевели в «Отказ» с комментарием — он и есть причина отказа (владелец,
+    10.11.2026: «поле причина отказа заполняется с текстового поля, когда
+    указываешь статус и пишешь коммент»).
+
+    Пишем в карточку (`extra_data.rejection_reason`, поле «Причина отказа»,
+    правится в «Редактировать») и в заявку (`rejection_reason` — по нему считает
+    отчёт «Причины отказов»; раньше это поле не заполнял никто). Отказ без
+    комментария прежнюю причину не стирает.
+    """
+    text = comment_plain_text(comment)
+    if not text:
+        return
+    if entity is not None:
+        entity.extra_data = {**(entity.extra_data or {}), REJECTION_REASON_KEY: text}
+    if application is not None:
+        application.rejection_reason = text[:255]
 
 
 async def move_application(
@@ -111,6 +151,8 @@ async def move_application(
         changed_by_id=changed_by.id if changed_by else None,
         comment=comment,
     )
+    if to_stage == ApplicationStage.rejected:
+        remember_rejection_reason(entity, application, comment)
     return StageMove(
         application_id=application.id,
         entity_id=application.entity_id,
@@ -194,6 +236,8 @@ async def change_status_without_application(
     extra = dict(entity.extra_data or {})
     extra["notes"] = [*(extra.get("notes") or []), note]
     entity.extra_data = extra
+    if new_status == EntityStatus.rejected:
+        remember_rejection_reason(entity, None, text)
     entity.status = new_status
     entity.updated_at = datetime.utcnow()
     if entity.is_archived:

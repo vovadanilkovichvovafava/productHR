@@ -652,6 +652,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Board team dates merge failed (non-critical): {e}")
 
+    # Секция «Уволился» отделилась от «Уволен» (10.11.2026): в личных наборах
+    # секций, где был «Уволен», дописать её. Одноразово.
+    try:
+        from ..services.board_placements import split_quit_section_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await split_quit_section_once(session)
+    except Exception as e:
+        logger.warning(f"Board quit section split failed (non-critical): {e}")
+
     # Отделы доски — к списку владельца (09.11.2026, services/board_catalog.py):
     # похожие переименовать, недостающие создать. Одноразово.
     try:
