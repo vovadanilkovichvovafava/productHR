@@ -68,10 +68,8 @@ export interface BoardRow {
   /** Метки-сорсеры: кто привёл этого человека. */
   sourcers?: { id: number; name: string; color: string }[];
   dismissal_date: string | null;
-  /** «Сумма» по человеку. Приходит только владельцам организации, остальным
-   *  null и `salary_visible: false` — колонка у них не показывается. */
-  salary: number | null;
-  salary_visible: boolean;
+  /** «Причина отказа» — поле карточки (заполняется при переводе в «Отказ»). */
+  rejection_reason?: string | null;
   /** отметки «веха пройдена» — парные колонки в скобках из ClickUp */
   dept_done: string | null;
   w2_done: string | null;
@@ -101,8 +99,7 @@ export interface BoardRowUpdate {
   /** Полный список HR; [] — очистить. */
   assignee_user_ids?: number[];
   dismissal_date?: string | null;
-  /** Правит только владелец организации; остальным сервер ответит 403. */
-  salary?: number | null;
+  rejection_reason?: string | null;
   dept_done?: string | null;
   w2_done?: string | null;
   m1_done?: string | null;

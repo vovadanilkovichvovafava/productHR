@@ -69,7 +69,7 @@ type FilterKey =
   | "name" | "assignee" | "sourcer" | "position" | "department" | "telegram"
   | "practice_start_date" | "manager" | "department_start_date"
   | "dept_done" | "w2" | "w2_done" | "m1" | "m1_done"
-  | "m3" | "m3_done" | "y1" | "y1_done" | "dismissal_date";
+  | "m3" | "m3_done" | "y1" | "y1_done" | "dismissal_date" | "rejection_reason";
 
 /** Ширины колонок с датами рассчитаны так, чтобы «дд.мм.гггг» помещалась
  *  целиком: в узких колонках дата обрезалась и год было не прочитать
@@ -80,7 +80,7 @@ type FilterKey =
 /** Ширина в px задана у каждой колонки: без неё 19 колонок растягивались как
  *  попало, длинная должность раздувала свою, а даты сжимались до переноса.
  *  Суммарно таблица шире экрана — прокрутка есть, но имя закреплено слева. */
-const COLUMNS: { key: FilterKey | "offer" | "salary"; label: string; filter: boolean; narrow?: boolean; width: number }[] = [
+const COLUMNS: { key: FilterKey | "offer"; label: string; filter: boolean; narrow?: boolean; width: number }[] = [
   { key: "name",                  label: "Сотрудник",         filter: true, width: 250 },
   { key: "assignee",              label: "HR",                filter: true, width: 130 },
   { key: "sourcer",               label: "Сорсер",            filter: true, width: 150 },
@@ -101,9 +101,10 @@ const COLUMNS: { key: FilterKey | "offer" | "salary"; label: string; filter: boo
   { key: "y1",                    label: "1 год",             filter: true, width: 116 },
   { key: "y1_done",               label: "✓",                 filter: true, narrow: true, width: 124 },
   { key: "dismissal_date",        label: "Дата увольнения",   filter: true, width: 124 },
-  // «Сумма» видна только владельцам организации (Настя). У остальных сервер
-  // не присылает значение, и колонка в таблицу не попадает.
-  { key: "salary",                label: "Сумма",             filter: false, width: 120 },
+  // То же поле, что «Причина отказа» в карточке кандидата: заполняется из
+  // комментария при переводе в «Отказ», правится и здесь (владелец,
+  // 10.11.2026). Колонку «Сумма» в тот же день убрали с доски целиком.
+  { key: "rejection_reason",      label: "Причина отказа",    filter: true, width: 220 },
 ];
 
 /** Колонки, которые можно спрятать: все, кроме «Сотрудника» — без имени
@@ -113,15 +114,9 @@ const HIDEABLE_COLUMNS = COLUMNS.filter((c) => c.key !== "name");
 /** Колонки вкладки: пусто — показываем все, иначе только отмеченные, и
  *  «Сотрудник» всегда первым (его прятать нельзя). Порядок всегда из COLUMNS,
  *  чтобы таблица не переставлялась от порядка галочек. */
-export function pickColumns(
-  chosen?: string[] | null,
-  withSalary = false,
-): typeof COLUMNS {
-  // «Сумма» — только владельцам организации: сервер не присылает значение,
-  // и колонку мы даже не рисуем (владелец, 09.10.2026).
-  const base = withSalary ? COLUMNS : COLUMNS.filter((c) => c.key !== "salary");
-  if (!chosen?.length) return base;
-  return base.filter((c) => c.key === "name" || chosen.includes(c.key));
+export function pickColumns(chosen?: string[] | null): typeof COLUMNS {
+  if (!chosen?.length) return COLUMNS;
+  return COLUMNS.filter((c) => c.key === "name" || chosen.includes(c.key));
 }
 
 /** Подписи для списка «Фильтры»: там «✓» ничего не сказало бы. */
@@ -383,6 +378,7 @@ const cellText = (r: BoardRow, key: FilterKey): string => {
     case "position": return r.position || "";
     case "department": return r.department_name || "";
     case "telegram": return r.telegram || "";
+    case "rejection_reason": return r.rejection_reason || "";
     case "manager": return r.manager || "";
     // Отметки — «заполнено» значит «отмечено», чтобы фильтр по колонке
     // отвечал на вопрос «у кого веха пройдена».
@@ -766,13 +762,7 @@ export default function StatusesPage() {
   // статусам, но и по столбцам» — Мария, 08.10.2026). Имя не прячем: без него
   // строка бессмысленна, поэтому в наборе его нет и он всегда первый.
   const myColumns = columnViews[dept];
-  // Право на «Сумму» приходит со строками: сервер ставит его всем строкам
-  // одинаково, поэтому достаточно посмотреть первую.
-  const canSeeSalary = rows.some((r) => r.salary_visible);
-  const visibleColumns = useMemo(
-    () => pickColumns(myColumns, canSeeSalary),
-    [myColumns, canSeeSalary],
-  );
+  const visibleColumns = useMemo(() => pickColumns(myColumns), [myColumns]);
 
   const counts = useMemo(() => {
     // У отдела — сколько в нём строк, у «Все» — сколько ЛЮДЕЙ: человек в
@@ -844,9 +834,7 @@ export default function StatusesPage() {
    *  отдела и сортировки, плюс колонку статуса: в файле групп нет. */
   /** Строки → лист: шапка как в таблице, плюс колонка со статусом. */
   const sheetFrom = (items: BoardRow[]) => {
-    // «Сумма» — только владельцу: остальным сервер её не присылает, и в файле
-    // висела бы пустая колонка, по которой непонятно, что сломалось.
-    const cols = COLUMNS.filter((c) => c.key !== "offer" && (c.key !== "salary" || canSeeSalary));
+    const cols = COLUMNS.filter((c) => c.key !== "offer");
     const header = ["Статус", ...cols.map((c) => FILTER_LABELS[c.key as FilterKey] || c.label)];
     const body: (string | number)[][] = items.map((r) => [
       STATUSES.find((s2) => (s2.members as readonly string[]).includes(r.status))?.label || r.status,
@@ -892,24 +880,6 @@ export default function StatusesPage() {
     XLSX.writeFile(wb, `statuses-${today}.xlsx`);
     toast.success(`Выгружено строк: ${total}`);
   };
-
-  /** Итог по колонке «Сумма»: считаем по ЛЮДЯМ, а не по строкам — человек в
-   *  песочнице и в отделе занимает две строки, но деньги у него одни. Берём
-   *  ровно то, что сейчас на экране после фильтров (владелец, 09.10.2026:
-   *  «когда фильтры применялись, этот столбец в конце писал сумму всех»). */
-  const salaryTotal = useMemo(() => {
-    if (!canSeeSalary) return null;
-    // Люди, а не строки: человек в песочнице и в отделе — две строки.
-    const people = new Set<number>();
-    const seen = new Map<number, number>();
-    for (const r of visible) {
-      people.add(r.entity_id);
-      if (r.salary != null) seen.set(r.entity_id, r.salary);
-    }
-    let sum = 0;
-    seen.forEach((v) => { sum += v; });
-    return { sum, people: people.size, withSalary: seen.size };
-  }, [visible, canSeeSalary]);
 
   const grouped = useMemo(
     () => STATUSES.filter((s) => !mySections || !mySections.length || mySections.includes(s.key)).map((s) => {
@@ -1198,7 +1168,7 @@ export default function StatusesPage() {
         <div className="hf-statuses-body">
           {showSections && (
             <ViewModal
-              hideable={HIDEABLE_COLUMNS.filter((c) => c.key !== "salary" || canSeeSalary)}
+              hideable={HIDEABLE_COLUMNS}
               scopeLabel={
                 dept === "all" ? "Все"
                   : dept === UNASSIGNED ? "Без отдела"
@@ -1330,32 +1300,6 @@ export default function StatusesPage() {
                 })}
               </tbody>
 
-              {/* Колонку «Сумма» спрятали в «Виде» — итог без суммы ничего не
-                  говорит («Итого · 0 чел.» читалось как «никого не нашли»). */}
-              {salaryTotal && visibleColumns.some((c) => c.key === "salary") && (
-                <tfoot className="hf-statuses-foot">
-                  <tr>
-                    {visibleColumns.map((c, i) => (
-                      <td
-                        key={c.key}
-                        className={clsx(
-                          "hf-statuses-td",
-                          c.key === "name" && "hf-statuses-sticky",
-                        )}
-                      >
-                        {c.key === "salary"
-                          ? <strong>{formatMoney(salaryTotal.sum)}</strong>
-                          : i === 0
-                            ? `Итого по отбору · ${salaryTotal.people} чел.` +
-                              (salaryTotal.withSalary < salaryTotal.people
-                                ? ` (сумма указана у ${salaryTotal.withSalary})`
-                                : "")
-                            : null}
-                      </td>
-                    ))}
-                  </tr>
-                </tfoot>
-              )}
             </table>
           </div>
         </div>
@@ -2197,8 +2141,11 @@ function Row({
     y1: date("y1", row.y1_auto),
     y1_done: mark("y1_done"),
     dismissal_date: date("dismissal_date"),
-    salary: (
-      <MoneyCell value={row.salary} onSave={(v) => onPatch(row, { salary: v })} />
+    rejection_reason: (
+      <ReasonCell
+        value={row.rejection_reason ?? null}
+        onSave={(v) => onPatch(row, { rejection_reason: v })}
+      />
     ),
   };
 
@@ -2265,37 +2212,43 @@ function TextCell({
   );
 }
 
-/** «Сумма» — число, которое вписывает владелец. Показываем с разделителями
- *  тысяч, правим как обычную ячейку. */
-function MoneyCell({
+/** «Причина отказа» — текст в несколько строк: правится многострочным полем
+ *  (однострочное склеило бы строки при первом же клике). Сохраняется по уходу
+ *  из поля или ⌘/Ctrl+Enter, Escape — отмена. */
+function ReasonCell({
   value, onSave,
-}: { value: number | null; onSave: (v: number | null) => void }) {
+}: { value: string | null; onSave: (v: string | null) => void }) {
   const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || "");
+
+  useEffect(() => { setDraft(value || ""); }, [value]);
+
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next !== (value || "")) onSave(next || null);
+  };
 
   if (editing) {
     return (
-      <input
+      <textarea
         autoFocus
-        type="number"
-        inputMode="decimal"
-        className="hf-statuses-cell-input"
-        defaultValue={value ?? ""}
-        onBlur={(e) => {
-          setEditing(false);
-          const raw = e.target.value.trim();
-          const next = raw === "" ? null : Number(raw);
-          if (next !== value && (next === null || Number.isFinite(next))) onSave(next);
+        rows={3}
+        className="hf-statuses-cell-input hf-statuses-cell-textarea"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commit();
+          if (e.key === "Escape") { setDraft(value || ""); setEditing(false); }
         }}
-        onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
       />
     );
   }
 
   return (
-    <button className="hf-statuses-cell-btn" onClick={() => setEditing(true)}>
-      {value == null
-        ? <span className="hf-statuses-cell-placeholder">—</span>
-        : formatMoney(value)}
+    <button className="hf-statuses-cell-btn" onClick={() => setEditing(true)} title={value || ""}>
+      {value || <span className="hf-statuses-cell-placeholder">—</span>}
     </button>
   );
 }
@@ -2486,10 +2439,6 @@ export const isBoardHr = (name: string | null | undefined) =>
 
 /** Сколько HR можно закрепить за человеком — как на бэке (MAX_ASSIGNEES). */
 const MAX_HR = 5;
-
-/** 2500.5 → «2 500,5»: длинные суммы без разделителей не читаются. */
-const formatMoney = (v: number) =>
-  v.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
 
 const initialsOf = (name: string | null | undefined) =>
   (name || "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";

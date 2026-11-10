@@ -440,3 +440,29 @@ async def split_quit_section_once(db) -> None:
     db.add(DataMigrationMark(key=QUIT_SECTION_MARK))
     await db.commit()
     logger.info(f"BOARD_SECTIONS quit split: дополнено наборов {touched}")
+
+
+REJECTION_COLUMN_MARK = "board_rejection_column_2026_11_10"
+
+
+async def add_rejection_column_once(db) -> None:
+    """Разово: на доске появилась колонка «Причина отказа» (10.11.2026).
+
+    У тех, кто настраивал колонки в «Виде», набор — явный список, и новая
+    колонка в нём молча не появилась бы. Дописываем её. Пустой набор значит
+    «все колонки» — там она и так видна.
+    """
+    from ..models.database import BoardStatusView, DataMigrationMark
+
+    if await db.get(DataMigrationMark, REJECTION_COLUMN_MARK) is not None:
+        return
+    touched = 0
+    for r in (await db.execute(select(BoardStatusView))).scalars().all():
+        cols = list(r.column_keys or [])
+        if cols and "rejection_reason" not in cols:
+            r.column_keys = [*cols, "rejection_reason"]
+            flag_modified(r, "column_keys")
+            touched += 1
+    db.add(DataMigrationMark(key=REJECTION_COLUMN_MARK))
+    await db.commit()
+    logger.info(f"BOARD_SECTIONS rejection column: дополнено наборов {touched}")

@@ -9794,19 +9794,8 @@ body.performance-mode .glass-card:hover {
 .hf-statuses-chip-quit        { background: var(--hf-cyan-100); color: var(--hf-cyan-800); }
 .hf-statuses-group-count { font-size: var(--hf-fs-4xs); color: var(--hf-main-500); }
 
-/* Итог по «Сумме»: липнет к низу таблицы, чтобы число было видно при
-   прокрутке длинного списка. */
-.hf-statuses-foot td {
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
-  background: var(--hf-main-50);
-  border-top: var(--hf-border-xs) solid var(--hf-ui-border);
-  font-size: var(--hf-fs-3xs);
-  color: var(--hf-main-700);
-  white-space: nowrap;
-}
-.hf-statuses-foot td.hf-statuses-sticky { z-index: 4; }
+/* «Причина отказа» правится в несколько строк. */
+.hf-statuses-cell-textarea { resize: vertical; min-height: 64px; white-space: pre-wrap; }
 
 /* Строки */
 .hf-statuses-row { transition: background var(--hf-transition-fast); }

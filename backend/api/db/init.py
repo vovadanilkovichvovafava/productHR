@@ -662,6 +662,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Board quit section split failed (non-critical): {e}")
 
+    # Колонка «Причина отказа» на доске (10.11.2026): дописать её в личные
+    # наборы колонок, где колонки выбраны явно. Одноразово.
+    try:
+        from ..services.board_placements import add_rejection_column_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await add_rejection_column_once(session)
+    except Exception as e:
+        logger.warning(f"Board rejection column failed (non-critical): {e}")
+
     # Отделы доски — к списку владельца (09.11.2026, services/board_catalog.py):
     # похожие переименовать, недостающие создать. Одноразово.
     try:

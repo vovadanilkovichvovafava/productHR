@@ -71,3 +71,49 @@ async def test_reason_is_editable_by_hand(client, db_session, admin_user, one_fu
     )
     assert r.status_code == 200, r.text
     assert r.json()["extra_data"]["rejection_reason"] == "уточнили: зарплата"
+
+
+async def test_reason_on_board_row_and_editable(client, db_session, admin_user, org_owner, candidate_entity):
+    """Колонка «Причина отказа» на «Штате» — то же поле карточки: видно и правится."""
+    candidate_entity.status = EntityStatus.dismissed
+    candidate_entity.extra_data = {**(candidate_entity.extra_data or {}), "rejection_reason": "Сократили"}
+    await db_session.commit()
+
+    rows = (await client.get("/api/staff-board/rows", headers=_headers(admin_user))).json()
+    row = next(r for r in rows if r["entity_id"] == candidate_entity.id)
+    assert row["rejection_reason"] == "Сократили"
+    assert "salary" not in row   # «Сумму» убрали с доски целиком
+
+    r = await client.patch(
+        f"/api/staff-board/rows/{candidate_entity.id}",
+        json={"rejection_reason": "  Сократили отдел  "}, headers=_headers(admin_user),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["rejection_reason"] == "Сократили отдел"
+    await db_session.refresh(candidate_entity)
+    assert candidate_entity.extra_data["rejection_reason"] == "Сократили отдел"
+
+    r = await client.patch(
+        f"/api/staff-board/rows/{candidate_entity.id}",
+        json={"salary": 1000}, headers=_headers(admin_user),
+    )
+    assert r.status_code == 422   # поля «Сумма» больше нет
+
+
+async def test_rejection_column_added_to_custom_views(db_session, organization, admin_user, second_user):
+    from sqlalchemy import select
+    from api.models.database import BoardStatusView
+    from api.services.board_placements import add_rejection_column_once
+
+    db_session.add_all([
+        BoardStatusView(user_id=admin_user.id, org_id=organization.id, scope_key="all",
+                        statuses=[], column_keys=["position", "department"]),
+        BoardStatusView(user_id=second_user.id, org_id=organization.id, scope_key="all",
+                        statuses=["probation"], column_keys=[]),
+    ])
+    await db_session.commit()
+    await add_rejection_column_once(db_session)
+    await add_rejection_column_once(db_session)
+    rows = {r.user_id: r.column_keys for r in (await db_session.execute(select(BoardStatusView))).scalars()}
+    assert rows[admin_user.id] == ["position", "department", "rejection_reason"]
+    assert rows[second_user.id] == []
