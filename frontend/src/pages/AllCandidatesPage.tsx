@@ -407,7 +407,7 @@ export default function AllCandidatesPage() {
   // Раньше отсюда же уходил ещё и PATCH статуса — второй запрос на то же
   // действие, который выравнивал ВСЕ заявки кандидата под один этап (17.09).
   const handleStatusChange = (status: string) => {
-    // Вкладка, а не сам статус: «Уволен» стоит во вкладке «Отказ» (boardColumnOf).
+    // Вкладка, а не сам статус (boardColumnOf): убранные этапы — «Вне воронки».
     // Без этого карточка с таким статусом не находила вкладку и пропадала до F5.
     const newStatus = boardColumnOf(status);
     if (!selectedCard || newStatus === selectedStatus) return;

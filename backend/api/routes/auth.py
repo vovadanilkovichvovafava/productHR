@@ -549,12 +549,13 @@ async def _get_user_org_or_404(user: User, db: AsyncSession) -> Organization:
 
 
 def _read_org_stages(org: Organization) -> list[dict]:
-    """Возвращает stage_config из settings либо дефолты."""
-    settings_data = org.settings or {}
-    cfg = settings_data.get("stage_config")
-    if isinstance(cfg, list) and cfg:
-        # Убедимся что все ключи известные — фильтруем неизвестные.
-        return [s for s in cfg if isinstance(s, dict) and s.get("key") in ALLOWED_STAGE_KEYS]
+    """Этапы организации — канон справочника (services/hr_stages.py).
+
+    Старый `settings["stage_config"]` больше не читается (10.11.2026): редактор
+    этапов убран давно, а сохранённые им подписи перебивали канон — на проде
+    так и висело «Принятие решения/СБ» и «Новый», хотя список этапов Мария
+    утвердила другим. Одна правда — справочник.
+    """
     return [dict(s) for s in DEFAULT_ORG_STAGES]
 
 

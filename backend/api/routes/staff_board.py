@@ -74,6 +74,44 @@ DEPARTED_STATUSES: List[EntityStatus] = [
     EntityStatus.withdrawn,
 ]
 
+# Был ли человек «у нас»: доходил до практики или до отдела. Только таким
+# отказ показывается на доске как уход (Мария, 10.11.2026: «кандидат,
+# перешедший из „Оффер“ в „Отказ“, не попадает в „Уволен“, а исчезает с
+# дашборда… „Уволен“ ставится только тем, кто реально был в штате»). Раньше
+# хватало назначения в отдел — а его HR часто ставит уже на «Оффер принят»,
+# и отказавшийся от оффера всплывал в «Уволен».
+_STAFF_STAGES = ("probation", "transferred")
+_STAFF_NOTE_STAGES = ("probation", "transferred", "dismissed", "quit")
+
+
+async def _reached_staff(db: AsyncSession, entities) -> set:
+    """id тех, кто хоть раз был на практике / в отделе: история заявок, лента
+    карточки (переводы вне воронок и с доски) или дата выхода на практику."""
+    from ..models.database import StageTransition
+
+    ids = [e.id for e in entities]
+    if not ids:
+        return set()
+    out = set((await db.execute(
+        select(StageTransition.entity_id).where(
+            StageTransition.entity_id.in_(ids),
+            cast(StageTransition.to_stage, String).in_(_STAFF_STAGES),
+        )
+    )).scalars().all())
+    for e in entities:
+        if e.id in out:
+            continue
+        ex = e.extra_data if isinstance(e.extra_data, dict) else {}
+        if ex.get(_K_PRACTICE):
+            out.add(e.id)
+            continue
+        for n in ex.get("notes") or []:
+            if isinstance(n, dict) and n.get("stage") in _STAFF_NOTE_STAGES:
+                out.add(e.id)
+                break
+    return out
+
+
 # Подписи статусов для записи в ленте карточки — те же слова, что видит HR.
 STATUS_LABELS_RU = {
     EntityStatus.hired.value: "Оффер принят",
@@ -389,8 +427,8 @@ async def _move_board_application(
     правило (раньше было две копии — здесь и в services/board_status_sync.py):
       • УВОЛЕН / УВОЛИЛСЯ — человек ушёл целиком: «Отказом» закрываются ВСЕ его
         живые заявки. Статус кандидата остаётся точным (уволен/уволился), на
-        «Все кандидаты» он во вкладке «Отказ»; пересчёт по этим заявкам статус
-        не отменит (KEEP_DEPARTED).
+        «Все кандидаты» с 10.11.2026 — своя вкладка «Мы уволили» / «Сам
+        уволился»; пересчёт по этим заявкам статус не отменит (KEEP_DEPARTED).
       • Остальные статусы доски — двигается «актуальная» открытая заявка, та
         же, по которой сервер считает общий статус (pick_primary_application):
         тогда статус и этап совпадут, и следующее действие в воронке не вернёт
@@ -405,8 +443,15 @@ async def _move_board_application(
     from ..services.stage_change import move_application
     from .vacancies.common import pick_primary_application
 
-    fired = new_status in (EntityStatus.dismissed, EntityStatus.quit)
-    target_stage = ApplicationStage.rejected if fired else STATUS_SYNC_MAP.get(new_status)
+    if new_status in (EntityStatus.dismissed, EntityStatus.quit):
+        # Одно правило с карточкой «Все кандидаты» (stage_change, 10.11.2026).
+        from ..services.stage_change import close_applications_for_departure
+        from ..services.hr_stages import STATUS_LABELS
+        return await close_applications_for_departure(
+            db, entity, new_status, changed_by=user,
+            comment=f"{STATUS_LABELS[new_status.value]} — доска «Штат»",
+        )
+    target_stage = STATUS_SYNC_MAP.get(new_status)
     if target_stage is None:
         return []
     open_apps = (await db.execute(
@@ -422,17 +467,9 @@ async def _move_board_application(
         .with_for_update(of=VacancyApplication)
     )).scalars().all()
 
-    if fired:
-        closed = (ApplicationStage.rejected, ApplicationStage.withdrawn)
-        targets = [a for a in open_apps if a.stage not in closed]
-        comment = (
-            "Уволен — доска «Штат»" if new_status == EntityStatus.dismissed
-            else "Уволился — доска «Штат»"
-        )
-    else:
-        primary = pick_primary_application(list(open_apps))
-        targets = [primary] if primary is not None else []
-        comment = comment or "Перевод с доски «Штат»"
+    primary = pick_primary_application(list(open_apps))
+    targets = [primary] if primary is not None else []
+    comment = comment or "Перевод с доски «Штат»"
 
     moves = []
     for app in targets:
@@ -1820,6 +1857,18 @@ async def list_rows(
         .where(Entity.org_id == org.id, on_board, Entity.is_archived.is_not(True))
         .order_by(Entity.name)
     )).scalars().all()
+
+    # Отказ без практики и отдела (например, отказался от оффера) — не уход,
+    # а работа воронки: на доске его нет (10.11.2026).
+    departed_values = {s.value for s in DEPARTED_STATUSES}
+    _status = lambda e: e.status.value if hasattr(e.status, "value") else str(e.status)
+    maybe_departed = [e for e in entities if _status(e) in departed_values]
+    if maybe_departed:
+        stayed = await _reached_staff(db, maybe_departed)
+        entities = [
+            e for e in entities
+            if _status(e) not in departed_values or e.id in stayed
+        ]
 
     if not entities:
         return []

@@ -1228,7 +1228,7 @@ class TestKanbanColumnPagination:
         data = response.json()
         assert data["stage"] == "applied"
         # Подпись — из справочника этапов (services/hr_stages.py).
-        assert data["title"] == "Новый"
+        assert data["title"] == "Новые"
         assert data["count"] >= 1
         assert "applications" in data
         assert "total_count" in data

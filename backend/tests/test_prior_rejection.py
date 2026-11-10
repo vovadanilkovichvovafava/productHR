@@ -69,7 +69,7 @@ async def test_list_row_shows_rejection_of_the_other_card(client, admin_user, se
     assert pr["vacancy_title"] == "Трафик"
     assert pr["recruiter_name"] == setup["admin_name"]
     assert pr["comment"] == "Не сдал тестовое" and pr["reason"] == "Слабая аналитика"
-    assert pr["from_stage"] == "Выполняет ТЗ" and pr["date"].startswith("2026-08-28")
+    assert pr["from_stage"] == "Выполняют ТЗ" and pr["date"].startswith("2026-08-28")
     # Сама отклонённая карточка — во вкладке «Отказ», метки у неё нет.
     assert (await _kanban_card(client, H, setup["old_id"]))["prior_rejection"] is None
 

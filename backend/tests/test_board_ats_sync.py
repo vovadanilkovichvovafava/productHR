@@ -84,7 +84,7 @@ async def test_dismissal_closes_all_live_applications(
     assert {m.application_id for m in moves} == {live.id, other.id}
     assert all(m.to_stage == ApplicationStage.rejected.value for m in moves)
     # В ленте видно, почему «Отказ»: уволен на доске.
-    assert all(m.comment == "Уволен — доска «Штат»" for m in moves)
+    assert all(m.comment == "Мы уволили — доска «Штат»" for m in moves)
 
 
 @pytest.mark.asyncio
@@ -129,15 +129,20 @@ async def test_two_funnels_move_only_the_actual_application(
 async def test_dismissed_candidate_sits_in_rejected_column(
     client, db_session, organization, admin_user, org_owner
 ):
-    """В базе «Все кандидаты» уволенный — в «Отказе», а не в «Вне воронки»."""
+    """С 10.11.2026 (список Марии) у уволенного своя вкладка «Мы уволили» —
+    не «Отказ» и не «Вне воронки»."""
     e = await _candidate(db_session, organization, admin_user, EntityStatus.dismissed)
 
     r = await client.get("/api/candidates/kanban", headers=_h(admin_user))
     assert r.status_code == 200, r.text
     columns = {c["status"]: c for c in r.json()["columns"]}
-    assert e.id in [c["id"] for c in columns["rejected"]["cards"]]
-    assert e.id not in [c["id"] for c in columns["other"]["cards"]]
+    assert columns["dismissed"]["label"] == "Мы уволили"
+    assert e.id in [c["id"] for c in columns["dismissed"]["cards"]]
+    assert e.id not in [c["id"] for c in columns["rejected"]["cards"]]
+    assert "other" not in columns  # пустая «Вне воронки» не показывается
 
-    # «Выбрать всех» на вкладке «Отказ» обязано отбирать тех же людей.
-    ids = await client.get("/api/candidates/ids?status=rejected", headers=_h(admin_user))
+    # «Выбрать всех» на вкладке обязано отбирать тех же людей.
+    ids = await client.get("/api/candidates/ids?status=dismissed", headers=_h(admin_user))
     assert e.id in ids.json()["ids"]
+    rejected = await client.get("/api/candidates/ids?status=rejected", headers=_h(admin_user))
+    assert e.id not in rejected.json()["ids"]

@@ -534,8 +534,10 @@ async def test_board_shows_only_own_people(
         await db_session.commit()
         assert await _rows(client, admin_user, e.id) == [], f"лишняя строка: {status.value}"
 
-    # Отказ и «отозван» у того, кто УЖЕ был в отделе, — это уход: строка
-    # остаётся и попадает в «Уволен / Уволился».
+    # Отказ и «отозван» у того, кто УЖЕ был в отделе и на практике, — это
+    # уход: строка остаётся и попадает в «Уволен / Уволился». Практику
+    # подтверждает запись ленты (как пишет перевод вне воронок и с доски).
+    e.extra_data = {"notes": [{"id": "p", "text": "", "stage": "probation", "from_status": "hired"}]}
     for status in (EntityStatus.rejected, EntityStatus.withdrawn):
         e.status = status
         await db_session.commit()
@@ -1031,3 +1033,49 @@ async def test_sandbox_change_is_not_rotation(
     )
     assert r.status_code == 201, r.text
     assert r.json()["team_history"] == []
+
+
+@pytest.mark.asyncio
+async def test_offer_then_reject_leaves_the_board(
+    client, db_session, organization, admin_user, org_owner
+):
+    """Мария, 10.11.2026: «кандидат, перешедший из „Оффер“ в „Отказ“, не
+    попадает в „Уволен“, а исчезает с дашборда». Отдел ему ставили уже на
+    «Оффер принят» (так на проде было у двоих), но на практике и в отделе он не
+    был — это отказ от оффера, а не увольнение. Отказ после практики — уход,
+    остаётся."""
+    from api.models.database import (
+        ApplicationStage, StageTransition, Vacancy, VacancyApplication, VacancyStatus,
+    )
+    team = await _dept(client, admin_user, "HR team")
+    now = datetime.utcnow()
+    v = Vacancy(org_id=organization.id, created_by=admin_user.id, title="HR", status=VacancyStatus.open,
+                salary_currency="RUB", created_at=now, updated_at=now)
+    db_session.add(v)
+    await db_session.commit()
+
+    async def hired_with_team(name, reached=None):
+        e = await _person(db_session, organization, admin_user, name=name, status=EntityStatus.hired)
+        app = VacancyApplication(vacancy_id=v.id, entity_id=e.id, stage=ApplicationStage.hired,
+                                 stage_order=1, created_by=admin_user.id, applied_at=now,
+                                 last_stage_change_at=now, updated_at=now)
+        db_session.add(app)
+        await db_session.commit()
+        if reached:
+            db_session.add(StageTransition(application_id=app.id, entity_id=e.id,
+                                           from_stage="hired", to_stage=reached,
+                                           changed_by=admin_user.id, created_at=now))
+            await db_session.commit()
+        r = await client.post("/api/staff-board/placements",
+                              json={"entity_id": e.id, "department_id": team["id"]}, headers=_h(admin_user))
+        assert r.status_code in (200, 201), r.text
+        assert len(await _rows(client, admin_user, e.id)) == 1  # на «Оффер принят» — на доске
+        e.status = EntityStatus.rejected
+        await db_session.commit()
+        return e
+
+    declined = await hired_with_team("Отказался От Оффера")
+    assert await _rows(client, admin_user, declined.id) == []
+
+    failed = await hired_with_team("Не Прошёл Практику", reached="probation")
+    assert len(await _rows(client, admin_user, failed.id)) == 1

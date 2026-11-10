@@ -135,8 +135,9 @@ async def test_kanban_orders_by_created_at_shows_status_date(
 async def test_dismissed_gets_date_of_board_rejection(
     client, db_session, organization, department, admin_user, org_owner,
 ):
-    """Уволенного доска переводит в воронке в «Отказ» — эта дата и стоит в
-    строке «Все кандидаты» (вкладка «Отказ»), а не дата добавления."""
+    """Уволенного доска переводит в воронке в «Отказ», а в ленте пишет перевод
+    в «Мы уволили» — эта дата и стоит в строке «Все кандидаты» (вкладка «Мы
+    уволили» с 10.11.2026), а не дата добавления."""
     from api.models.database import (
         ApplicationStage, Entity, EntityStatus, EntityType, Vacancy, VacancyApplication,
         VacancyStatus,
@@ -160,5 +161,5 @@ async def test_dismissed_gets_date_of_board_rejection(
     r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"status": "dismissed"}, headers=h)
     assert r.status_code == 200, r.text
     cols = {c["status"]: c for c in (await client.get("/api/candidates/kanban", headers=h)).json()["columns"]}
-    card = next(c for c in cols["rejected"]["cards"] if c["id"] == e.id)
+    card = next(c for c in cols["dismissed"]["cards"] if c["id"] == e.id)
     assert card["status_changed_at"] and card["status_changed_at"][:10] == now.date().isoformat()

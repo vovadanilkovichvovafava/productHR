@@ -16,10 +16,23 @@ def test_every_funnel_stage_has_label():
         assert stage in hr_stages.STAGE_LABELS_BY_ENUM, stage
 
 
-def test_board_statuses_cover_sync_map():
-    assert set(hr_stages.BOARD_STATUSES) == {s.value for s in STATUS_SYNC_MAP}
+def test_board_statuses_are_marias_list():
+    """Вкладки «Все кандидаты» — ровно список Марии (10.11.2026), её порядок и
+    её названия. «Принятие решения» и «Отозван» убраны, уволенные — своими
+    вкладками после «Отказа»."""
+    labels = [hr_stages.STATUS_LABELS[s] for s in hr_stages.BOARD_STATUSES]
+    assert labels == [
+        "Новые", "Выполняют ТЗ", "Интервью с HR", "Интервью с заказчиком",
+        "Выставлен оффер", "Оффер принят", "Практика", "Перешёл в отдел", "Отказ",
+        "Мы уволили", "Сам уволился", "Резерв",
+    ]
+    # Убранные этапы подписаны (старая история), но вкладки у них нет.
     for status in STATUS_SYNC_MAP:
         assert status.value in hr_stages.STATUS_LABELS
+    assert hr_stages.board_column("is_interview") == hr_stages.OTHER_STATUS
+    assert hr_stages.board_column("withdrawn") == hr_stages.OTHER_STATUS
+    assert hr_stages.board_column("dismissed") == "dismissed"
+    assert hr_stages.statuses_in_column("rejected") == ["rejected"]
 
 
 def test_status_and_stage_labels_agree():
@@ -40,8 +53,10 @@ def test_reserve_is_labelled_everywhere():
 
 def test_default_org_stages_are_funnel_columns():
     keys = [s["key"] for s in hr_stages.DEFAULT_ORG_STAGES]
-    assert EntityStatus.withdrawn.value not in keys  # у «Отозван» нет вкладки воронки
-    assert keys == [s for s in hr_stages.BOARD_STATUSES if s != "withdrawn"]
+    assert EntityStatus.withdrawn.value not in keys
+    assert EntityStatus.is_interview.value not in keys
+    # Вкладки воронки = вкладки «Все кандидаты», кроме уволенных (у заявки их нет).
+    assert keys == [s for s in hr_stages.BOARD_STATUSES if s not in ("dismissed", "quit")]
 
 
 def test_no_handwritten_label_tables_left():
@@ -52,6 +67,6 @@ def test_no_handwritten_label_tables_left():
         if path.name == "hr_stages.py":
             continue
         text = path.read_text(encoding="utf-8")
-        if '"Выполняет ТЗ",' in text or "'Выполняет ТЗ'," in text:
+        if '"Выполняют ТЗ",' in text or "'Выполняют ТЗ'," in text:
             offenders.append(str(path.relative_to(api_dir)))
     assert offenders == []

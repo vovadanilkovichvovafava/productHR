@@ -145,8 +145,8 @@ async def test_closed_funnel_and_no_funnel_keep_timeline_note(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status, note", [
-    (EntityStatus.dismissed, "Уволен — доска «Штат»"),
-    (EntityStatus.quit, "Уволился — доска «Штат»"),
+    (EntityStatus.dismissed, "Мы уволили — доска «Штат»"),
+    (EntityStatus.quit, "Сам уволился — доска «Штат»"),
 ])
 async def test_dismissal_moves_application_to_rejected(
     client, db_session, organization, department, admin_user, org_owner, status, note,
@@ -177,16 +177,17 @@ async def test_dismissal_moves_application_to_rejected(
 async def test_dismissed_stands_in_rejected_tab_and_select_all(
     client, db_session, organization, department, admin_user, org_owner,
 ):
-    """На «Все кандидаты» уволенный — во вкладке «Отказ», и «Выбрать всех»
-    на этой вкладке берёт его тоже (бейдж и выбор не расходятся)."""
+    """На «Все кандидаты» уволенный — во вкладке «Мы уволили» (с 10.11.2026),
+    и «Выбрать всех» на этой вкладке берёт его тоже (бейдж и выбор не
+    расходятся)."""
     e = await _person(db_session, organization, admin_user, status=EntityStatus.dismissed)
     r = await client.get("/api/candidates/kanban", headers=_h(admin_user))
     assert r.status_code == 200, r.text
     cols = {c["status"]: c for c in r.json()["columns"]}
-    assert e.id in [c["id"] for c in cols["rejected"]["cards"]]
-    assert e.id not in [c["id"] for c in cols.get("other", {}).get("cards", [])]
+    assert e.id in [c["id"] for c in cols["dismissed"]["cards"]]
+    assert e.id not in [c["id"] for c in cols["rejected"]["cards"]]
 
-    ids = (await client.get("/api/candidates/ids?status=rejected", headers=_h(admin_user))).json()["ids"]
+    ids = (await client.get("/api/candidates/ids?status=dismissed", headers=_h(admin_user))).json()["ids"]
     assert e.id in ids
     all_ids = (await client.get("/api/candidates/ids", headers=_h(admin_user))).json()["ids"]
     assert e.id in all_ids

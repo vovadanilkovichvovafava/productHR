@@ -69,6 +69,13 @@ def _note_status_date(extra: Any, status: str) -> Optional[datetime]:
     return best
 
 
+def _date_column(status: str) -> str:
+    """Вкладка для сравнения дат: уволенные — как «Отказ» (см. выше)."""
+    if status in ("dismissed", "quit"):
+        return "rejected"
+    return board_column(status)
+
+
 async def status_changed_at_map(db: AsyncSession, entities: Iterable[Any]) -> Dict[int, datetime]:
     """{entity_id: когда перевели на текущий статус}. Без записи — ключа нет."""
     items = [e for e in entities if getattr(e, "id", None) is not None]
@@ -95,11 +102,12 @@ async def status_changed_at_map(db: AsyncSession, entities: Iterable[Any]) -> Di
             .group_by(StageTransition.entity_id, StageTransition.to_stage)
         )
         for ent_id, to_stage, at in rows.all():
-            # Сравниваем по вкладке, а не по статусу дословно: уволенного доска
+            # Сравниваем по вкладке, а не по статусу дословно. Уволенного доска
             # переводит в воронке в «Отказ» (запись истории — на rejected), а
-            # статус у него «уволен» — это та же вкладка «Отказ» (hr_stages).
+            # статус у него «Мы уволили» / «Сам уволился»: с 10.11.2026 это своя
+            # вкладка, но дата увольнения — это дата того «Отказа».
             stage_status = _STAGE_TO_STATUS.get(to_stage)
-            if stage_status is None or board_column(stage_status) != board_column(status_of.get(ent_id, "")):
+            if stage_status is None or _date_column(stage_status) != _date_column(status_of.get(ent_id, "")):
                 continue
             when = _naive_utc(at)
             if when is not None and (ent_id not in out or when > out[ent_id]):

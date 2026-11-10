@@ -55,7 +55,7 @@ import ResumeTab, { EntityFilesContext, useResumeSources } from "@/components/en
 import { readParticipations } from "@/components/entities/candidateDetail/ImportedParticipations";
 
 import { useCardActions } from "@/components/entities/candidateDetail/useCardActions";
-import { STAGE_CHIP_BRIGHT_BY_STAGE } from "@/constants/hrStages";
+import { DEPARTED_STATUSES, STAGE_CHIP_BRIGHT_BY_STAGE } from "@/constants/hrStages";
 import { getInitials, formatPhoneDisplay, getVacancyStageLabel } from "@/components/candidates/candidateFormat";
 
 import { AnketaTab } from "@/components/entities/candidateDetail/AnketaTab";
@@ -382,6 +382,14 @@ export const InfoTab = memo(function InfoTab({
       // четыре значения в них называются по-разному — переводим по карте, а не
       // приведением типа (раньше «Новый», «Интервью с HR» и др. давали 422).
       const appStage = STATUS_TO_STAGE_MAP[stage as EntityStatus];
+      // «Мы уволили» / «Сам уволился» (10.11.2026): этапа заявки у них нет —
+      // сервер сам закроет «Отказом» все живые заявки, как доска «Штат».
+      if (DEPARTED_STATUSES.has(stage)) {
+        const res = await cardActions.changeStatusOutOfFunnel(stage, getStackStageLabel(stage), comment);
+        if (res.ok) onStatusChange(res.entityStatus ?? stage);
+        await loadActivity();
+        return res.ok;
+      }
       if (appId > 0 && !appStage) {
         // Кандидат В ВОРОНКЕ, а у статуса нет пары среди этапов заявки
         // («Вне воронки»): применить некуда — честная ошибка и НИКАКОГО

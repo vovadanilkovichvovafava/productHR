@@ -313,6 +313,75 @@ async def apply_entity_status(
     return move
 
 
+DEPARTED = (EntityStatus.dismissed, EntityStatus.quit)
+
+
+async def close_applications_for_departure(
+    db: AsyncSession,
+    entity: Entity,
+    new_status: EntityStatus,
+    *,
+    changed_by: Optional[User],
+    comment: str,
+) -> list:
+    """«Мы уволили» / «Сам уволился» — человек ушёл целиком: «Отказом»
+    закрываются ВСЕ его живые заявки (Мария, 20.10.2026: «борд и АТС — единая
+    система»). Одно место и для доски «Штат», и для карточки «Все кандидаты».
+    Статус кандидата ставит вызывающий. Возвращает переводы (StageMove)."""
+    from ..models.database import Vacancy, VacancyStatus
+
+    open_apps = (await db.execute(
+        select(VacancyApplication)
+        .join(Vacancy, VacancyApplication.vacancy_id == Vacancy.id)
+        .where(
+            VacancyApplication.entity_id == entity.id,
+            Vacancy.status != VacancyStatus.closed,
+            Vacancy.deleted_at.is_(None),
+        )
+        # Единый порядок row-locks со всеми FOR UPDATE по заявкам (deadlock 27.08).
+        .order_by(VacancyApplication.id)
+        .with_for_update(of=VacancyApplication)
+    )).scalars().all()
+    closed = (ApplicationStage.rejected, ApplicationStage.withdrawn)
+    moves = []
+    for app in open_apps:
+        if app.stage in closed:
+            continue
+        move = await move_application(
+            db, app, ApplicationStage.rejected, changed_by=changed_by, comment=comment,
+        )
+        if move is not None:
+            moves.append(move)
+    return moves
+
+
+async def depart_entity(
+    db: AsyncSession,
+    entity: Entity,
+    new_status: EntityStatus,
+    *,
+    changed_by: User,
+    comment: Optional[str] = None,
+    stage_label: Optional[str] = None,
+) -> tuple[list, Optional[dict]]:
+    """Уволить из карточки «Все кандидаты» (10.11.2026, вкладки «Мы уволили» /
+    «Сам уволился»): заявки — «Отказ», в ленте — запись о переводе (её корзина
+    вернёт прежний статус), статус — точный. Общий статус НЕ пересчитывается
+    по заявкам: он и есть итог действия."""
+    from .hr_stages import STATUS_LABELS
+
+    label = stage_label or STATUS_LABELS.get(new_status.value, new_status.value)
+    text = (comment or "").strip()
+    moves = await close_applications_for_departure(
+        db, entity, new_status, changed_by=changed_by,
+        comment=f"{label} — {text}" if text else label,
+    )
+    note = await change_status_without_application(
+        db, entity, new_status, changed_by=changed_by, comment=comment, stage_label=label,
+    )
+    return moves, note
+
+
 def log_out_of_funnel(user: User, entity_id: int, note: Optional[dict]) -> None:
     """STAGE_CHANGE для перевода вне воронок. Звать после коммита."""
     if not note:

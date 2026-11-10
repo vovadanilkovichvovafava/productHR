@@ -35,13 +35,13 @@ def _cards(board):
 
 @pytest.mark.asyncio
 async def test_withdrawn_candidate_is_on_the_board(client, db_session, organization, admin_user, org_owner):
-    """«Отозван» — обычная колонка, а не дыра: статус есть у кандидата, значит он
-    должен быть виден в общем списке."""
+    """«Отозван» убран из списка этапов (Мария, 10.11.2026), но кандидат с таким
+    статусом не пропадает: он во «Вне воронки», а не в дыре."""
     await _mk(db_session, organization, "Отозванов Олег", EntityStatus.withdrawn, admin_user)
 
     r = await client.get("/api/candidates/kanban?per_column=500", headers=_h(admin_user))
     assert r.status_code == 200, r.text
-    assert _cards(r.json()).get("Отозванов Олег") == "withdrawn"
+    assert _cards(r.json()).get("Отозванов Олег") == "other"
 
 
 @pytest.mark.asyncio
@@ -49,16 +49,15 @@ async def test_status_outside_funnel_lands_in_other_column(client, db_session, o
     """Статусы вне воронки (легаси) собираются в «Вне воронки» — кандидат
     остаётся видимым, а не исчезает с доски.
 
-    Уволенные со «Штата» с 20.10.2026 сюда больше не попадают: для базы
-    кандидатов это «Отказ» (владелец: «меняю статус с практики на уволен — в
-    ATS он тоже перемещается в отказ»), см. test_board_ats_sync.py.
+    Уволенные сюда не попадают: с 10.11.2026 у них своя вкладка «Мы уволили»
+    (список Марии), см. test_board_ats_sync.py.
     """
     await _mk(db_session, organization, "Уволенов Урал", EntityStatus.dismissed, admin_user)
     await _mk(db_session, organization, "Легасин Лев", EntityStatus.active, admin_user)
 
     r = await client.get("/api/candidates/kanban?per_column=500", headers=_h(admin_user))
     cards = _cards(r.json())
-    assert cards.get("Уволенов Урал") == "rejected"
+    assert cards.get("Уволенов Урал") == "dismissed"
     assert cards.get("Легасин Лев") == "other"
 
     labels = {c["status"]: c["label"] for c in r.json()["columns"]}

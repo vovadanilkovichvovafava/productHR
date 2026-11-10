@@ -29,7 +29,7 @@ import { getUsers, createUser, deleteUser, adminResetPassword, adminUpdateUser, 
 import type { OrgMember, OrgRole, Organization } from '@/services/api';
 import type { User } from '@/types';
 import { getVacancies } from '@/services/api/vacancies';
-import { HR_STAGES } from '@/constants/hrStages';
+import { BOARD_STATUS_OPTIONS } from '@/constants/hrStages';
 import { useAuthStore } from '@/stores/authStore';
 import toast from 'react-hot-toast';
 import { getErrorDetail } from '@/utils';
@@ -1588,7 +1588,7 @@ function EditUserModal({
             <div>
               <label className="block text-sm text-dark-400 mb-1">Какие этапы видит</label>
               <div className="flex flex-wrap gap-1.5 rounded-xl glass-light p-2">
-                {HR_STAGES.map((s) => {
+                {BOARD_STATUS_OPTIONS.map((s) => {
                   const checked = scopeStatuses.includes(s.status);
                   return (
                     <label

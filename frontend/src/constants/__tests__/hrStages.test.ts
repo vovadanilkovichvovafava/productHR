@@ -19,10 +19,10 @@ import { CANDIDATE_VACANCY_STAGE_LABELS } from "@/components/entities/candidateD
 import { FUNNEL_STAGE_ORDER, HR_STAGES } from "../hrStages";
 
 describe("hrStages", () => {
-  it("подписи этапов заявки прежние", () => {
+  it("подписи этапов заявки — как у Марии (10.11.2026)", () => {
     expect(APPLICATION_STAGE_LABELS).toEqual({
-      applied: "Новый",
-      screening: "Выполняет ТЗ",
+      applied: "Новые",
+      screening: "Выполняют ТЗ",
       phone_screen: "Интервью с HR",
       interview: "Интервью с заказчиком",
       assessment: "Принятие решения",
@@ -37,14 +37,16 @@ describe("hrStages", () => {
     expect(CANDIDATE_VACANCY_STAGE_LABELS).toEqual(APPLICATION_STAGE_LABELS);
   });
 
-  it("подписи статусов кандидата прежние, включая легаси", () => {
-    expect(STATUS_LABELS.new).toBe("Новый");
+  it("подписи статусов кандидата, включая легаси и убранные (старая история)", () => {
+    expect(STATUS_LABELS.new).toBe("Новые");
+    expect(STATUS_LABELS.dismissed).toBe("Мы уволили");
+    expect(STATUS_LABELS.quit).toBe("Сам уволился");
     expect(STATUS_LABELS.practice).toBe("Интервью с HR");
     expect(STATUS_LABELS.tech_practice).toBe("Интервью с заказчиком");
     expect(STATUS_LABELS.is_interview).toBe("Принятие решения");
     expect(STATUS_LABELS.reserve).toBe("Резерв");
     expect(STATUS_LABELS.active).toBe("Активный");
-    expect(STATUS_LABELS.applied).toBe("Новый");
+    expect(STATUS_LABELS.applied).toBe("Новые");
     expect(STATUS_LABELS.phone_screen).toBe("Интервью с HR");
     expect(STATUS_LABELS.interview).toBe("Интервью с заказчиком");
     expect(STATUS_LABELS.assessment).toBe("Принятие решения");
@@ -77,10 +79,19 @@ describe("hrStages", () => {
     expect(APPLICATION_STAGE_COLORS.transferred).toContain("--hf-status-green");
   });
 
-  it("вкладки воронки: всё, кроме «Отозван», «Резерв» последним", () => {
+  it("вкладки воронки: без убранных «Принятие решения» и «Отозван», «Резерв» последним", () => {
     expect(FUNNEL_STAGE_ORDER).toEqual([
-      "applied", "screening", "phone_screen", "interview", "assessment",
+      "applied", "screening", "phone_screen", "interview",
       "offer", "hired", "probation", "transferred", "rejected", "reserve",
+    ]);
+  });
+
+  it("статусы базы — ровно список Марии, её порядок", async () => {
+    const { BOARD_STATUS_OPTIONS } = await import("../hrStages");
+    expect(BOARD_STATUS_OPTIONS.map((o) => o.label)).toEqual([
+      "Новые", "Выполняют ТЗ", "Интервью с HR", "Интервью с заказчиком",
+      "Выставлен оффер", "Оффер принят", "Практика", "Перешёл в отдел", "Отказ",
+      "Мы уволили", "Сам уволился", "Резерв",
     ]);
   });
 
@@ -96,7 +107,7 @@ describe("hrStages", () => {
         }
         if (!/\.(ts|tsx)$/.test(name) || name === "hrStages.ts") continue;
         const text = readFileSync(path, "utf-8");
-        if (/["']Выполняет ТЗ["']\s*[,}]/.test(text)) offenders.push(relative(root, path));
+        if (/["']Выполняют ТЗ["']\s*[,}]/.test(text)) offenders.push(relative(root, path));
       }
     };
     walk(root);
@@ -105,12 +116,14 @@ describe("hrStages", () => {
 });
 
 describe("boardColumnOf — вкладка «Все кандидаты» по статусу", () => {
-  it("этапы HR — своя вкладка; уволен/уволился — «Отказ» (как на сервере, board_column)", async () => {
+  it("этапы HR и уволенные — своя вкладка; убранные и легаси — «Вне воронки» (как board_column)", async () => {
     const { boardColumnOf, DEPARTED_LABELS } = await import("../hrStages");
     expect(boardColumnOf("probation")).toBe("probation");
-    expect(boardColumnOf("dismissed")).toBe("rejected");
-    expect(boardColumnOf("quit")).toBe("rejected");
+    expect(boardColumnOf("dismissed")).toBe("dismissed");
+    expect(boardColumnOf("quit")).toBe("quit");
+    expect(boardColumnOf("is_interview")).toBe("other");
+    expect(boardColumnOf("withdrawn")).toBe("other");
     expect(boardColumnOf("active")).toBe("other");
-    expect(DEPARTED_LABELS).toEqual({ dismissed: "Уволен", quit: "Уволился" });
+    expect(DEPARTED_LABELS).toEqual({ dismissed: "Мы уволили", quit: "Сам уволился" });
   });
 });

@@ -108,6 +108,8 @@ export const TERMINAL_STAGE_STATUSES = new Set([
   ...NEUTRAL_STAGE_STATUSES,
   "reserve",
   "withdrawn",
+  "dismissed",
+  "quit",
 ]);
 
 /**

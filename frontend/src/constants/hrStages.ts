@@ -31,22 +31,32 @@ export interface HrStage {
   status: EntityStatus;
   label: string;
   color: StageColor;
-  /** Есть вкладка в воронке («Отозван» — только на доске «Все кандидаты»). */
+  /** Есть вкладка в воронке. */
   inFunnel: boolean;
+  /**
+   * Убранный этап (10.11.2026): строка только для подписи в старой истории —
+   * ни вкладки, ни пункта в окне смены этапа, ни колонки воронки.
+   */
+  retired?: boolean;
 }
 
+// Список и названия — как у Марии (10.11.2026): Новые, Выполняют ТЗ, Интервью
+// с HR, Интервью с заказчиком, Выставлен оффер, Оффер принят, Практика,
+// Перешёл в отдел, Отказ, Мы уволили, Сам уволился, Резерв. «Принятие решения»
+// и «Отозван» убраны (на проде на них никого не было) — строки остались только
+// ради подписей в старой истории (retired).
 export const HR_STAGES: readonly HrStage[] = [
-  { stage: "applied", status: "new", label: "Новый", color: "blue", inFunnel: true },
-  { stage: "screening", status: "screening", label: "Выполняет ТЗ", color: "cyan", inFunnel: true },
+  { stage: "applied", status: "new", label: "Новые", color: "blue", inFunnel: true },
+  { stage: "screening", status: "screening", label: "Выполняют ТЗ", color: "cyan", inFunnel: true },
   { stage: "phone_screen", status: "practice", label: "Интервью с HR", color: "purple", inFunnel: true },
   { stage: "interview", status: "tech_practice", label: "Интервью с заказчиком", color: "indigo", inFunnel: true },
-  { stage: "assessment", status: "is_interview", label: "Принятие решения", color: "orange", inFunnel: true },
+  { stage: "assessment", status: "is_interview", label: "Принятие решения", color: "orange", inFunnel: false, retired: true },
   { stage: "offer", status: "offer", label: "Выставлен оффер", color: "yellow", inFunnel: true },
   { stage: "hired", status: "hired", label: "Оффер принят", color: "green", inFunnel: true },
   { stage: "probation", status: "probation", label: "Практика", color: "teal", inFunnel: true },
   { stage: "transferred", status: "transferred", label: "Перешёл в отдел", color: "green", inFunnel: true },
   { stage: "rejected", status: "rejected", label: "Отказ", color: "red", inFunnel: true },
-  { stage: "withdrawn", status: "withdrawn", label: "Отозван", color: "gray", inFunnel: false },
+  { stage: "withdrawn", status: "withdrawn", label: "Отозван", color: "gray", inFunnel: false, retired: true },
   { stage: "reserve", status: "reserve", label: "Резерв", color: "gray", inFunnel: true },
 ];
 
@@ -54,20 +64,37 @@ export const HR_STAGES: readonly HrStage[] = [
 export const BOARD_OTHER_LABEL = "Вне воронки";
 
 /**
- * Уволен / уволился — итог после отдела. Своей вкладки на «Все кандидаты» нет:
- * для HR это отказ (Мария, 20.10.2026: «борд и АТС — единая система»), и
- * стоят они во вкладке «Отказ». В паре с services/hr_stages.py (board_column).
+ * «Мы уволили» / «Сам уволился» — итог после отдела. С 10.11.2026 у них свои
+ * вкладки на «Все кандидаты» (список Марии), после «Отказа». Этапа заявки у
+ * них нет: в воронках уволенный — «Отказ». В паре с services/hr_stages.py.
  */
 export const DEPARTED_LABELS: Record<string, string> = {
-  dismissed: "Уволен",
-  quit: "Уволился",
+  dismissed: "Мы уволили",
+  quit: "Сам уволился",
 };
-const COLUMN_OF_STATUS: Record<string, string> = { dismissed: "rejected", quit: "rejected" };
+export const DEPARTED_STATUSES = new Set(Object.keys(DEPARTED_LABELS));
+
+/**
+ * Статусы базы в порядке вкладок «Все кандидаты» — ровно список Марии: этапы
+ * без убранных, после «Отказа» — «Мы уволили» и «Сам уволился». Для выбора
+ * этапов вне доски (галочки «Какие этапы видит» у наблюдателя).
+ */
+export const BOARD_STATUS_OPTIONS: ReadonlyArray<{ status: string; label: string }> = HR_STAGES
+  .filter((s) => !s.retired)
+  .flatMap((s) =>
+    s.status === "rejected"
+      ? [
+          { status: s.status, label: s.label },
+          ...Object.entries(DEPARTED_LABELS).map(([status, label]) => ({ status, label })),
+        ]
+      : [{ status: s.status, label: s.label }],
+  );
 
 /** Вкладка «Все кандидаты», в которой стоит кандидат с этим статусом. */
 export function boardColumnOf(status: string): string {
-  if (HR_STAGES.some((s) => s.status === status)) return status;
-  return COLUMN_OF_STATUS[status] ?? "other";
+  if (DEPARTED_STATUSES.has(status)) return status;
+  if (HR_STAGES.some((s) => s.status === status && !s.retired)) return status;
+  return "other";
 }
 
 /** Этапы заявки в порядке вкладок воронки. */

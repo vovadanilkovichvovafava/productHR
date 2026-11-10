@@ -7,7 +7,7 @@ import type { KanbanColumn } from "@/services/api/candidates";
 // число людей.
 const col = (status: string, count = 0): KanbanColumn =>
   ({ status, label: status, cards: [], count }) as KanbanColumn;
-const board = ["new", "screening", "offer", "probation", "transferred", "rejected", "other"].map((s) => col(s));
+const board = ["new", "screening", "offer", "probation", "transferred", "rejected", "dismissed", "quit", "other"].map((s) => col(s));
 
 describe("limitBoardColumnsToStatuses", () => {
   it("без ограничения — все вкладки", () => {
@@ -26,7 +26,7 @@ describe("limitBoardColumnsToStatuses", () => {
     ]);
   });
 
-  it("«Уволен» живёт во вкладке «Отказ»", () => {
-    expect(limitBoardColumnsToStatuses(board, ["dismissed"]).map((c) => c.status)).toEqual(["rejected"]);
+  it("«Мы уволили» — своя вкладка (10.11.2026)", () => {
+    expect(limitBoardColumnsToStatuses(board, ["dismissed"]).map((c) => c.status)).toEqual(["dismissed"]);
   });
 });

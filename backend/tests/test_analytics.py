@@ -95,8 +95,8 @@ class TestFunnelStages:
         # свой словарь: «Скрининг» переименован в «Выполняет ТЗ», «Принят» —
         # в «Оффер принят».
         from api.services.hr_stages import STAGE_LABELS as HR_STAGE_LABELS
-        assert STAGE_LABELS.get("applied") == "Новый"
-        assert STAGE_LABELS.get("screening") == "Выполняет ТЗ"
+        assert STAGE_LABELS.get("applied") == "Новые"
+        assert STAGE_LABELS.get("screening") == "Выполняют ТЗ"
         assert STAGE_LABELS.get("hired") == "Оффер принят"
         assert STAGE_LABELS.get("rejected") == "Отказ"
         for stage, label in STAGE_LABELS.items():

@@ -14,43 +14,52 @@ from __future__ import annotations
 
 from ..models.database import STATUS_SYNC_MAP, ApplicationStage, EntityStatus
 
-# (статус кандидата, подпись, цвет, есть ли колонка в воронке)
+# (статус кандидата, подпись, цвет, есть ли колонка в воронке, показывать ли)
+#
+# Список и названия — как у Марии (10.11.2026, «актуальные статусы в базе
+# кандидатов… уберите лишние»): Новые, Выполняют ТЗ, Интервью с HR, Интервью с
+# заказчиком, Выставлен оффер, Оффер принят, Практика, Перешёл в отдел, Отказ,
+# Мы уволили, Сам уволился, Резерв. «Принятие решения» и «Отозван» убраны
+# (на проде на них не было ни кандидатов, ни заявок, ни архивных): строки
+# остались только ради подписей в старой истории — вкладок, пунктов выбора и
+# колонок воронки у них нет (shown=False).
 _STAGES = [
-    (EntityStatus.new,           "Новый",                 "#3b82f6", True),
-    (EntityStatus.screening,     "Выполняет ТЗ",          "#06b6d4", True),
-    (EntityStatus.practice,      "Интервью с HR",         "#a855f7", True),
-    (EntityStatus.tech_practice, "Интервью с заказчиком", "#6366f1", True),
-    (EntityStatus.is_interview,  "Принятие решения",      "#f97316", True),
-    (EntityStatus.offer,         "Выставлен оффер",       "#eab308", True),
-    (EntityStatus.hired,         "Оффер принят",          "#22c55e", True),
-    (EntityStatus.probation,     "Практика",              "#14b8a6", True),
-    (EntityStatus.transferred,   "Перешёл в отдел",       "#16a34a", True),
-    (EntityStatus.rejected,      "Отказ",                 "#ef4444", True),
-    # «Отозван» — на доске «Все кандидаты» есть, вкладки в воронке нет.
-    (EntityStatus.withdrawn,     "Отозван",               "#6b7280", False),
-    (EntityStatus.reserve,       "Резерв",                "#6b7280", True),
+    (EntityStatus.new,           "Новые",                 "#3b82f6", True,  True),
+    (EntityStatus.screening,     "Выполняют ТЗ",          "#06b6d4", True,  True),
+    (EntityStatus.practice,      "Интервью с HR",         "#a855f7", True,  True),
+    (EntityStatus.tech_practice, "Интервью с заказчиком", "#6366f1", True,  True),
+    (EntityStatus.is_interview,  "Принятие решения",      "#f97316", False, False),
+    (EntityStatus.offer,         "Выставлен оффер",       "#eab308", True,  True),
+    (EntityStatus.hired,         "Оффер принят",          "#22c55e", True,  True),
+    (EntityStatus.probation,     "Практика",              "#14b8a6", True,  True),
+    (EntityStatus.transferred,   "Перешёл в отдел",       "#16a34a", True,  True),
+    (EntityStatus.rejected,      "Отказ",                 "#ef4444", True,  True),
+    (EntityStatus.withdrawn,     "Отозван",               "#6b7280", False, False),
+    (EntityStatus.reserve,       "Резерв",                "#6b7280", True,  True),
 ]
 
-# Колонка-приёмник «Все кандидаты» для статусов вне воронки (dismissed, quit,
-# легаси) — чтобы такие кандидаты не выпадали с доски (18.09.2026).
+# Колонка-приёмник «Все кандидаты» для статусов вне списка (легаси, убранные
+# этапы) — чтобы такие кандидаты не выпадали с доски (18.09.2026). Пустая —
+# не показывается.
 OTHER_STATUS = "other"
 OTHER_LABEL = "Вне воронки"
 
-# Статусы кандидата в порядке колонок доски «Все кандидаты».
-BOARD_STATUSES: list[str] = [s.value for s, *_ in _STAGES]
-
-# Уволен / уволился — итог работы с человеком после отдела. Своей колонки на
-# «Все кандидаты» у них нет: для HR это отказ, и стоят они во вкладке «Отказ»
-# (Мария, 20.10.2026: «борд и АТС — единая система: уволен на борде → отказ в
-# АТС»). Точный статус виден на доске «Штат» и в чипе.
+# «Мы уволили» / «Сам уволился» — итог работы с человеком после отдела. С
+# 10.11.2026 у них СВОИ вкладки на «Все кандидаты» (список Марии; до этого
+# стояли во вкладке «Отказ»). Этапа заявки у них нет: в воронках уволенный —
+# «Отказ» (все живые заявки закрываются, stage_change.depart_entity).
 DEPARTED_LABELS: dict[str, str] = {
-    EntityStatus.dismissed.value: "Уволен",
-    EntityStatus.quit.value: "Уволился",
+    EntityStatus.dismissed.value: "Мы уволили",
+    EntityStatus.quit.value: "Сам уволился",
 }
-_COLUMN_OF_STATUS: dict[str, str] = {
-    EntityStatus.dismissed.value: EntityStatus.rejected.value,
-    EntityStatus.quit.value: EntityStatus.rejected.value,
-}
+
+# Статусы кандидата в порядке вкладок «Все кандидаты».
+BOARD_STATUSES: list[str] = []
+for _status, _label, _color, _in_funnel, _shown in _STAGES:
+    if _shown:
+        BOARD_STATUSES.append(_status.value)
+    if _status == EntityStatus.rejected:
+        BOARD_STATUSES.extend(DEPARTED_LABELS)
 
 # Подпись по статусу кандидата (EntityStatus.value), включая «Вне воронки».
 STATUS_LABELS: dict[str, str] = {
@@ -62,9 +71,7 @@ STATUS_LABELS: dict[str, str] = {
 
 def board_column(status: str) -> str:
     """Вкладка «Все кандидаты», в которой стоит кандидат с этим статусом."""
-    if status in BOARD_STATUSES:
-        return status
-    return _COLUMN_OF_STATUS.get(status, OTHER_STATUS)
+    return status if status in BOARD_STATUSES else OTHER_STATUS
 
 
 def statuses_in_column(column: str) -> list[str] | None:
@@ -93,7 +100,7 @@ STAGE_LABELS_BY_ENUM: dict[ApplicationStage, str] = {
 # Этапы организации по умолчанию (GET /auth/org-stages): только колонки воронки.
 DEFAULT_ORG_STAGES: list[dict] = [
     {"key": s.value, "label": label, "color": color}
-    for s, label, color, in_funnel in _STAGES
+    for s, label, color, in_funnel, _shown in _STAGES
     if in_funnel
 ]
 

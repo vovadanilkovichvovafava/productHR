@@ -610,7 +610,9 @@ async def change_candidate_status(
     кандидат вне воронок — для него перевод записывается в ленту.
     """
     from api.services.stage_change import (
+        DEPARTED,
         change_status_without_application,
+        depart_entity,
         log_moves,
         log_out_of_funnel,
         move_application,
@@ -659,7 +661,18 @@ async def change_candidate_status(
 
     move = None
     note = None
-    if open_apps:
+    departure_moves: list = []
+    if new_status in DEPARTED:
+        # «Мы уволили» / «Сам уволился» (10.11.2026): как с доски «Штат» — все
+        # живые заявки «Отказом», статус точный, запись в ленте.
+        try:
+            departure_moves, note = await depart_entity(
+                db, entity, new_status, changed_by=current_user,
+                comment=body.comment, stage_label=body.stage_label,
+            )
+        except ValueError:
+            raise HTTPException(400, "Comment too long")
+    elif open_apps:
         target_stage = STATUS_SYNC_MAP.get(new_status)
         if target_stage is None:
             raise HTTPException(409, "Этот этап нельзя поставить заявке — кандидат остался на прежнем")
@@ -686,7 +699,7 @@ async def change_candidate_status(
 
     await db.commit()
     await db.refresh(entity)
-    log_moves([move], current_user, via="candidate_status")
+    log_moves([move, *departure_moves], current_user, via="candidate_status")
     log_out_of_funnel(current_user, entity_id, note)
 
     return {
@@ -1217,31 +1230,23 @@ async def get_candidates_kanban(
         except Exception as exc:
             logger.warning(f"Skipping entity {e.id} in kanban: {exc}")
 
-    # Org-level кастомизация лейблов/цветов этапов (если админ настроил
-    # через UI в /all-candidates → ⚙️). Если не настроена — дефолты.
-    stage_overrides: dict[str, dict] = {}
-    if org_id:
-        from ..models.database import Organization
-        org_res = await db.execute(select(Organization).where(Organization.id == org_id))
-        org_row = org_res.scalar_one_or_none()
-        cfg = (org_row.settings or {}).get("stage_config") if org_row else None
-        if isinstance(cfg, list):
-            for s in cfg:
-                if isinstance(s, dict) and s.get("key"):
-                    stage_overrides[s["key"]] = s
-
+    # Подписи — только справочник (hr_stages), цвета рисует фронт. Старый
+    # settings["stage_config"] не читаем (10.11.2026, см. auth._read_org_stages).
     columns = []
     total = 0
     for s in BOARD_COLUMNS:
         all_cards = grouped.get(s, [])
         # count — ПОЛНОЕ число в колонке (по всему набору), cards — обрезанные.
         col_count = counts.get(s, len(all_cards))
+        # «Вне воронки» — приёмник для статусов вне списка (легаси, убранные
+        # этапы). Пустой вкладке не место среди этапов Марии.
+        if s == OTHER_STATUS and not col_count:
+            continue
         total += col_count
-        override = stage_overrides.get(s) or {}
         columns.append(KanbanColumn(
             status=s,
-            label=override.get("label") or KANBAN_STATUS_LABELS.get(s, s),
-            color=override.get("color"),
+            label=KANBAN_STATUS_LABELS.get(s, s),
+            color=None,
             cards=all_cards[:per_column],
             count=col_count,
         ))

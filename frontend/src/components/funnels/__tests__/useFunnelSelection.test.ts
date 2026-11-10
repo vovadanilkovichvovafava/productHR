@@ -152,7 +152,8 @@ describe("useFunnelSelection", () => {
 describe("buildFunnelStagesConfig", () => {
   it("по умолчанию — вкладки воронки по общему справочнику", () => {
     expect(stages.keys[0]).toBe("applied");
-    expect(stages.labels.screening).toBe("Выполняет ТЗ");
+    expect(stages.labels.screening).toBe("Выполняют ТЗ");
+    expect(stages.keys).not.toContain("assessment"); // «Принятие решения» убран (10.11.2026)
     expect(stages.keys).toContain("reserve");
   });
 

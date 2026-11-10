@@ -484,8 +484,8 @@ export const ENTITY_TYPES: Record<EntityType, EntityTypeInfo> = {
   }
 };
 
-/** Служебная колонка доски «Все кандидаты»: статусы вне воронки (уволен,
- *  уволился, легаси). Не статус сущности — поэтому вне EntityStatus. */
+/** Служебная колонка доски «Все кандидаты»: статусы вне списка (убранные
+ *  этапы, легаси). Не статус сущности — поэтому вне EntityStatus. */
 export const BOARD_OTHER_STATUS = 'other';
 
 export const STATUS_LABELS = {
