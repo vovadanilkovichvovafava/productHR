@@ -9459,59 +9459,51 @@ body.performance-mode .glass-card:hover {
   min-height: 0;
   gap: var(--hf-space-xl);
 }
-.hf-statuses-sidebar {
-  flex: 0 0 220px;
-  min-height: 0;
-  overflow-y: auto;
+/* Вкладки над доской: «Все» и песочницы (с 10.11.2026 вместо колонки
+   отделов слева). */
+.hf-statuses-tabs {
   display: flex;
-  flex-direction: column;
-  gap: var(--hf-space-xxs);
+  align-items: center;
+  gap: var(--hf-space-xs);
+  min-width: 0;
+  overflow-x: auto;
 }
-
-/* ── Папки ───────────────────────────────── */
-.hf-statuses-folder {
+.hf-statuses-tab {
   position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  border: var(--hf-border-xs) solid var(--hf-ui-border);
+  border-radius: var(--hf-radius-s);
+  background: var(--hf-white);
+}
+.hf-statuses-tab:hover { background: var(--hf-main-100); }
+.hf-statuses-tab-active,
+.hf-statuses-tab-active:hover {
+  border-color: var(--hf-green-300, #86efac);
+  background: var(--hf-green-50, #f0fdf4);
+}
+.hf-statuses-tab-btn {
   display: flex;
   align-items: center;
   gap: var(--hf-space-s);
-  width: 100%;
-  padding: var(--hf-space-s) var(--hf-space-m);
-  border: var(--hf-border-xs) solid transparent;
-  border-radius: var(--hf-radius-s);
-  background: var(--hf-white);
-  color: var(--hf-main-750);
+  padding: var(--hf-space-xs) var(--hf-space-m);
+  color: var(--hf-main-800);
   font-size: var(--hf-fs-2xs);
-  text-align: left;
-  transition: background var(--hf-transition-fast), color var(--hf-transition-fast);
-}
-.hf-statuses-folder:hover { background: var(--hf-main-100); }
-.hf-statuses-folder-active {
-  background: var(--hf-green-50);
-  border-color: var(--hf-green-200);
-  color: var(--hf-green-800);
-  font-weight: var(--hf-fw-medium);
-}
-.hf-statuses-folder-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hf-statuses-folder-count {
-  font-size: var(--hf-fs-4xs);
+.hf-statuses-tab-active .hf-statuses-tab-btn { color: var(--hf-green-800); font-weight: var(--hf-fw-semibold); }
+.hf-statuses-tab-count { color: var(--hf-main-500); font-size: var(--hf-fs-4xs); }
+.hf-statuses-tab-edit {
+  display: none;
+  margin-right: var(--hf-space-xxs);
+  padding: 3px;
+  border-radius: var(--hf-radius-xs, 4px);
   color: var(--hf-main-500);
 }
-.hf-statuses-folder-row { position: relative; }
-.hf-statuses-folder-actions {
-  position: absolute;
-  right: var(--hf-space-s);
-  top: 50%;
-  transform: translateY(-50%);
-  display: none;
-  gap: var(--hf-space-xxs);
-}
-.hf-statuses-folder-row:hover .hf-statuses-folder-actions { display: flex; }
+.hf-statuses-tab:hover .hf-statuses-tab-edit { display: inline-flex; }
+.hf-statuses-tab-edit:hover { color: var(--hf-main-900); background: var(--hf-main-200); }
+/* Крестик «Закрыть» в окнах доски (отдел, «Вид», выгрузка). */
 .hf-statuses-folder-action {
   padding: var(--hf-space-xxs);
   border-radius: var(--hf-radius-xs);
@@ -9519,34 +9511,6 @@ body.performance-mode .glass-card:hover {
   background: var(--hf-white);
 }
 .hf-statuses-folder-action:hover { color: var(--hf-main-900); background: var(--hf-main-200); }
-.hf-statuses-folder-action-danger:hover { color: var(--hf-red-600); }
-.hf-statuses-folder-edit {
-  display: flex;
-  align-items: center;
-  gap: var(--hf-space-xxs);
-}
-.hf-statuses-folder-add {
-  display: flex;
-  align-items: center;
-  gap: var(--hf-space-s);
-  width: 100%;
-  margin-top: var(--hf-space-xxs);
-  padding: var(--hf-space-s) var(--hf-space-m);
-  border: var(--hf-border-xs) dashed var(--hf-ui-border);
-  border-radius: var(--hf-radius-s);
-  color: var(--hf-main-600);
-  font-size: var(--hf-fs-2xs);
-}
-.hf-statuses-folder-add:hover { color: var(--hf-main-900); background: var(--hf-white); }
-
-/* Команда внутри песочницы — со сдвигом и полоской слева: иерархия отделов
-   должна читаться глазами (решение владельца 30.09.2026). */
-.hf-statuses-folder-child {
-  margin-left: var(--hf-space-m);
-  border-left: var(--hf-border-xs) solid var(--hf-ui-border);
-  padding-left: var(--hf-space-xxs);
-}
-
 /* Окно отдела: название, роль, кому виден. */
 .hf-statuses-modal-back {
   position: fixed;
@@ -9682,19 +9646,6 @@ body.performance-mode .glass-card:hover {
   background: var(--hf-main-900);
 }
 .hf-statuses-modal-save:disabled { opacity: 0.6; }
-.hf-statuses-folder-input {
-  flex: 1;
-  min-width: 0;
-  padding: var(--hf-space-s) var(--hf-space-m);
-  border: var(--hf-border-xs) solid var(--hf-ui-border);
-  border-radius: var(--hf-radius-s);
-  background: var(--hf-white);
-  color: var(--hf-main-900);
-  font-size: var(--hf-fs-2xs);
-  outline: none;
-}
-.hf-statuses-folder-input:focus { border-color: var(--hf-cyan-500); }
-
 /* ── Таблица ─────────────────────────────── */
 /* Прокрутка живёт ВНУТРИ таблицы, а не у страницы: иначе шапка с названиями
    колонок не может прилипнуть — sticky считается от ближайшего прокручиваемого
@@ -10090,15 +10041,6 @@ body.performance-mode .glass-card:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-
-/* Перетаскивание отделов: порядок у каждого HR свой */
-.hf-statuses-folder-row { cursor: grab; }
-.hf-statuses-folder-dragging { opacity: 0.5; }
-.hf-statuses-folder-over .hf-statuses-folder {
-  border-color: var(--hf-cyan-500);
-  box-shadow: 0 -2px 0 var(--hf-cyan-500) inset;
-}
-
 /* Панель фильтров: колонка раскрывается, внутри — галочки со значениями.
    Операторы «равно/не равно/содержит» убраны: Мария в них путалась
    (встреча 24.09.2026). */
@@ -10531,19 +10473,6 @@ body.performance-mode .glass-card:hover {
   color: var(--hf-main-900);
   font-size: var(--hf-fs-4xs);
 }
-
-/* «Все» всегда на виду: отделов может стать много, а к полному списку
-   возвращаются чаще всего (владелец, 24.09.2026). */
-.hf-statuses-folder-all {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}
-
-/* Скрытый отдел: виден только когда раскрыли «Показать скрытые» */
-.hf-statuses-folder-hidden .hf-statuses-folder-name,
-.hf-statuses-folder-hidden .hf-statuses-folder-count { opacity: 0.55; }
-
 /* Быстрый фильтр «HR: …» рядом с поиском */
 .hf-statuses-hr-filter {
   height: 36px;
@@ -10796,15 +10725,6 @@ body.performance-mode .glass-card:hover {
   border-color: var(--hf-main-200);
   cursor: default;
 }
-
-/* Разовая кнопка: завести направления по отделам из ClickUp */
-.hf-statuses-folder-import {
-  border-style: solid;
-  border-color: var(--hf-cyan-500);
-  color: var(--hf-cyan-700);
-}
-.hf-statuses-folder-import:disabled { opacity: .6; cursor: default; }
-
 /* ── «Статусы»: ширины и закреплённое имя ─────────────────────────────
    Ширины задаёт <colgroup> из COLUMNS; fixed-раскладка их соблюдает, а не
    растягивает колонку под самую длинную должность. Таблица шире экрана —

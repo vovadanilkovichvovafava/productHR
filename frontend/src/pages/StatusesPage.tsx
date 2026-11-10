@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
-  Search, Loader2, Plus, Pencil, Eye, EyeOff, Check, Copy, Download, X,
+  Search, Loader2, Plus, Pencil, Check, Copy, Download, X,
   ChevronRight, ChevronDown, Paperclip, Upload, SlidersHorizontal, ListChecks,
 } from "lucide-react";
 import clsx from "clsx";
@@ -11,8 +11,7 @@ import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   getBoardRows, updateBoardRow, addBoardPlacement, removeBoardPlacement,
-  getBoardDepartments, createBoardDepartment, updateBoardDepartment, setBoardDepartmentHidden,
-  saveBoardDepartmentOrder,
+  getBoardDepartments, createBoardDepartment, updateBoardDepartment,
   type BoardDepartment, type BoardRow, type BoardRowUpdate, type BoardTeamStint,
 } from "@/services/api/staffBoard";
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
@@ -410,6 +409,12 @@ export default function StatusesPage() {
   // Раньше тут были «направления» — отдельный список папок, но это те же
   // отделы (решение владельца 21.09.2026), так что панель строится по отделам.
   const [dept, setDept] = useUrlTab<string>("dept", "all");
+  // Вкладки — только «Все» и песочницы. Старая ссылка на команду или на
+  // «Без отдела» (?dept=…) открывает «Все», а не пустую доску без вкладки.
+  useEffect(() => {
+    if (!departments.length || dept === "all") return;
+    if (!sandboxTabs(departments).some((d) => String(d.id) === dept)) setDept("all", { push: false });
+  }, [departments, dept, setDept]);
   const [q, setQ] = useState("");
   // Быстрый фильтр по HR — запоминаем: Лиза открывает доску и сразу видит своих
   const [hrFilter, setHrFilter] = useState<string>(() => {
@@ -908,6 +913,15 @@ export default function StatusesPage() {
               /statuses: по нему уже ходят закладки и ссылки. */}
           <h1 className="hf-statuses-title">Штат</h1>
         </div>
+        <DeptTabs
+          departments={departments}
+          orgHr={orgHr}
+          counts={counts}
+          active={dept}
+          onSelect={setDept}
+          onSaved={(d) => setDepartments((cur) => cur.map((x) => (x.id === d.id ? d : x)))}
+          onRows={load}
+        />
         <div className="hf-statuses-tools">
           <div className="hf-statuses-search">
             <Search className="hf-statuses-search-icon" size={15} />
@@ -1201,19 +1215,6 @@ export default function StatusesPage() {
             />
           )}
 
-          <DepartmentSidebar
-            departments={departments}
-            orgHr={orgHr}
-            counts={counts}
-            active={dept}
-            onSelect={setDept}
-            onCreated={(d) => setDepartments((cur) => [...cur, d])}
-            onRenamed={(d) => setDepartments((cur) => cur.map((x) => (x.id === d.id ? d : x)))}
-            onHidden={(d) => setDepartments((cur) => cur.map((x) => (x.id === d.id ? d : x)))}
-            onReorder={setDepartments}
-            onRows={load}
-          />
-
           <div className="hf-statuses-table-wrap">
             <table className="hf-statuses-table">
               <colgroup>
@@ -1460,178 +1461,75 @@ function FilterSection({
   );
 }
 
-/** Отделы слева — вместо прежних «направлений» (это были те же отделы).
- *  Сначала отделы, где кто-то есть, потом пустые: пустых в оргструктуре
- *  много, и за ними терялись нужные. «+ Отдел» заводит отдел прямо здесь; это
- *  СВОЙ справочник доски, оргструктуру Enceladus он не трогает. */
-function DepartmentSidebar({
-  departments, orgHr, counts, active, onSelect, onCreated, onRenamed, onHidden, onReorder,
-  onRows,
+/** Вкладки над доской: «Все» и песочницы (владелец, 10.11.2026 — «убираем
+ *  [колонку отделов] и оставляем сверху кнопки: все и 3 сендбокса»). Команды
+ *  вкладками больше не показываются: отделы теперь из фиксированного списка, и
+ *  смотреть людей отдела удобнее фильтром «Отдел». До 10.11.2026 слева была
+ *  колонка всех отделов с «Без отдела», перетаскиванием, скрытием и «+ Отдел».
+ *  Карандаш у песочницы открывает её настройки: кому видна, по умолчанию ли
+ *  в неё попадают с практики. */
+function DeptTabs({
+  departments, orgHr, counts, active, onSelect, onSaved, onRows,
 }: {
   departments: BoardDepartment[];
   orgHr: { user_id: number; user_name: string | null }[];
   counts: Record<string, number>;
   active: string;
   onSelect: (id: string) => void;
-  onCreated: (d: BoardDepartment) => void;
-  onRenamed: (d: BoardDepartment) => void;
-  onHidden: (d: BoardDepartment) => void;
-  onReorder: (list: BoardDepartment[]) => void;
+  onSaved: (d: BoardDepartment) => void;
   /** Перечитать строки доски: включение песочницы «по умолчанию» ставит в неё
    *  тех, кто уже на практике, — таблица должна это показать сразу. */
   onRows: () => void;
 }) {
-  // Перетаскивание отделов: порядок личный и сохраняется в базе.
-  const [dragId, setDragId] = useState<number | null>(null);
-  const [overId, setOverId] = useState<number | null>(null);
-  // Скрытые не выбрасываем из списка совсем: их можно раскрыть и вернуть.
-  const [showHidden, setShowHidden] = useState(false);
-  // Отдел заводят и правят в окне: у него есть не только название, но и роль
-  // (песочница или команда внутри неё) и видимость (решение владельца
-  // 30.09.2026). В строке сайдбара это уже не поместилось бы.
-  const [modal, setModal] = useState<{ dept: BoardDepartment | null } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<BoardDepartment | null>(null);
+  const sandboxes = sandboxTabs(departments);
 
-  const label = (d: BoardDepartment) => d.name;
-  const hiddenCount = departments.filter((d) => d.hidden).length;
-  // Порядок задаёт сам пользователь перетаскиванием — сервер отдаёт список уже
-  // в его порядке, поэтому здесь только отодвигаем скрытые в конец.
-  const sorted = departments
-    .filter((d) => showHidden || !d.hidden || String(d.id) === active)
-    .slice()
-    .sort((a, b) => (a.hidden === b.hidden ? 0 : a.hidden ? 1 : -1));
-
-  // Список отделов плоский: вложенность под песочницу убрана (владелец,
-  // 09.10.2026 — «убрать визуальную привязку к родительскому отделу»). Связь
-  // parent_id осталась в данных и в окне отдела, просто её больше не рисуем.
-  const tree = sorted.map((d) => ({ d, child: false }));
-
-  const drop = async (target: BoardDepartment) => {
-    setOverId(null);
-    const from = departments.findIndex((d) => d.id === dragId);
-    const to = departments.findIndex((d) => d.id === target.id);
-    setDragId(null);
-    if (from < 0 || to < 0 || from === to) return;
-    const next = [...departments];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    onReorder(next);  // сразу показываем новый порядок, не дожидаясь сервера
-    try {
-      onReorder(await saveBoardDepartmentOrder(next.map((d) => d.id)));
-    } catch (e: any) {
-      toast.error(e?.response?.data?.detail || "Не удалось сохранить порядок отделов");
-      onReorder(departments);
-    }
-  };
-
-  const toggleHidden = async (d: BoardDepartment) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const next = await setBoardDepartmentHidden(d.id, !d.hidden);
-      onHidden(next);
-      if (next.hidden && active === String(d.id)) onSelect("all");
-      toast.success(next.hidden ? `Отдел «${d.name}» скрыт` : `Отдел «${d.name}» снова виден`);
-    } catch (e: any) {
-      toast.error(e?.response?.data?.detail || "Не удалось изменить отдел");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const item = (id: string, text: string) => (
-    <button
-      key={id}
-      onClick={() => onSelect(id)}
-      className={clsx(
-        "hf-statuses-folder",
-        id === "all" && "hf-statuses-folder-all",
-        active === id && "hf-statuses-folder-active"
+  const tab = (id: string, text: string, d?: BoardDepartment) => (
+    <div key={id} className={clsx("hf-statuses-tab", active === id && "hf-statuses-tab-active")}>
+      <button className="hf-statuses-tab-btn" onClick={() => onSelect(id)} title={text}>
+        <span>{text}</span>
+        <span className="hf-statuses-tab-count">{counts[id] ?? 0}</span>
+      </button>
+      {d && (
+        <button
+          className="hf-statuses-tab-edit"
+          title="Настройки песочницы: кому видна, по умолчанию"
+          onClick={() => setEditing(d)}
+        >
+          <Pencil size={11} />
+        </button>
       )}
-      title={text}
-    >
-      <span className="hf-statuses-folder-name">{text}</span>
-      <span className="hf-statuses-folder-count">{counts[id] ?? 0}</span>
-    </button>
+    </div>
   );
 
   return (
-    <div className="hf-statuses-sidebar">
-      {item("all", "Все")}
-
-      {tree.map(({ d, child }) => (
-          <div
-            key={d.id}
-            className={clsx(
-              "hf-statuses-folder-row",
-              child && "hf-statuses-folder-child",
-              d.hidden && "hf-statuses-folder-hidden",
-              dragId === d.id && "hf-statuses-folder-dragging",
-              overId === d.id && dragId !== d.id && "hf-statuses-folder-over"
-            )}
-            draggable
-            onDragStart={() => setDragId(d.id)}
-            onDragEnd={() => { setDragId(null); setOverId(null); }}
-            onDragOver={(e) => { e.preventDefault(); setOverId(d.id); }}
-            onDrop={(e) => { e.preventDefault(); drop(d); }}
-            title="Потяните, чтобы переставить отдел"
-          >
-            {item(String(d.id), label(d))}
-            <div className="hf-statuses-folder-actions">
-              <button
-                className="hf-statuses-folder-action"
-                title="Название, роль, кому виден"
-                onClick={(e) => { e.stopPropagation(); setModal({ dept: d }); }}
-              >
-                <Pencil size={12} />
-              </button>
-              <button
-                className="hf-statuses-folder-action"
-                title={d.hidden ? "Показывать отдел" : "Скрыть отдел (останется у людей)"}
-                onClick={(e) => { e.stopPropagation(); toggleHidden(d); }}
-              >
-                {d.hidden ? <Eye size={12} /> : <EyeOff size={12} />}
-              </button>
-            </div>
-          </div>
-      ))}
-
-      {item(UNASSIGNED, "Без отдела")}
-
-      {hiddenCount > 0 && (
-        <button className="hf-statuses-folder-add" onClick={() => setShowHidden((v) => !v)}>
-          {showHidden ? <EyeOff size={14} /> : <Eye size={14} />}
-          {showHidden ? "Спрятать скрытые" : `Показать скрытые · ${hiddenCount}`}
-        </button>
-      )}
-
-      <button className="hf-statuses-folder-add" onClick={() => setModal({ dept: null })}>
-        <Plus size={14} /> Отдел
-      </button>
-
-      {modal && (
+    <div className="hf-statuses-tabs">
+      {tab("all", "Все")}
+      {sandboxes.map((d) => tab(String(d.id), d.name, d))}
+      {editing && (
         <DepartmentModal
-          dept={modal.dept}
+          dept={editing}
           departments={departments}
           orgHr={orgHr}
-          onClose={() => setModal(null)}
-          onSaved={(d, created) => {
-            if (created) {
-              onCreated(d);
-              onSelect(String(d.id));
-            } else {
-              onRenamed(d);
-            }
+          onClose={() => setEditing(null)}
+          onSaved={(d) => {
+            onSaved(d);
             if (d.placed_now) {
               toast.success(`Практиканты без отдела переехали в «${d.name}»: ${d.placed_now}`);
               onRows();
             }
-            setModal(null);
+            setEditing(null);
           }}
         />
       )}
     </div>
   );
+}
+
+/** Песочницы для вкладок — в порядке, в котором их отдаёт сервер; скрытые
+ *  не показываем. */
+export function sandboxTabs(departments: BoardDepartment[]): BoardDepartment[] {
+  return departments.filter((d) => d.kind === "sandbox" && !d.hidden);
 }
 
 /** Окно «Вид»: какие секции И какие колонки показывать на этой вкладке.
