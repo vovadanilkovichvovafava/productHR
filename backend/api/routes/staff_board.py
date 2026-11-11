@@ -898,14 +898,20 @@ async def _load_sourcers(
 def _team_history(
     ex: Dict[str, Any], depts: Optional[Dict[int, BoardDepartment]]
 ) -> List[BoardTeamStint]:
-    """Прошлые отделы из карточки. Имя — текущее имя отдела, если он ещё есть
-    (отдел могли переименовать), иначе то, что запомнили при переводе."""
+    """Прошлые отделы из карточки. Имя — текущее имя отдела (отдел могли
+    переименовать). Отдел УДАЛИЛИ — запись не показываем: удаляют отделы,
+    заведённые по ошибке («Тестеровшики QA»), и «↻ Тестеровшики QA» у
+    человека после этого — неправда (владелец, 11.11.2026). Сама запись в
+    карточке остаётся: отдел могут завести заново только с новым id, так что
+    вернуться она не может. Имя из записи — только у старых записей без id."""
     out: List[BoardTeamStint] = []
     raw = ex.get(_K_TEAM_HISTORY)
     for item in raw if isinstance(raw, list) else []:
         if not isinstance(item, dict):
             continue
         did = _as_int(item.get("department_id"))
+        if did and depts is not None and did not in depts:
+            continue
         dept = (depts or {}).get(did) if did else None
         name = (dept.name if dept is not None else None) or item.get("name")
         if not name:

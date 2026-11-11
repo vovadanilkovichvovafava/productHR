@@ -2780,6 +2780,11 @@ export function rotationNote(
   current: string,
 ): { short: string; title: string } | null {
   const past = (history ?? []).filter((h) => h.name);
+  // Вернулся туда же, где был, — это не ротация. Так бывает после ошибки:
+  // SEO → «Тестеровшики QA» (завели по ошибке) → снова SEO; отдел QA удалили,
+  // сервер его запись больше не отдаёт, и без этого осталось бы «↻ SEO team»
+  // у человека, который в SEO team и сидит (владелец, 11.11.2026).
+  while (past.length && current && past[past.length - 1].name === current) past.pop();
   if (!past.length) return null;
   const last = past[past.length - 1];
   const more = past.length > 1 ? ` +${past.length - 1}` : "";

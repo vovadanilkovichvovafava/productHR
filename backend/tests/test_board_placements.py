@@ -1014,6 +1014,33 @@ async def test_rotation_between_teams_is_remembered(
 
 
 @pytest.mark.asyncio
+async def test_deleted_department_leaves_rotation_history(
+    client, db_session, organization, admin_user, org_owner
+):
+    """Удалили отдел, заведённый по ошибке, — «↻ <отдел>» у тех, кто через него
+    прошёл, пропадает (владелец, 11.11.2026: «Тестеровшики QA» висел у человека
+    после удаления отдела)."""
+    sandbox = await _dept(client, admin_user, "SANDBOX", kind="sandbox")
+    qa = await _dept(client, admin_user, "Тестеровшики QA", kind="team", parent_id=sandbox["id"])
+    alpha = await _dept(client, admin_user, "Альфа", kind="team", parent_id=sandbox["id"])
+    seo = await _dept(client, admin_user, "SEO", kind="team", parent_id=sandbox["id"])
+    e = await _person(db_session, organization, admin_user, status=EntityStatus.transferred)
+    for d in (sandbox, qa, alpha, seo):
+        r = await client.post(
+            "/api/staff-board/placements",
+            json={"entity_id": e.id, "department_id": d["id"]}, headers=_h(admin_user),
+        )
+        assert r.status_code == 201, r.text
+    rows = await _rows(client, admin_user, e.id)
+    assert [h["name"] for h in rows[0]["team_history"]] == ["Тестеровшики QA", "Альфа"]
+
+    r = await client.delete(f"/api/staff-board/departments/{qa['id']}", headers=_h(admin_user))
+    assert r.status_code in (200, 204), r.text
+    rows = await _rows(client, admin_user, e.id)
+    assert all([h["name"] for h in row["team_history"]] == ["Альфа"] for row in rows)
+
+
+@pytest.mark.asyncio
 async def test_sandbox_change_is_not_rotation(
     client, db_session, organization, admin_user, org_owner
 ):
