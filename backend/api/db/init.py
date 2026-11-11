@@ -651,6 +651,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Departed apps sync failed (non-critical): {e}")
 
+    # Объединённые карточки, оставшиеся в «Новых» при закрытых заявках влитой:
+    # слияние не пересчитывало статус (11.11.2026, services/merged_status_sync.py).
+    try:
+        from ..services.merged_status_sync import resettle_merged_new_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await resettle_merged_new_once(session)
+    except Exception as e:
+        logger.warning(f"Merged status sync failed (non-critical): {e}")
+
     # Даты отдела собрать в одном месте — у рабочего назначения (13.10.2026,
     # services/board_placements.py). Одноразово: до этого они лежали у каждого
     # назначения своими, и на вкладках у человека выходили разные даты.

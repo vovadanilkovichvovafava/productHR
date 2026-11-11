@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import re
 import logging
 
-from ..models.database import Entity, EntityType, Organization, User
+from ..models.database import Entity, EntityStatus, EntityType, Organization, User
 
 logger = logging.getLogger("hr-analyzer.similarity")
 
@@ -1666,6 +1666,25 @@ class SimilarityService:
 
         # Удаляем исходную сущность
         await db.delete(source_entity)
+
+        # Общий статус — по заявкам, которые теперь у выжившей карточки
+        # (Мария, 11.11.2026: «на статусе „Новые“ висят отказники»). Новую
+        # карточку («Новые», воронок нет) объединяли со старой, где был «Отказ»
+        # в «Трафике»: заявка переезжала, а статус оставался «Новые», и человек
+        # с чипом «Отказ · Трафик» стоял во вкладке «Новые». Пересчитываем,
+        # только если у выжившей «Новые» — за этим статусом нет решения HR;
+        # «Практику» или «Перешёл в отдел», поставленные без воронки, старая
+        # заявка с отказом не перебивает. undo=True: слияние — не новое решение
+        # по кандидату (не превращать «Отказ» в «Уволен»).
+        await db.flush()
+        if target_entity.status == EntityStatus.new:
+            from ..routes.vacancies.common import recompute_entity_status
+            await recompute_entity_status(db, target_entity.id, undo=True)
+            if target_entity.status != EntityStatus.new:
+                logger.info(
+                    "MERGE_STATUS: entity=%s new -> %s (заявки влитой %s)",
+                    target_entity.id, target_entity.status.value, source_entity.id,
+                )
 
         # Сохраняем изменения
         await db.commit()
