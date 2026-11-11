@@ -4,6 +4,8 @@ import { Plus, X, Check } from 'lucide-react';
 import clsx from 'clsx';
 
 import type { VacancyApplication } from '@/types';
+import { APPLICATION_STAGE_LABELS } from '@/types';
+import { STAGE_CHIP_BRIGHT_BY_STAGE } from '@/constants/hrStages';
 import { readHeadlineTags, HeadlineTagChip } from '@/components/entities/headlineTags';
 import { PriorRejectionChip } from '@/components/candidates/priorRejection';
 
@@ -162,6 +164,23 @@ export function FunnelCandidateList({
                 {candidate.entity_position && (
                   <div className="hf-candidate-row-subtitle">
                     {candidate.entity_position}
+                  </div>
+                )}
+                {/* Этап в этой воронке — тот же чип, что в «Все кандидаты»
+                    (Мария, 11.11.2026: «на вакансиях почему-то статусов на
+                    карточках нет, а во „Все кандидаты“ они прописаны»).
+                    Название воронки не пишем: она и так открыта. */}
+                {candidate.stage && (
+                  <div className="mt-[2px] flex min-w-0">
+                    <span
+                      className={clsx(
+                        'inline-flex shrink-0 items-center rounded-[20px] px-[6px] py-[1px] text-[length:var(--hf-fs-2xs)] font-semibold',
+                        STAGE_CHIP_BRIGHT_BY_STAGE[candidate.stage] ||
+                          'bg-[var(--hf-status-gray)] text-[#111827]',
+                      )}
+                    >
+                      {(APPLICATION_STAGE_LABELS as Record<string, string>)[candidate.stage] || candidate.stage}
+                    </span>
                   </div>
                 )}
                 {/* «Был отказ» в другой воронке / карточке / архиве (22.10.2026). */}
