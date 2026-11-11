@@ -164,6 +164,8 @@ _K_BOARD_DEPT = "board_department_id"
 # «Причина отказа» — то же поле карточки, что заполняется при переводе в
 # «Отказ» с комментарием (services/stage_change.remember_rejection_reason).
 _K_REJECTION_REASON = "rejection_reason"
+# Значения своих полей доски у человека: {id поля: значение} (11.11.2026).
+_K_CUSTOM = "board_custom"
 
 # Все поля доски живут в КАРТОЧКЕ человека (`entities.extra_data`) — и даты
 # практики, и выход в отдел, и вехи. Владелец 13.10.2026: «надо, чтобы данные
@@ -351,6 +353,9 @@ class BoardRow(BaseModel):
     sourcers: List["BoardSourcer"] = []
     dismissal_date: Optional[str] = None
     rejection_reason: Optional[str] = None
+    # Значения своих полей (11.11.2026): id поля → значение. Определения полей —
+    # GET /custom-fields.
+    custom: Dict[str, Any] = {}
     # Отметки «пройдено» рядом с каждой вехой
     dept_done: Optional[str] = None
     w2_done: Optional[str] = None
@@ -589,6 +594,8 @@ class BoardRowUpdate(BaseModel):
     assignee_user_ids: Optional[List[int]] = None
     dismissal_date: Optional[str] = None
     rejection_reason: Optional[str] = None
+    # Свои поля: id → значение; null или "" — очистить. Не переданные не трогаем.
+    custom: Optional[Dict[str, Any]] = None
     dept_done: Optional[str] = None
     w2_done: Optional[str] = None
     m1_done: Optional[str] = None
@@ -1081,6 +1088,7 @@ def _row_from_entity(
         sourcers=(sourcers_by_entity or {}).get(entity.id, []),
         dismissal_date=_iso(_parse_date(_pick(ex, _K_DISMISSAL, _CF_DISMISSAL))),
         rejection_reason=(str(ex.get(_K_REJECTION_REASON) or "").strip() or None),
+        custom=dict(ex.get(_K_CUSTOM) or {}) if isinstance(ex.get(_K_CUSTOM), dict) else {},
         dept_done=_as_done(pex, "dept_done"),
         w2_done=_as_done(pex, "w2_done"),
         m1_done=_as_done(pex, "m1_done"),
@@ -1968,9 +1976,12 @@ class BoardViewUpdate(BaseModel):
     widths: Optional[Dict[str, int]] = None
 
 
-def _clean_view(raw: Dict[str, Any]) -> BoardView:
-    hidden = [c for c in dict.fromkeys(raw.get("hidden") or []) if c in BOARD_COLUMNS]
-    order = [c for c in dict.fromkeys(raw.get("order") or []) if c in BOARD_COLUMNS]
+def _clean_view(raw: Dict[str, Any], custom_keys: tuple = ()) -> BoardView:
+    """custom_keys — колонки своих полей («cf:<id>»): их тоже можно скрыть,
+    переставить и растянуть. Название своего поля правится в самом поле."""
+    cols = (*BOARD_COLUMNS, *custom_keys)
+    hidden = [c for c in dict.fromkeys(raw.get("hidden") or []) if c in cols]
+    order = [c for c in dict.fromkeys(raw.get("order") or []) if c in cols]
     labels: Dict[str, str] = {}
     for k, v in (raw.get("labels") or {}).items():
         text = " ".join(str(v or "").split())[:40]
@@ -1982,14 +1993,18 @@ def _clean_view(raw: Dict[str, Any]) -> BoardView:
             w = int(v)
         except (TypeError, ValueError):
             continue
-        if k in _VIEW_KEYS:
+        if k in _VIEW_KEYS or k in custom_keys:
             widths[k] = max(_MIN_W, min(_MAX_W, w))
     return BoardView(hidden=hidden, order=order, labels=labels, widths=widths)
 
 
+def _custom_keys(org: Organization) -> tuple:
+    return tuple(f"cf:{f['id']}" for f in _custom_fields(org))
+
+
 def _board_view(org: Organization) -> BoardView:
     raw = (org.settings if isinstance(org.settings, dict) else {}).get(_BOARD_VIEW_KEY) or {}
-    return _clean_view(raw if isinstance(raw, dict) else {})
+    return _clean_view(raw if isinstance(raw, dict) else {}, _custom_keys(org))
 
 
 @router.get("/board-view", response_model=BoardView)
@@ -2017,13 +2032,217 @@ async def save_board_view(
     settings = dict(org.settings) if isinstance(org.settings, dict) else {}
     current = _board_view(org).model_dump()
     changes = data.model_dump(exclude_none=True)
-    view = _clean_view({**current, **changes})
+    view = _clean_view({**current, **changes}, _custom_keys(org))
     settings[_BOARD_VIEW_KEY] = view.model_dump()
     org.settings = settings
     flag_modified(org, "settings")
     await db.commit()
     logger.info(f"BOARD_VIEW: {sorted(changes)} → {view.model_dump()} by user {current_user.id}")
     return view
+
+
+# --- Свои поля (11.11.2026) ------------------------------------------------
+# Клиент: «добавьте возможность создавать сущности самим» (вкладка «Создать
+# новое» в панели полей ClickUp). Поле — у организации (settings): название,
+# тип, варианты; значение — у человека (extra_data.board_custom[id]). Колонка
+# своего поля — «cf:<id>»: её скрывают, двигают и растягивают в общем виде,
+# фильтруют и выгружают, как встроенные. Создавать и править может любой HR;
+# удалить поле, которое у кого-то заполнено, — только админ (Настя, Мария):
+# значения при этом в карточках остаются, просто больше не показываются.
+_CUSTOM_FIELDS_KEY = "board_custom_fields"
+CUSTOM_TYPES = ("text", "number", "date", "select", "checkbox")
+
+
+class CustomField(BaseModel):
+    id: str
+    name: str
+    type: str
+    options: List[str] = []
+
+
+class CustomFieldCreate(BaseModel):
+    name: str
+    type: str
+
+
+class CustomFieldUpdate(BaseModel):
+    name: Optional[str] = None
+    # Новый список вариантов (у выпадающего списка). Убрать вариант, который
+    # у кого-то стоит, нельзя — 409.
+    options: Optional[List[str]] = None
+    # Переименовать вариант — и у всех, у кого он стоит.
+    rename_option: Optional[Dict[str, str]] = None
+
+
+def _custom_fields(org: Organization) -> List[Dict[str, Any]]:
+    raw = (org.settings if isinstance(org.settings, dict) else {}).get(_CUSTOM_FIELDS_KEY) or []
+    out = []
+    for f in raw if isinstance(raw, list) else []:
+        if isinstance(f, dict) and f.get("id") and f.get("name") and f.get("type") in CUSTOM_TYPES:
+            out.append({
+                "id": str(f["id"]), "name": str(f["name"]), "type": f["type"],
+                "options": [str(o) for o in (f.get("options") or [])],
+            })
+    return out
+
+
+def _save_custom_fields(org: Organization, fields: List[Dict[str, Any]]) -> None:
+    settings = dict(org.settings) if isinstance(org.settings, dict) else {}
+    settings[_CUSTOM_FIELDS_KEY] = fields
+    org.settings = settings
+    flag_modified(org, "settings")
+
+
+def _clean_name(raw: str, what: str = "Название") -> str:
+    name = " ".join((raw or "").split())
+    if not name:
+        raise HTTPException(400, f"{what} пустое")
+    return name[:60]
+
+
+def _coerce_custom(field: Dict[str, Any], raw: Any) -> Any:
+    """Значение своего поля по его типу. None — «очистить»."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    t = field["type"]
+    if t == "checkbox":
+        return True if raw in (True, "true", "1", 1, "✓") else None
+    if t == "number":
+        try:
+            return round(float(str(raw).replace(",", ".").replace(" ", "")), 4)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"«{field['name']}»: нужно число")
+    if t == "date":
+        parsed = _parse_date(raw)
+        if not parsed:
+            raise HTTPException(400, f"«{field['name']}»: некорректная дата")
+        return parsed.isoformat()
+    text = " ".join(str(raw).split()) if t == "select" else str(raw).strip()
+    if t == "select" and text not in field["options"]:
+        raise HTTPException(400, f"«{field['name']}»: такого варианта нет")
+    return text[:500]
+
+
+async def _custom_usage(db: AsyncSession, org_id: int, fid: str) -> Dict[str, int]:
+    """Сколько людей с каждым значением поля (ключ — значение строкой)."""
+    usage: Dict[str, int] = {}
+    rows = (await db.execute(
+        select(Entity.extra_data).where(Entity.org_id == org_id, Entity.extra_data.is_not(None))
+    )).scalars().all()
+    for ex in rows:
+        vals = (ex or {}).get(_K_CUSTOM) if isinstance(ex, dict) else None
+        if isinstance(vals, dict) and vals.get(fid) not in (None, ""):
+            k = str(vals[fid])
+            usage[k] = usage.get(k, 0) + 1
+    return usage
+
+
+@router.get("/custom-fields", response_model=List[CustomField])
+async def list_custom_fields(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    return _custom_fields(org)
+
+
+@router.post("/custom-fields", response_model=List[CustomField], status_code=201)
+async def create_custom_field(
+    data: CustomFieldCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    if data.type not in CUSTOM_TYPES:
+        raise HTTPException(400, "Нет такого типа поля")
+    name = _clean_name(data.name)
+    fields = _custom_fields(org)
+    if any(f["name"].lower() == name.lower() for f in fields):
+        raise HTTPException(409, f"Поле «{name}» уже есть")
+    fields.append({"id": uuid.uuid4().hex[:8], "name": name, "type": data.type, "options": []})
+    _save_custom_fields(org, fields)
+    await db.commit()
+    logger.info(f"BOARD_FIELD create: «{name}» ({data.type}) by user {current_user.id}")
+    return fields
+
+
+@router.patch("/custom-fields/{field_id}", response_model=List[CustomField])
+async def update_custom_field(
+    field_id: str,
+    data: CustomFieldUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    fields = _custom_fields(org)
+    field = next((f for f in fields if f["id"] == field_id), None)
+    if field is None:
+        raise HTTPException(404, "Поле не найдено")
+    if data.name is not None:
+        name = _clean_name(data.name)
+        if any(f["id"] != field_id and f["name"].lower() == name.lower() for f in fields):
+            raise HTTPException(409, f"Поле «{name}» уже есть")
+        field["name"] = name
+    if data.rename_option:
+        old = _clean_name(data.rename_option.get("from", ""), "Вариант")
+        new = _clean_name(data.rename_option.get("to", ""), "Вариант")
+        if old not in field["options"]:
+            raise HTTPException(404, f"Варианта «{old}» нет")
+        if new != old and new in field["options"]:
+            raise HTTPException(409, f"Вариант «{new}» уже есть")
+        field["options"] = [new if o == old else o for o in field["options"]]
+        people = (await db.execute(
+            select(Entity).where(Entity.org_id == org.id, Entity.extra_data.is_not(None))
+        )).scalars().all()
+        for e in people:
+            vals = (e.extra_data or {}).get(_K_CUSTOM)
+            if isinstance(vals, dict) and vals.get(field_id) == old:
+                e.extra_data = {**e.extra_data, _K_CUSTOM: {**vals, field_id: new}}
+    if data.options is not None:
+        opts = list(dict.fromkeys(_clean_name(o, "Вариант") for o in data.options))
+        removed = [o for o in field["options"] if o not in opts]
+        if removed:
+            usage = await _custom_usage(db, org.id, field_id)
+            busy = [o for o in removed if usage.get(o)]
+            if busy:
+                raise HTTPException(409, f"«{busy[0]}» стоит у {usage[busy[0]]} чел. — сначала поменяйте у них")
+        field["options"] = opts
+    _save_custom_fields(org, fields)
+    await db.commit()
+    logger.info(f"BOARD_FIELD update: {field_id} → {field} by user {current_user.id}")
+    return fields
+
+
+@router.delete("/custom-fields/{field_id}", response_model=List[CustomField])
+async def delete_custom_field(
+    field_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    fields = _custom_fields(org)
+    field = next((f for f in fields if f["id"] == field_id), None)
+    if field is None:
+        raise HTTPException(404, "Поле не найдено")
+    used = sum((await _custom_usage(db, org.id, field_id)).values())
+    if used and not await _is_board_admin(db, current_user, org.id):
+        raise HTTPException(403, f"Поле «{field['name']}» заполнено у {used} чел. — удалить его может только админ")
+    _save_custom_fields(org, [f for f in fields if f["id"] != field_id])
+    await db.commit()
+    logger.info(f"BOARD_FIELD delete: «{field['name']}» ({field_id}), заполнено у {used} by user {current_user.id}")
+    return _custom_fields(org)
 
 
 @router.get("/status-views", response_model=List[BoardStatusViewOut])
@@ -2477,6 +2696,21 @@ async def update_row(
         touched_extra = True
     elif "assignee_user_id" in payload:
         ex.pop(_K_ASSIGNEES, None)
+    if payload.get("custom"):
+        fields = {f["id"]: f for f in _custom_fields(org)}
+        values = dict(ex.get(_K_CUSTOM) or {}) if isinstance(ex.get(_K_CUSTOM), dict) else {}
+        for fid, raw in payload["custom"].items():
+            field = fields.get(fid)
+            if field is None:
+                raise HTTPException(400, "Нет такого поля")
+            value = _coerce_custom(field, raw)
+            if value is None:
+                values.pop(fid, None)
+            else:
+                values[fid] = value
+        ex[_K_CUSTOM] = values
+        touched_extra = True
+    payload.pop("custom", None)
     if "manager" in payload:
         # Пусто — тоже выбор («убрали»), поэтому ключ остаётся: иначе снова
         # всплыл бы наставник из тега.

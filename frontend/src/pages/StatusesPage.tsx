@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { ReactNode } from "react";
 import {
   Search, Loader2, Plus, Pencil, Check, Copy, Download, X, MoreHorizontal, Trash2,
-  Settings, Calendar, ChevronDownSquare, Type, User as UserIcon, GripVertical,
+  Settings, Calendar, ChevronDownSquare, Type, User as UserIcon, GripVertical, Hash, CheckSquare,
   ChevronRight, ChevronDown, Paperclip, Upload, SlidersHorizontal,
 } from "lucide-react";
 import clsx from "clsx";
@@ -20,6 +20,8 @@ import {
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
 import {
   getBoardView, saveBoardView, EMPTY_BOARD_VIEW, type BoardView,
+  getCustomFields, createCustomField, updateCustomField, deleteCustomField,
+  type CustomField, type CustomFieldType,
 } from "@/services/api/staffBoard";
 import { getOrgMembers } from "@/services/api/accessHub";
 import { addTagToEntity, createTag, getTags, removeTagFromEntity, type Tag } from "@/services/api/tags";
@@ -68,6 +70,7 @@ const groupOf = (status: string) =>
 const UNASSIGNED = "__none__";
 
 type FilterKey =
+  | `cf:${string}`
   | "name" | "assignee" | "sourcer" | "position" | "department" | "telegram"
   | "practice_start_date" | "manager" | "department_start_date"
   | "dept_done" | "w2" | "w2_done" | "m1" | "m1_done"
@@ -109,9 +112,30 @@ const COLUMNS: { key: FilterKey | "offer"; label: string; filter: boolean; narro
   { key: "rejection_reason",      label: "Причина отказа",    filter: true, width: 220 },
 ];
 
-/** Колонки, которые можно спрятать: все, кроме «Сотрудника» — без имени
- *  строка бессмысленна (просьба Марии 08.10.2026 про лист-вью по столбцам). */
-const HIDEABLE_COLUMNS = COLUMNS.filter((c) => c.key !== "name");
+type Column = (typeof COLUMNS)[number];
+
+/** Свои поля организации (11.11.2026) — колонки «cf:<id>» после встроенных.
+ *  Реестр на уровне модуля, как FIELD_LABELS: подписи, значения ячеек и
+ *  фильтры — чистые функции, страница обновляет реестр при загрузке. */
+let CUSTOM_FIELDS: CustomField[] = [];
+export const setCustomFields = (list: CustomField[]) => { CUSTOM_FIELDS = list; };
+export const customFieldOf = (key: string) =>
+  key.startsWith("cf:") ? CUSTOM_FIELDS.find((f) => `cf:${f.id}` === key) : undefined;
+const CUSTOM_WIDTH: Record<CustomFieldType, number> = { text: 180, number: 110, date: 120, select: 150, checkbox: 90 };
+
+/** Все колонки: встроенные и свои. */
+export function allColumns(): Column[] {
+  return [
+    ...COLUMNS,
+    ...CUSTOM_FIELDS.map((f) => ({
+      key: `cf:${f.id}` as FilterKey, label: f.name, filter: true, width: CUSTOM_WIDTH[f.type],
+    })),
+  ];
+}
+
+/** Колонки, которые можно спрятать: все, кроме «ФИО» — без имени строка
+ *  бессмысленна (просьба Марии 08.10.2026 про лист-вью по столбцам). */
+const hideableColumns = () => allColumns().filter((c) => c.key !== "name");
 
 /** Колонки по общему виду (11.11.2026): «ФИО» первым, дальше в порядке,
  *  который выставили перетаскиванием (новые колонки — в конце), с общими
@@ -120,21 +144,22 @@ export function arrangeColumns(
   view: Partial<Pick<BoardView, "hidden" | "order" | "widths">>,
   withHidden = false,
 ): typeof COLUMNS {
-  const known = new Set(COLUMNS.map((c) => c.key as string));
+  const cols = allColumns();
+  const known = new Set(cols.map((c) => c.key as string));
   const order = (view.order ?? []).filter((k) => k !== "name" && known.has(k));
-  const rest = COLUMNS.map((c) => c.key as string).filter((k) => k !== "name" && !order.includes(k));
+  const rest = cols.map((c) => c.key as string).filter((k) => k !== "name" && !order.includes(k));
   const hidden = view.hidden ?? [];
   return ["name", ...order, ...rest]
     .filter((k) => withHidden || k === "name" || !hidden.includes(k))
     .map((k) => {
-      const c = COLUMNS.find((x) => x.key === k)!;
+      const c = cols.find((x) => x.key === k)!;
       const w = view.widths?.[k];
       return w ? { ...c, width: w } : c;
     });
 }
 
 /** Колонки из выбора (выгрузка): «ФИО» всегда, порядок — как у base. */
-export function pickColumns(chosen?: string[] | null, base: typeof COLUMNS = COLUMNS): typeof COLUMNS {
+export function pickColumns(chosen?: string[] | null, base: Column[] = allColumns()): Column[] {
   if (!chosen?.length) return base;
   return base.filter((c) => c.key === "name" || chosen.includes(c.key));
 }
@@ -157,10 +182,12 @@ export const setFieldLabels = (map: Record<string, string>) => { FIELD_LABELS = 
 
 /** Название поля в списках, фильтрах и выгрузке (у отметок — с «✓»). */
 export const fieldLabel = (key: string) =>
-  FIELD_LABELS[key] || FILTER_LABELS[key as FilterKey] || COLUMNS.find((c) => c.key === key)?.label || key;
+  FIELD_LABELS[key] || customFieldOf(key)?.name || FILTER_LABELS[key as FilterKey]
+  || COLUMNS.find((c) => c.key === key)?.label || key;
 
 /** Подпись в шапке таблицы: у отметок по умолчанию короткая «✓». */
-const headerLabel = (c: { key: string; label: string }) => FIELD_LABELS[c.key] || c.label;
+const headerLabel = (c: { key: string; label: string }) =>
+  FIELD_LABELS[c.key] || customFieldOf(c.key)?.name || c.label;
 
 /** Имя колонки для фразы в панели и для чипов. */
 const filterLabel = (key: FilterKey) => fieldLabel(key);
@@ -172,7 +199,7 @@ const fmt = (iso: string | null) => {
 };
 
 /** Колонки, по которым можно фильтровать. */
-const FILTERABLE = COLUMNS.filter((c) => c.filter) as { key: FilterKey; label: string }[];
+const filterableColumns = () => allColumns().filter((c) => c.filter) as { key: FilterKey; label: string }[];
 
 // v3 (11.11.2026): снова правила «поле → условие → значение», как в ClickUp
 // (клиент: «открывается окно, в нём выбираешь поле, потом его значение…
@@ -193,7 +220,7 @@ type SortDir = "asc" | "desc";
 const DATE_KEYS: FilterKey[] = [
   "practice_start_date", "department_start_date", "w2", "m1", "m3", "y1", "dismissal_date",
 ];
-const isDateKey = (k: FilterKey) => DATE_KEYS.includes(k);
+const isDateKey = (k: FilterKey) => DATE_KEYS.includes(k) || customFieldOf(k)?.type === "date";
 
 /** Колонки-галочки: у них всего два варианта. */
 const DONE_KEYS: FilterKey[] = ["dept_done", "w2_done", "m1_done", "m3_done", "y1_done"];
@@ -222,7 +249,9 @@ export const OP_LABELS: Record<FilterOp, string> = {
 /** Какие условия есть у поля. */
 export function opsFor(key: FilterKey): FilterOp[] {
   if (isDateKey(key)) return ["between", "empty", "not_empty"];
-  if (TEXT_KEYS.includes(key)) return ["contains", "is", "empty", "not_empty"];
+  const cf = customFieldOf(key);
+  if (cf?.type === "checkbox") return ["not_empty", "empty"];
+  if (TEXT_KEYS.includes(key) || cf?.type === "text") return ["contains", "is", "empty", "not_empty"];
   return ["is", "is_not", "empty", "not_empty"];
 }
 
@@ -278,7 +307,7 @@ function ruleMatches(row: BoardRow, r: FilterRule): boolean {
   const key = r.key as FilterKey;
   if (isDateKey(key)) {
     // Сравниваем «сырую» дату (ГГГГ-ММ-ДД), а не видимую «дд.мм.гггг».
-    const iso = ((row[key as keyof BoardRow] as string | null) || "").slice(0, 10);
+    const iso = rawDate(row, key);
     if (r.op === "empty") return !iso;
     if (r.op === "not_empty") return !!iso;
     return !!iso && (!r.from || iso >= r.from) && (!r.to || iso <= r.to);
@@ -337,7 +366,7 @@ export function describeFilters(filters: BoardFilters): string {
 export function readSavedFilters(raw: unknown): BoardFilters {
   if (!raw || typeof raw !== "object") return EMPTY_FILTERS;
   const o = raw as Record<string, any>;
-  const known = new Set(FILTERABLE.map((c) => c.key as string));
+  const known = new Set(filterableColumns().map((c) => c.key as string));
   if (Array.isArray(o.rules)) {
     const rules: FilterRule[] = o.rules
       .filter((r: any) => r && typeof r === "object" && (!r.key || known.has(r.key)))
@@ -413,7 +442,7 @@ export type ExportPick = { sections: string[]; columns: string[] };
 
 /** Колонки файла: «Сотрудник» всегда, порядок табличный. Пусто — все.
  *  «Оффер» в файле — имя приложенного файла. */
-export function exportColumns(chosen?: string[] | null, base: typeof COLUMNS = COLUMNS): typeof COLUMNS {
+export function exportColumns(chosen?: string[] | null, base: Column[] = allColumns()): Column[] {
   return pickColumns(chosen, base);
 }
 
@@ -487,8 +516,26 @@ const cellText = (r: BoardRow, key: FilterKey): string => {
     case "m1_done": return r.m1_done || "";
     case "m3_done": return r.m3_done || "";
     case "y1_done": return r.y1_done || "";
-    default: return fmt(r[key] as string | null);
+    default: {
+      const cf = customFieldOf(key);
+      if (cf) {
+        const v = r.custom?.[cf.id];
+        if (v === undefined || v === null || v === "") return "";
+        if (cf.type === "checkbox") return v ? "✓" : "";
+        if (cf.type === "date") return fmt(String(v));
+        if (cf.type === "number") return Number(v).toLocaleString("ru-RU", { maximumFractionDigits: 4 });
+        return String(v);
+      }
+      return fmt(r[key as keyof BoardRow] as string | null);
+    }
   }
+};
+
+/** Дата ячейки как ГГГГ-ММ-ДД — для фильтра «в периоде». */
+const rawDate = (r: BoardRow, key: FilterKey): string => {
+  const cf = customFieldOf(key);
+  const v = cf ? r.custom?.[cf.id] : r[key as keyof BoardRow];
+  return typeof v === "string" ? v.slice(0, 10) : "";
 };
 
 /** Ключ строки доски: назначение, а у тех, кто ещё не в отделе, — человек. */
@@ -589,6 +636,13 @@ export default function StatusesPage() {
   // нет — видны все. До 11.11 у каждого был свой набор секций и колонок на
   // каждой вкладке (мит 07.10.2026).
   const [view, setView] = useState<BoardView>(EMPTY_BOARD_VIEW);
+  // Свои поля организации (11.11.2026). Реестр модуля обновляем вместе со
+  // стейтом — по стейту перерисовываемся.
+  const [customFields, setCustomFieldsState] = useState<CustomField[]>([]);
+  const applyCustomFields = useCallback((list: CustomField[]) => {
+    setCustomFields(list);
+    setCustomFieldsState(list);
+  }, []);
   const hiddenColumns = view.hidden;
   // Ширина, которую тянут прямо сейчас: на экране сразу, на сервер — по
   // отпусканию мыши, чтобы не слать запрос на каждый пиксель.
@@ -637,6 +691,7 @@ export default function StatusesPage() {
     getBoardView()
       .then((v) => { setFieldLabels(v.labels); setView(v); })
       .catch(() => setView(EMPTY_BOARD_VIEW));
+    getCustomFields().then(applyCustomFields).catch(() => applyCustomFields([]));
     getTags().then(setSourcerTags).catch(() => setSourcerTags([]));
     // Вести сотрудника может только HR. В организации числятся все
     // работники, и без фильтра в список попадали бы полсотни человек,
@@ -760,7 +815,9 @@ export default function StatusesPage() {
 
   const visibleColumns = useMemo(
     () => arrangeColumns({ ...view, widths: { ...view.widths, ...liveWidths } }),
-    [view, liveWidths],
+    // customFields — колонки своих полей зависят от реестра
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, liveWidths, customFields],
   );
   /** Поменять часть общего вида: сразу на экране, потом на сервере; не
    *  вышло — вернуть как было. */
@@ -1099,13 +1156,14 @@ export default function StatusesPage() {
               onSave={saveView}
               onShowAll={() => saveView({ hidden: [] })}
               onClose={() => setShowFields(false)}
+              onCustomFields={applyCustomFields}
             />
           )}
 
           {showExport && canExport && (
             <ExportModal
               months={months}
-              hideable={HIDEABLE_COLUMNS}
+              hideable={hideableColumns()}
               sections={STATUSES.map((s) => s.key)}
               columns={visibleColumns.filter((c) => c.key !== "name").map((c) => c.key)}
               order={arrangeColumns(view, true)}
@@ -1185,6 +1243,7 @@ export default function StatusesPage() {
                           columns={visibleColumns}
                           departments={departments}
                           onDepartments={setDepartments}
+                          onCustomFields={applyCustomFields}
                           catalogs={catalogs}
                           onCatalog={setCatalog}
                           people={people}
@@ -1345,7 +1404,7 @@ function FbFieldSelect({ value, onChange }: { value: FilterKey | ""; onChange: (
   const dd = useFbDropdown();
   const [q, setQ] = useState("");
   const needle = q.trim().toLowerCase();
-  const fields = FILTERABLE.filter((c) => !needle || fieldLabel(c.key).toLowerCase().includes(needle));
+  const fields = filterableColumns().filter((c) => !needle || fieldLabel(c.key).toLowerCase().includes(needle));
   return (
     <div className="hf-fb-dd" ref={dd.ref}>
       <button type="button" className={clsx("hf-fb-select hf-fb-dd-btn", !value && "is-empty")}
@@ -1533,7 +1592,11 @@ const FIELD_TYPE: Record<string, "name" | "person" | "dropdown" | "text" | "date
 };
 
 function FieldTypeIcon({ k }: { k: string }) {
-  const t = FIELD_TYPE[k] ?? "text";
+  const cf = customFieldOf(k);
+  if (cf?.type === "number") return <Hash size={16} className="hf-fields-ico-text" />;
+  if (cf?.type === "checkbox") return <CheckSquare size={16} className="hf-fields-ico-drop" />;
+  const t = cf ? ({ text: "text", date: "date", select: "dropdown" } as const)[cf.type as "text" | "date" | "select"]
+    : (FIELD_TYPE[k] ?? "text");
   if (t === "name") return <span className="hf-fields-aa">Aa</span>;
   if (t === "person") return <UserIcon size={16} />;
   if (t === "dropdown") return <ChevronDownSquare size={16} className="hf-fields-ico-drop" />;
@@ -1549,14 +1612,41 @@ function FieldTypeIcon({ k }: { k: string }) {
  *  двигается — по нему читается строка, но переименовать его можно. Секций
  *  здесь больше нет: на доске видны все. */
 function FieldsPanel({
-  view, onToggle, onSave, onShowAll, onClose,
+  view, onToggle, onSave, onShowAll, onClose, onCustomFields,
 }: {
   view: BoardView;
   onToggle: (key: string, hide: boolean) => void;
   onSave: (patch: Partial<BoardView>) => void;
   onShowAll: () => void;
   onClose: () => void;
+  onCustomFields: (list: CustomField[]) => void;
 }) {
+  // Вкладки как в ClickUp: «Добавить существующее» (список полей) и «Создать
+  // новое» — своё поле (клиент, 11.11.2026).
+  const [tab, setTab] = useState<"existing" | "new">("existing");
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState<CustomFieldType>("text");
+  const [busy, setBusy] = useState(false);
+  const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
+  const create = async () => {
+    const name = newName.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    try {
+      onCustomFields(await createCustomField(name, newType));
+      setNewName("");
+      setTab("existing");
+      toast.success(`Поле «${name}» добавлено — оно уже в таблице`);
+    } catch (e) { fail(e, "Не удалось создать поле"); } finally { setBusy(false); }
+  };
+  const removeCustom = async (key: string) => {
+    const cf = customFieldOf(key);
+    if (!cf) return;
+    try {
+      onCustomFields(await deleteCustomField(cf.id));
+      toast.success(`Поле «${cf.name}» удалено`);
+    } catch (e) { fail(e, "Не удалось удалить поле"); }
+  };
   const [q, setQ] = useState("");
   const [renaming, setRenaming] = useState<{ key: string; text: string } | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -1576,6 +1666,16 @@ function FieldsPanel({
   const saveRename = () => {
     if (!renaming) return;
     const text = renaming.text.trim().replace(/\s+/g, " ");
+    // Своё поле переименовываем в нём самом, а не подписью вида.
+    const cf = customFieldOf(renaming.key);
+    if (cf) {
+      setRenaming(null);
+      if (text && text !== cf.name) {
+        updateCustomField(cf.id, { name: text }).then(onCustomFields)
+          .catch((e) => fail(e, "Не удалось переименовать поле"));
+      }
+      return;
+    }
     const labels = { ...view.labels };
     const base = COLUMNS.find((c) => c.key === renaming.key);
     const deflt = FILTER_LABELS[renaming.key as FilterKey] || base?.label || "";
@@ -1630,6 +1730,7 @@ function FieldsPanel({
         ) : (
           <span className="hf-fields-name" title={custom ? `Своё название. Было: ${COLUMNS.find((x) => x.key === c.key)?.label}` : undefined}>
             {fieldLabel(c.key)}
+            {customFieldOf(c.key) && <span className="hf-fields-own">своё</span>}
           </span>
         )}
         {renaming?.key !== c.key && (
@@ -1640,6 +1741,16 @@ function FieldsPanel({
             onClick={() => setRenaming({ key: c.key, text: fieldLabel(c.key) })}
           >
             <Pencil size={13} />
+          </button>
+        )}
+        {customFieldOf(c.key) && renaming?.key !== c.key && (
+          <button
+            type="button"
+            className="hf-fields-edit"
+            title="Удалить своё поле"
+            onClick={() => removeCustom(c.key)}
+          >
+            <Trash2 size={13} />
           </button>
         )}
         <input
@@ -1663,6 +1774,55 @@ function FieldsPanel({
           <X size={16} />
         </button>
       </div>
+      <div className="hf-fields-tabs">
+        <button type="button" className={clsx(tab === "new" && "is-on")} onClick={() => setTab("new")}>
+          Создать новое
+        </button>
+        <button type="button" className={clsx(tab === "existing" && "is-on")} onClick={() => setTab("existing")}>
+          Добавить существующее
+        </button>
+      </div>
+      {tab === "new" ? (
+        <div className="hf-fields-create">
+          <label>
+            Название
+            <input
+              autoFocus
+              className="hf-fields-search"
+              placeholder="Например, «Грейд»"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") create(); }}
+            />
+          </label>
+          <div className="hf-fields-types">
+            {([
+              ["select", "Выпадающий список"], ["text", "Текст"], ["date", "Дата"],
+              ["number", "Число"], ["checkbox", "Флажок"],
+            ] as [CustomFieldType, string][]).map(([t, label]) => (
+              <button
+                key={t}
+                type="button"
+                className={clsx("hf-fields-row", newType === t && "is-on")}
+                onClick={() => setNewType(t)}
+              >
+                <span className="hf-fields-ico">
+                  {t === "select" ? <ChevronDownSquare size={16} className="hf-fields-ico-drop" />
+                    : t === "date" ? <Calendar size={16} className="hf-fields-ico-date" />
+                      : t === "number" ? <Hash size={16} className="hf-fields-ico-text" />
+                        : t === "checkbox" ? <CheckSquare size={16} className="hf-fields-ico-drop" />
+                          : <Type size={16} className="hf-fields-ico-text" />}
+                </span>
+                <span className="hf-fields-name">{label}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" className="hf-fields-reset hf-fields-create-btn" disabled={!newName.trim() || busy} onClick={create}>
+            Создать поле
+          </button>
+          <div className="hf-fields-note">Поле появится у всех HR. Значения заполняются прямо в таблице.</div>
+        </div>
+      ) : (<>
       <input
         autoFocus
         className="hf-fields-search"
@@ -1699,6 +1859,7 @@ function FieldsPanel({
           </button>
         </div>
       )}
+      </>)}
     </aside>
   );
 }
@@ -2055,7 +2216,7 @@ function DepartmentModal({
 // ============================================================
 
 function Row({
-  row, columns, departments, onDepartments, catalogs, onCatalog,
+  row, columns, departments, onDepartments, onCustomFields, catalogs, onCatalog,
   people, sourcerTags, onSourcerTags, saving,
   onPatch, onStatus, onPlace, onUnplace, onReload,
 }: {
@@ -2064,6 +2225,7 @@ function Row({
   columns: typeof COLUMNS;
   departments: BoardDepartment[];
   onDepartments: (update: (cur: BoardDepartment[]) => BoardDepartment[]) => void;
+  onCustomFields: (list: CustomField[]) => void;
   catalogs: Record<CatalogKind, CatalogItem[]>;
   onCatalog: (kind: CatalogKind, list: CatalogItem[]) => void;
   people: { user_id: number; user_name: string | null }[];
@@ -2188,7 +2350,14 @@ function Row({
             c.narrow && "hf-statuses-td-narrow",
           )}
         >
-          {cells[c.key]}
+          {cells[c.key as keyof typeof cells] ?? (customFieldOf(c.key) && (
+            <CustomCell
+              field={customFieldOf(c.key)!}
+              value={row.custom?.[customFieldOf(c.key)!.id]}
+              onSave={(v) => onPatch(row, { custom: { [customFieldOf(c.key)!.id]: v } })}
+              onFields={onCustomFields}
+            />
+          ))}
         </td>
       ))}
     </tr>
@@ -2199,6 +2368,87 @@ function Row({
 // ============================================================
 // CELLS
 // ============================================================
+
+/** Ячейка своего поля — по его типу (11.11.2026). Выпадающий список — то же
+ *  окно «как в ClickUp», варианты добавляются, переименовываются и удаляются
+ *  прямо в нём; остальные типы — обычные ячейки доски. */
+function CustomCell({
+  field, value, onSave, onFields,
+}: {
+  field: CustomField;
+  value: string | number | boolean | undefined;
+  onSave: (v: string | number | boolean | null) => void;
+  onFields: (list: CustomField[]) => void;
+}) {
+  const menu = useCellMenu();
+  const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
+  if (field.type === "checkbox") {
+    return (
+      <button
+        type="button"
+        className={clsx("hf-statuses-cf-check", value && "is-on")}
+        title={value ? "Снять" : "Отметить"}
+        onClick={() => onSave(value ? null : true)}
+      >
+        {value ? <Check size={14} /> : null}
+      </button>
+    );
+  }
+  if (field.type === "date") {
+    return <DateCell value={value ? String(value) : null} onSave={(v) => onSave(v)} />;
+  }
+  if (field.type === "number") {
+    return <TextCell value={value === undefined ? null : String(value)} onSave={(v) => onSave(v)} />;
+  }
+  if (field.type === "text") {
+    return <TextCell value={value ? String(value) : null} onSave={(v) => onSave(v)} />;
+  }
+  const v = value ? String(value) : null;
+  const hue = pillHue(v || "");
+  return (
+    <>
+      <button
+        ref={menu.plusRef}
+        className={v ? "hf-statuses-pill" : "hf-statuses-empty-cell"}
+        onClick={menu.toggle}
+        style={v ? { background: `hsl(${hue} 70% 94%)`, color: `hsl(${hue} 55% 32%)`, borderColor: `hsl(${hue} 60% 84%)` } : undefined}
+        title={v || `Выбрать: ${field.name}`}
+      >
+        {v || "—"}
+      </button>
+      {menu.open && menu.pos && (
+        <CatalogPicker
+          menuRef={menu.menuRef}
+          pos={menu.pos}
+          placeholder={`Найти или добавить вариант…`}
+          groups={[{ label: field.name, options: field.options.map((o) => ({ key: o, label: o, editable: true })) }]}
+          taken={field.options}
+          current={v}
+          onClear={v ? () => { menu.close(); onSave(null); } : undefined}
+          onPick={(key) => { menu.close(); if (key !== v) onSave(key); }}
+          onAdd={async (name) => {
+            menu.close();
+            try {
+              onFields(await updateCustomField(field.id, { options: [...field.options, name] }));
+              onSave(name);
+            } catch (e) { fail(e, `Не удалось добавить «${name}»`); }
+          }}
+          onRename={async (key, name) => {
+            try {
+              onFields(await updateCustomField(field.id, { rename_option: { from: key, to: name } }));
+              if (key === v) onSave(name);
+            } catch (e) { fail(e, "Не удалось переименовать"); }
+          }}
+          onDelete={async (key) => {
+            try {
+              onFields(await updateCustomField(field.id, { options: field.options.filter((o) => o !== key) }));
+            } catch (e) { fail(e, `Не удалось удалить «${key}»`); }
+          }}
+        />
+      )}
+    </>
+  );
+}
 
 function TextCell({
   value, onSave, prefix,

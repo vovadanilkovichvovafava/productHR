@@ -70,6 +70,8 @@ export interface BoardRow {
   dismissal_date: string | null;
   /** «Причина отказа» — поле карточки (заполняется при переводе в «Отказ»). */
   rejection_reason?: string | null;
+  /** Значения своих полей: id поля → значение (11.11.2026). */
+  custom?: Record<string, string | number | boolean>;
   /** отметки «веха пройдена» — парные колонки в скобках из ClickUp */
   dept_done: string | null;
   w2_done: string | null;
@@ -100,6 +102,8 @@ export interface BoardRowUpdate {
   assignee_user_ids?: number[];
   dismissal_date?: string | null;
   rejection_reason?: string | null;
+  /** Свои поля: id → значение; null — очистить. */
+  custom?: Record<string, string | number | boolean | null>;
   dept_done?: string | null;
   w2_done?: string | null;
   m1_done?: string | null;
@@ -337,4 +341,39 @@ export async function getBoardView(): Promise<BoardView> {
 export async function saveBoardView(patch: Partial<BoardView>): Promise<BoardView> {
   const { data } = await api.put('/staff-board/board-view', patch);
   return { ...EMPTY_BOARD_VIEW, ...(data || {}) };
+}
+
+/** Свои поля доски (клиент, 11.11.2026: «добавьте возможность создавать
+ *  сущности самим»). Поле — у организации, значение — у человека. */
+export type CustomFieldType = 'text' | 'number' | 'date' | 'select' | 'checkbox';
+
+export interface CustomField {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  /** Варианты выпадающего списка. */
+  options: string[];
+}
+
+export async function getCustomFields(): Promise<CustomField[]> {
+  const { data } = await api.get('/staff-board/custom-fields');
+  return data || [];
+}
+
+export async function createCustomField(name: string, type: CustomFieldType): Promise<CustomField[]> {
+  const { data } = await api.post('/staff-board/custom-fields', { name, type });
+  return data || [];
+}
+
+export async function updateCustomField(
+  id: string,
+  patch: { name?: string; options?: string[]; rename_option?: { from: string; to: string } },
+): Promise<CustomField[]> {
+  const { data } = await api.patch(`/staff-board/custom-fields/${id}`, patch);
+  return data || [];
+}
+
+export async function deleteCustomField(id: string): Promise<CustomField[]> {
+  const { data } = await api.delete(`/staff-board/custom-fields/${id}`);
+  return data || [];
 }
