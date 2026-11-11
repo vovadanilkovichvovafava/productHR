@@ -36,7 +36,9 @@ export const createTag = async (payload: TagCreate): Promise<Tag> => {
 
 /**
  * ОСТОРОЖНО: настоящее удаление — срывает метку и со ВСЕХ карточек разом
- * (у связи стоит ondelete=CASCADE). Интерфейсу нужен archiveTag, а не это.
+ * (у связи стоит ondelete=CASCADE). Вызывать только после окна подтверждения
+ * «удаление из всей системы» (так делает «…» → «Удалить» у сорсера на доске
+ * «Штат», с 12.11.2026).
  */
 export const deleteTag = async (tagId: number): Promise<void> => {
   await api.delete(`/tags/${tagId}`);

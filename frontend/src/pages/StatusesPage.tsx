@@ -25,7 +25,7 @@ import {
 } from "@/services/api/staffBoard";
 import { getOrgMembers } from "@/services/api/accessHub";
 import {
-  addTagToEntity, archiveTag, createTag, getTags, removeTagFromEntity, updateTag, type Tag,
+  addTagToEntity, createTag, deleteTag, getTags, removeTagFromEntity, updateTag, type Tag,
 } from "@/services/api/tags";
 import { useUrlTab } from "@/hooks/useUrlTab";
 import { useAuthStore } from "@/stores/authStore";
@@ -2549,6 +2549,7 @@ function CustomCell({
               if (key === v) onSave(name);
             } catch (e) { fail(e, "Не удалось переименовать"); }
           }}
+          deleteWarning="Если вариант у кого-то стоит, удалить не получится — сначала поменяйте у них."
           onDelete={async (key) => {
             try {
               onFields(await updateCustomField(field.id, { options: field.options.filter((o) => o !== key) }));
@@ -2957,6 +2958,7 @@ function DepartmentCell({
               toast.error(e?.response?.data?.detail || "Не удалось переименовать отдел");
             }
           }}
+          deleteWarning="Отдел, в котором сейчас есть люди, удалить нельзя — сначала переведите их."
           onDelete={async (key, label) => {
             try {
               await deleteBoardDepartment(Number(key));
@@ -3086,6 +3088,7 @@ function ChoiceCell({
           onReload();
         } catch (e) { fail(e, "Не удалось переименовать"); }
       }}
+      deleteWarning="Если значение у кого-то стоит, удалить не получится — сначала поменяйте у них."
       onDelete={async (key) => {
         try {
           onCatalog(await deleteCatalogItem(kind, key));
@@ -3180,7 +3183,7 @@ const OPTION_MENU_H = 360;
  *  прокрутке доски). */
 export function CatalogPicker({
   menuRef, pos, placeholder, groups, taken, current, selected, selectedLabel = "Выбраны",
-  onPick, onAdd, onRename, onDelete, onClear, clearLabel, onRecolor, onReorder,
+  onPick, onAdd, onRename, onDelete, deleteWarning, onClear, clearLabel, onRecolor, onReorder,
 }: {
   menuRef: React.RefObject<HTMLDivElement>;
   pos: MenuPos;
@@ -3198,6 +3201,9 @@ export function CatalogPicker({
   onAdd?: (text: string) => void;
   onRename?: (key: string, text: string) => void;
   onDelete?: (key: string, label: string) => void;
+  /** Что ещё сказать в окне подтверждения удаления (что будет с теми, у кого
+   *  значение уже стоит). */
+  deleteWarning?: string;
   onClear?: () => void;
   /** Подпись строки очистки, если «— убрать» мало (отдел: откуда именно). */
   clearLabel?: string;
@@ -3215,6 +3221,11 @@ export function CatalogPicker({
   const popRef = useRef<HTMLDivElement>(null);
   // Свои цвета, добавленные в этом окне, — видны сразу, до ответа сервера.
   const [addedColors, setAddedColors] = useState<string[]>([]);
+  // «Удалить» — только через подтверждение: это удаление из ВСЕЙ системы, у
+  // всех, а не с этого человека (владелец, 12.11.2026: «обязательно должна
+  // вылезать модалка»). Окно живёт внутри окна-списка: клик по нему иначе
+  // считался бы кликом мимо и закрывал список.
+  const [confirmDel, setConfirmDel] = useState<{ key: string; label: string } | null>(null);
   const [drag, setDrag] = useState<{ group: string; key: string } | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const needle = q.trim().toLowerCase();
@@ -3385,7 +3396,7 @@ export function CatalogPicker({
             <button
               type="button"
               className="hf-option-menu-delete"
-              onClick={() => { setMenu(null); onDelete(o.key, o.label); }}
+              onClick={() => { setMenu(null); setConfirmDel({ key: o.key, label: o.label }); }}
             >
               <Trash2 size={16} /> Удалить
             </button>
@@ -3510,6 +3521,38 @@ export function CatalogPicker({
       {!shown.length && !picked.length && !canAdd && (
         <div className="hf-statuses-hr-menu-hint">
           {needle ? "Ничего не найдено" : onAdd ? "Список пуст — начните вводить, чтобы добавить" : "Список пуст"}
+        </div>
+      )}
+      {confirmDel && onDelete && (
+        <div
+          className="hf-confirm-overlay"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setConfirmDel(null); }}
+          onKeyDown={(e) => {
+            // Escape закрывает только подтверждение, а не всё окно-список.
+            if (e.key === "Escape") { e.stopPropagation(); setConfirmDel(null); }
+          }}
+        >
+          <div className="hf-confirm" role="alertdialog" aria-modal="true" aria-labelledby="hf-confirm-title">
+            <div className="hf-confirm-icon"><Trash2 size={18} /></div>
+            <h3 id="hf-confirm-title">Удалить «{confirmDel.label}» из системы?</h3>
+            <p>
+              Это удаление из всей системы: «{confirmDel.label}» пропадёт из этого
+              списка у всех пользователей, а не только у этого человека.
+            </p>
+            {deleteWarning && <p>{deleteWarning}</p>}
+            <div className="hf-confirm-actions">
+              <button type="button" className="hf-confirm-cancel" autoFocus onClick={() => setConfirmDel(null)}>
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="hf-confirm-danger"
+                onClick={() => { const d = confirmDel; setConfirmDel(null); onDelete(d.key, d.label); }}
+              >
+                Удалить из системы
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -3670,11 +3713,19 @@ function SourcerCell({
             catch (e) { fail(e, "Не удалось поменять цвет"); }
           }}
           onReorder={metaHandlers("sourcers").onReorder}
+          deleteWarning={"Сорсер снимется со ВСЕХ кандидатов, у кого он стоит, — и на доске, и в «Все кандидаты». "
+            + "Вернуть нельзя. Снять сорсера только с этого кандидата — «×» справа от него в окне."}
           onDelete={async (key, label) => {
-            // «Удалить» = убрать из списка выбора: у кого уже стоит — остаётся
-            // (настоящее удаление сорвало бы метку со всех карточек).
-            try { replaceTag(await archiveTag(Number(key))); toast.success(`«${label}» убран из списка`); }
-            catch (e) { fail(e, `Не удалось удалить «${label}»`); }
+            // «Удалить» = удалить из ВСЕЙ системы, в том числе с карточек, где
+            // сорсер стоит (владелец, 12.11.2026: «удалил, но не убралось» —
+            // до этого кнопка только прятала сорсера из списка, а у кандидатов
+            // он оставался). Делается только после окна подтверждения.
+            try {
+              await deleteTag(Number(key));
+              onCatalog((list) => list.filter((t) => String(t.id) !== key));
+              toast.success(`Сорсер «${label}» удалён`);
+              onReload();
+            } catch (e) { fail(e, `Не удалось удалить «${label}»`); }
           }}
         />
       )}

@@ -180,10 +180,27 @@ describe("окошко «…»", () => {
     expect(screen.getByText("Мои цвета")).toBeTruthy();
   });
 
-  it("«Удалить» внизу; у песочницы (noDelete) его нет", () => {
+  it("«Удалить» — сначала окно «удаление из всей системы», удаляет только по подтверждению", () => {
     const { onDelete } = open();
     fireEvent.click(screen.getByText("Удалить"));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog").textContent).toContain("удаление из всей системы");
+    fireEvent.click(screen.getByText("Отмена"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onDelete).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText("Настроить «SANDBOX»"));
+    fireEvent.click(screen.getByText("Удалить"));
+    fireEvent.click(screen.getByText("Удалить из системы"));
     expect(onDelete).toHaveBeenCalledWith("1", "SANDBOX");
+  });
+
+  it("Escape в окне подтверждения — отмена, без удаления", () => {
+    const { onDelete } = open();
+    fireEvent.click(screen.getByText("Удалить"));
+    fireEvent.keyDown(screen.getByText("Отмена"), { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it("у песочницы «Удалить» нет", () => {

@@ -10894,6 +10894,44 @@ body.performance-mode .glass-card:hover {
   color: var(--hf-main-800);
   cursor: pointer;
 }
+/* Подтверждение «Удалить из системы» (12.11.2026). */
+.hf-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.35);
+}
+.hf-confirm {
+  width: min(420px, 100%);
+  padding: 20px;
+  border-radius: 14px;
+  background: var(--hf-white);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.25);
+  color: var(--hf-main-800);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.hf-confirm-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  background: var(--hf-red-50, #fef2f2);
+  color: var(--hf-red-600, #dc2626);
+}
+.hf-confirm h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; color: var(--hf-main-900); }
+.hf-confirm p { margin: 0 0 8px; color: var(--hf-main-600); }
+.hf-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.hf-confirm-actions button { padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; }
+.hf-confirm-cancel { border: 1px solid var(--hf-main-200); background: var(--hf-white); color: var(--hf-main-800); }
+.hf-confirm-cancel:hover { background: var(--hf-main-50, #f8fafc); }
+.hf-confirm-danger { border: 1px solid var(--hf-red-600, #dc2626); background: var(--hf-red-600, #dc2626); color: #fff; }
+.hf-confirm-danger:hover { filter: brightness(0.92); }
 .hf-option-menu-delete:hover { background: var(--hf-main-50, #f1f5f9); color: var(--hf-red-600); }
 .hf-statuses-picker-clear { color: var(--hf-main-500); }
 /* HR: вся ячейка — одна кнопка, открывающая окно (как Assignees в ClickUp). */
