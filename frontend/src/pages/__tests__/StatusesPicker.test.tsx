@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
-import { CatalogPicker, menuPosFor } from "../StatusesPage";
+import { CatalogPicker, canLeaveDepartment, menuPosFor } from "../StatusesPage";
 
 // Окно-список доски «Штат» — одно на все выпадающие (11.11.2026). Сторожим
 // мелочи, найденные при проверке: окно с несколькими значениями не
@@ -56,6 +56,17 @@ describe("CatalogPicker", () => {
     expect(input.value).toBe("");
   });
 
+  it("«Добавить» видна всегда: без текста — подсказка, с текстом — над списком", () => {
+    const { input } = setup([]);
+    expect(screen.getByText(/введите название/)).toBeTruthy();
+    fireEvent.change(input, { target: { value: "Вера" } });
+    expect(screen.queryByText(/введите название/)).toBeNull();
+    const add = screen.getByText(/Добавить «Вера»/);
+    // Сразу под поиском — раньше, чем любой пункт списка.
+    expect(input.nextElementSibling?.textContent).toContain("Добавить «Вера»");
+    expect(add).toBeTruthy();
+  });
+
   it("пустой список подсказывает, как добавить", () => {
     render(
       <CatalogPicker
@@ -71,6 +82,42 @@ describe("CatalogPicker", () => {
       />,
     );
     expect(screen.getByText(/Список пуст/)).toBeTruthy();
+  });
+});
+
+// Строка «— убрать» в окне отдела (как «–» в ClickUp, 11.11.2026) — то же,
+// что крестик на ячейке: из отдела можно, из песочницы — нет.
+describe("canLeaveDepartment", () => {
+  it("из отдела убрать может любой HR", () => {
+    expect(canLeaveDepartment({ placement_id: 5, department_is_sandbox: false }, false)).toBe(true);
+  });
+  it("из песочницы — только админ", () => {
+    expect(canLeaveDepartment({ placement_id: 5, department_is_sandbox: true }, false)).toBe(false);
+    expect(canLeaveDepartment({ placement_id: 5, department_is_sandbox: true }, true)).toBe(true);
+  });
+  it("без отдела убирать нечего", () => {
+    expect(canLeaveDepartment({ placement_id: null, department_is_sandbox: false }, true)).toBe(false);
+  });
+  it("строка «— убрать» стоит над списком и зовёт onClear", () => {
+    const onClear = vi.fn();
+    render(
+      <CatalogPicker
+        menuRef={createRef<HTMLDivElement>()}
+        pos={{ top: 0, left: 0 }}
+        placeholder="Найти или добавить отдел…"
+        groups={[{ label: "Отделы", options: [{ key: "7", label: "SEO отдел", editable: true }] }]}
+        taken={["SEO отдел"]}
+        current="7"
+        onPick={vi.fn()}
+        onAdd={vi.fn()}
+        onRename={vi.fn()}
+        onDelete={vi.fn()}
+        onClear={onClear}
+        clearLabel="— убрать из «SANDBOX»"
+      />,
+    );
+    fireEvent.click(screen.getByText("— убрать из «SANDBOX»"));
+    expect(onClear).toHaveBeenCalled();
   });
 });
 

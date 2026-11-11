@@ -2818,6 +2818,17 @@ const initialsOf = (name: string | null | undefined) =>
  *  30.09.2026 — «песочница родительский отдел, Facebook дочерний, а человек
  *  один объект»). В строке команды выбор переносит её в другой отдел, а «×»
  *  убирает человека из отдела; из песочницы «×» не предлагаем. */
+/** Можно ли убрать человека из отдела этой строки строкой «— убрать из …» в
+ *  окне. Из песочницы — только админ (так же проверяет сервер): её ставят по
+ *  ошибке, и снять было нечем — «SANDBOX выставлен ошибочно, как убрать?»
+ *  (владелец, 11.11.2026). Крестик на ячейке у песочницы по-прежнему не
+ *  рисуем: в строке песочницы главной показана команда, и «×» на ней
+ *  читался бы как «убрать из команды». */
+export const canLeaveDepartment = (
+  row: Pick<BoardRow, "placement_id" | "department_is_sandbox">,
+  isAdmin: boolean,
+) => row.placement_id != null && (!row.department_is_sandbox || isAdmin);
+
 function DepartmentCell({
   row, departments, onDepartments, onPlace, onUnplace, onReload,
 }: {
@@ -2829,6 +2840,8 @@ function DepartmentCell({
   onReload: () => void;
 }) {
   const menu = useCellMenu();
+  const isAdmin = useAuthStore((st) =>
+    st.user?.role === "superadmin" || st.user?.org_role === "owner" || st.user?.org_role === "admin");
   // Главным в ячейке всегда рабочий отдел — даже в строке песочницы: «нужно
   // видеть отделы везде, даже на сендбоксе» (Мария, 07.10.2026). Под ним —
   // подпись «из <песочницы>»: её убирали 09.10.2026 вместе с вложенностью
@@ -2914,6 +2927,10 @@ function DepartmentCell({
           {...metaHandlers("departments")}
           taken={departments.map((d) => d.name)}
           current={row.department_id != null ? String(row.department_id) : null}
+          // Строка «— убрать» сверху, как «–» в ClickUp (клиент, 11.11.2026):
+          // то же, что крестик на ячейке, — человек уходит из этого отдела.
+          onClear={canLeaveDepartment(row, isAdmin) ? () => { menu.close(); onUnplace(); } : undefined}
+          clearLabel={`— убрать из «${row.department_name}»`}
           onPick={(key) => { menu.close(); if (key !== String(row.department_id)) onPlace(Number(key)); }}
           onAdd={async (text) => {
             menu.close();
@@ -2946,7 +2963,7 @@ function DepartmentCell({
           }}
         />
       )}
-      {row.placement_id != null && !row.department_is_sandbox && (
+      {canLeaveDepartment(row, false) && (
         <button
           type="button"
           className="hf-statuses-dept-remove"
@@ -3132,7 +3149,7 @@ export const colorPill = (color: string): React.CSSProperties => ({
  *  прокрутке доски). */
 export function CatalogPicker({
   menuRef, pos, placeholder, groups, taken, current, selected,
-  onPick, onAdd, onRename, onDelete, onClear, onRecolor, onReorder,
+  onPick, onAdd, onRename, onDelete, onClear, clearLabel, onRecolor, onReorder,
 }: {
   menuRef: React.RefObject<HTMLDivElement>;
   pos: MenuPos;
@@ -3148,11 +3165,14 @@ export function CatalogPicker({
   onRename: (key: string, text: string) => void;
   onDelete: (key: string, label: string) => void;
   onClear?: () => void;
+  /** Подпись строки очистки, если «— убрать» мало (отдел: откуда именно). */
+  clearLabel?: string;
   onRecolor?: (key: string, color: string | null) => void;
   /** Новый порядок ключей группы — после перетаскивания. */
   onReorder?: (groupLabel: string, keys: string[]) => void | Promise<void>;
 }) {
   const [q, setQ] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   // Меню «…» висит поверх окна (fixed), а не внутри прокручиваемого списка:
   // у нижних пунктов оно уходило под край списка и было не видно (11.11.2026).
@@ -3337,6 +3357,7 @@ export function CatalogPicker({
       onScroll={() => { if (menuFor) { setMenuFor(null); setColorFor(null); } }}
     >
       <input
+        ref={searchRef}
         autoFocus
         className="hf-statuses-picker-search"
         placeholder={placeholder}
@@ -3353,9 +3374,17 @@ export function CatalogPicker({
           else if (first) pick(first.key);
         }}
       />
+      {/* «Добавить» — сразу под поиском, а не в конце списка: у длинного
+          списка она пряталась внизу, и «как добавить отдел — непонятно»
+          (владелец, 11.11.2026). */}
+      {canAdd && (
+        <button type="button" className="hf-statuses-hr-option hf-statuses-picker-add" onClick={() => add(text)}>
+          <Plus size={13} /> Добавить «{text}»
+        </button>
+      )}
       {onClear && !needle && (
         <button type="button" className="hf-statuses-hr-option hf-statuses-picker-clear" onClick={onClear}>
-          — убрать
+          {clearLabel || "— убрать"}
         </button>
       )}
       {multi && picked.length > 0 && (
@@ -3370,9 +3399,15 @@ export function CatalogPicker({
           {g.options.map((o) => row(o, g.label, false))}
         </div>
       ))}
-      {canAdd && (
-        <button type="button" className="hf-statuses-hr-option hf-statuses-picker-add" onClick={() => add(text)}>
-          <Plus size={13} /> Добавить «{text}»
+      {/* Пока ничего не ввели — видимая подсказка, что новое добавляется
+          отсюда же: клик ставит курсор в поиск. */}
+      {!needle && (shown.length > 0 || picked.length > 0) && (
+        <button
+          type="button"
+          className="hf-statuses-hr-option hf-statuses-picker-add is-hint"
+          onClick={() => searchRef.current?.focus()}
+        >
+          <Plus size={13} /> Добавить — введите название в поиске
         </button>
       )}
       {!shown.length && !picked.length && !canAdd && (

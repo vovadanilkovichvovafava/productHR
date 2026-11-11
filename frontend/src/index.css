@@ -10828,6 +10828,19 @@ body.performance-mode .glass-card:hover {
 .hf-statuses-picker-actions button:hover { background: var(--hf-main-50, #f1f5f9); }
 .hf-statuses-picker-actions .is-danger { color: var(--hf-red-600); }
 .hf-statuses-picker-add { color: var(--hf-cyan-700); font-weight: var(--hf-fw-semibold); }
+/* Подсказка «Добавить — введите название» прилипает к низу окна: у длинного
+   списка иначе её не видно без прокрутки. */
+.hf-statuses-picker-add.is-hint {
+  position: sticky;
+  bottom: -4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--hf-main-100);
+  border-radius: 0 0 6px 6px;
+  background: var(--hf-white);
+  color: var(--hf-main-500);
+  font-weight: normal;
+}
+.hf-statuses-picker-add.is-hint:hover { color: var(--hf-cyan-700); }
 .hf-statuses-picker-grip { display: grid; place-items: center; width: 14px; color: var(--hf-main-300); visibility: hidden; cursor: grab; }
 .hf-statuses-picker-row:hover .hf-statuses-picker-grip { visibility: visible; }
 .hf-statuses-picker-row.is-dragging { opacity: 0.4; }
