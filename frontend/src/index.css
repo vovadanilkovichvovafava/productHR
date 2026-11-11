@@ -325,7 +325,114 @@
 }
 
 .hf-hr-nav-list > * + * {
-  margin-top: var(--hf-space-xs);
+  margin-top: 2px;
+}
+
+/* Низ панели — «Закрытые вакансии» и «Корзина» — вне прокрутки, всегда на
+   виду (Мария, 11.11.2026). Прокручивается только .hf-hr-nav над ним. */
+.hf-hr-nav-footer {
+  flex-shrink: 0;
+  padding-right: var(--hf-sidebar-scroll-pr);
+}
+
+.hf-hr-nav-footer > .hf-hr-nav-item + .hf-hr-nav-item {
+  margin-top: 2px;
+}
+
+/* Глаз «показать / скрыть» у списка вакансий (владелец,
+   11.11.2026: «иконку глазика, анимированную»). */
+.hf-hr-eye-toggle {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--hf-radius-xs);
+  color: var(--hf-white-alpha-68);
+  transition: background-color var(--hf-transition-fast), color var(--hf-transition-fast);
+}
+
+.hf-hr-eye-toggle:hover,
+.hf-hr-nav-item:hover .hf-hr-eye-toggle {
+  background: var(--hf-white-alpha-08);
+  color: var(--hf-white);
+}
+
+.hf-eye {
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+}
+
+.hf-eye-ball {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hf-eye-blink 0.32s ease-in-out;
+}
+
+.hf-eye-off .hf-eye-ball {
+  opacity: 0.7;
+}
+
+.hf-eye-slash {
+  stroke-dasharray: 23;
+  stroke-dashoffset: 23;
+  transition: stroke-dashoffset 0.28s ease 0.12s;
+}
+
+.hf-eye-off .hf-eye-slash {
+  stroke-dashoffset: 0;
+}
+
+@keyframes hf-eye-blink {
+  0%   { transform: scaleY(1); }
+  45%  { transform: scaleY(0.12); }
+  100% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hf-eye-ball { animation: none; }
+  .hf-eye-slash { transition: none; }
+}
+
+/* «Пришла заявка» (Мария, 11.11.2026: «ярким каким-то светом подсвечивать,
+   что пришла задача»): пункт светится, пока есть невиданная заявка. */
+/* Свечение — ВНУТРИ пункта (inset), а не внешней тенью: меню —
+   прокручиваемая область, она срезала внешнюю тень по краям, и вокруг
+   пункта висела обрезанная «пелена» (владелец, 11.11.2026). */
+@keyframes hf-hr-request-glow {
+  0%, 100% {
+    background-color: rgba(220, 38, 38, 0.72);
+    box-shadow: inset 0 0 0 2px #ff7a7a, inset 0 0 10px rgba(255, 255, 255, 0.10);
+  }
+  50% {
+    background-color: rgba(239, 68, 68, 0.95);
+    box-shadow: inset 0 0 0 2px #ffc2c2, inset 0 0 16px rgba(255, 255, 255, 0.28);
+  }
+}
+
+/* Пришла заявка — пункт горит КРАСНЫМ (владелец, 11.11.2026: «пусть она
+   будет гореть красным цветом»). */
+.hf-hr-nav-item-alert,
+.hf-hr-nav-item-alert:hover {
+  background-color: rgba(220, 38, 38, 0.72);
+  color: #ffffff;
+  font-weight: var(--hf-fw-medium);
+  animation: hf-hr-request-glow 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hf-hr-nav-item-alert {
+    animation: none;
+    background-color: rgba(239, 68, 68, 0.9);
+    box-shadow: inset 0 0 0 2px #ff7a7a;
+  }
+}
+
+.hf-hr-request-item-new .hf-hr-request-title {
+  color: #ff8a8a;
+  font-weight: var(--hf-fw-medium);
 }
 
 .hf-hr-nav-item {
@@ -391,10 +498,14 @@
 
 .hf-hr-request-list {
   margin-top: var(--hf-sidebar-request-list-mt);
+  /* Заявок может прийти десяток — список не растягивает панель, а
+     прокручивается сам: видно около четырёх (Мария, 11.11.2026). */
+  max-height: 172px;
+  overflow-y: auto;
 }
 
 .hf-hr-request-list > * + * {
-  margin-top: var(--hf-space-s);
+  margin-top: var(--hf-space-xs);
 }
 
 .hf-hr-request-item {
@@ -508,7 +619,13 @@
 .hf-hr-funnels-header {
   display: flex;
   align-items: center;
-  gap: var(--hf-space-xs);
+  gap: 0;
+}
+
+/* Рядом с глазом кнопке-триггеру не нужен правый отступ — иначе имя
+   владельца («Вакансии: Пётр») обрезается. */
+.hf-hr-funnels-header .hf-hr-funnels-trigger:not(:last-child) {
+  padding-right: 6px;
 }
 
 .hf-hr-funnels-trigger {

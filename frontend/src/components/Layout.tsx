@@ -2,6 +2,14 @@ import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { isRequestVisibleTo, isPersonallyActive } from "@/utils/vacancy";
 import { pluralRu } from "@/utils/plural";
 import {
+  loadPanelFlag,
+  loadSeenRequests,
+  markRequestsSeen,
+  savePanelFlag,
+  saveSeenRequests,
+  unseenRequestIds,
+} from "@/utils/sidebarRequests";
+import {
   LayoutDashboard,
   Users,
   Settings,
@@ -41,6 +49,7 @@ import BackgroundEffects from "./BackgroundEffects";
 import ThemeToggle from "./ThemeToggle";
 import { VacancyForm } from "@/components/vacancies";
 import { SidebarRequestPreviewModal } from "@/components/hr/SidebarRequestPreviewModal";
+import { EyeToggleIcon } from "@/components/hr/EyeToggleIcon";
 import HrSettingsModal from "@/components/hr/HrSettingsModal";
 import ParserModal from "@/components/parser/ParserModal";
 import TelegramConnectBanner from "@/components/TelegramConnectBanner";
@@ -282,7 +291,20 @@ export default function Layout() {
   // Sidebar: expandable "Мои воронки" with vacancy list
   const { vacancies, fetchVacancies } = useVacancyStore();
   const [expandedFunnels, setExpandedFunnels] = useState(false);
-  const [expandedRequests, setExpandedRequests] = useState(true);
+  // Свернуть/развернуть «Заявки» и список вакансий — запоминается на
+  // устройстве (Мария, 11.11.2026: у Эльвиры длинный список вакансий).
+  // «Заявки» по умолчанию свёрнуты — видно только пункт со счётчиком и
+  // подсветкой, список раскрывается по нажатию (Мария, 11.11.2026: «только
+  // уведомление о заявке, и она раскрывается»). Не запоминаем: при каждом
+  // открытии страницы снова свёрнуто.
+  const [expandedRequests, setExpandedRequests] = useState(false);
+  const [funnelsListOpen, setFunnelsListOpenState] = useState(() =>
+    loadPanelFlag("hf-sidebar-funnels-open", true),
+  );
+  const setFunnelsListOpen = useCallback((value: boolean) => {
+    setFunnelsListOpenState(value);
+    savePanelFlag("hf-sidebar-funnels-open", value);
+  }, []);
   const [sidebarVacancy, setSidebarVacancy] = useState<Vacancy | null>(null);
   const [sidebarVacancyMode, setSidebarVacancyMode] =
     useState<SidebarVacancyMode>("view");
@@ -370,6 +392,18 @@ export default function Layout() {
     if (routeBlock === "hr") {
       fetchVacancies();
     }
+  }, [routeBlock, fetchVacancies]);
+
+  // Список вакансий раньше грузился только при входе в раздел HR: новая
+  // заявка в панели появлялась лишь после F5. Тихо обновляем раз в минуту,
+  // пока вкладка на виду, — иначе подсветке «пришла заявка» нечего показать.
+  useEffect(() => {
+    if (routeBlock !== "hr") return;
+    const tick = () => {
+      if (document.visibilityState === "visible") fetchVacancies(true).catch(() => undefined);
+    };
+    const interval = setInterval(tick, 60000);
+    return () => clearInterval(interval);
   }, [routeBlock, fetchVacancies]);
 
   useLayoutEffect(() => {
@@ -910,6 +944,33 @@ export default function Layout() {
   // нераспределённых. Список визуально ограничен 8, счётчик — полный.
   const sidebarRequestCount = allSidebarRequests.length;
   const sidebarRequestVacancies = allSidebarRequests.slice(0, 8);
+  // «Пришла заявка» (Мария, 11.11.2026): «Заявки» светятся, пока в списке
+  // есть заявка, которую человек ещё не видел. Видел — нажал «Заявки» или
+  // открыл саму заявку. Первый заход (на устройстве пусто) — всё текущее
+  // считаем увиденным, чтобы панель не загоралась от старых заявок.
+  const [seenRequestIds, setSeenRequestIds] = useState<number[] | null>(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    const stored = loadSeenRequests(user.id);
+    if (stored == null && vacancies.length > 0) {
+      const baseline = markRequestsSeen(allSidebarRequests.map((v) => v.id), null);
+      saveSeenRequests(user.id, baseline);
+      setSeenRequestIds(baseline);
+    } else {
+      setSeenRequestIds(stored);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, vacancies.length > 0]);
+  const newRequestIds = new Set(
+    unseenRequestIds(allSidebarRequests.map((v) => v.id), seenRequestIds),
+  );
+  const hasNewRequests = newRequestIds.size > 0;
+  const markSidebarRequestsSeen = (ids?: number[]) => {
+    if (!user?.id || seenRequestIds == null) return;
+    const next = markRequestsSeen(allSidebarRequests.map((v) => v.id), seenRequestIds, ids);
+    saveSeenRequests(user.id, next);
+    setSeenRequestIds(next);
+  };
   const getSidebarRequestAuthor = (vacancy: Vacancy) =>
     vacancy.created_by_name ||
     vacancy.hiring_manager_name ||
@@ -1119,25 +1180,45 @@ export default function Layout() {
                 <div>
                   <button
                     type="button"
-                    onClick={() => setExpandedRequests(!expandedRequests)}
-                    className="hf-hr-nav-item hf-hr-nav-item-white w-full"
+                    onClick={() => {
+                      // Нажал «Заявки» — новые увидел, подсветка гаснет.
+                      if (hasNewRequests) {
+                        markSidebarRequestsSeen();
+                        setExpandedRequests(true);
+                        return;
+                      }
+                      setExpandedRequests(!expandedRequests);
+                    }}
+                    className={clsx(
+                      "hf-hr-nav-item hf-hr-nav-item-white w-full",
+                      hasNewRequests && "hf-hr-nav-item-alert",
+                    )}
                     aria-expanded={expandedRequests}
+                    title={
+                      hasNewRequests
+                        ? "Пришла новая заявка — нажмите, чтобы посмотреть"
+                        : expandedRequests ? "Скрыть заявки" : "Показать заявки"
+                    }
                   >
                     <HfSpriteIcon
                       id="edit-2-20"
                       className="hf-hr-nav-icon"
                     />
                     <span className="min-w-0 flex-1">Заявки</span>
-                    {/* Счётчик рядом с «Заявки» = ВСЕГО заявок (как в списке),
-                        а не только нераспределённых. */}
-                    {isHrSidebarAdmin && sidebarRequestCount > 0 && (
-                      <span className="mr-2 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--hf-status-red)] px-1.5 text-[11px] font-semibold leading-none text-white">
+                    {/* Счётчик рядом с «Заявки» = ВСЕГО заявок (как в списке).
+                        С 11.11.2026 — у всех, не только у админов: рекрутёру
+                        тоже прилетают заявки (назначили). */}
+                    {sidebarRequestCount > 0 && (
+                      <span className={clsx(
+                        "ml-1.5 mr-2 inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold leading-none",
+                        hasNewRequests
+                          ? "bg-white text-[#b91c1c]"
+                          : "bg-[var(--hf-status-red)] text-white",
+                      )}>
                         {sidebarRequestCount}
                       </span>
                     )}
-                    <span className="hf-hr-secondary-text">
-                      {expandedRequests ? "Свернуть" : "Развернуть"}
-                    </span>
+
                   </button>
                   {expandedRequests && (
                     <div className="hf-hr-request-list">
@@ -1145,8 +1226,14 @@ export default function Layout() {
                         <button
                           key={v.id}
                           type="button"
-                          onClick={() => openVacancyModal(v.id)}
-                          className="group hf-hr-request-item"
+                          onClick={() => {
+                            markSidebarRequestsSeen([v.id]);
+                            openVacancyModal(v.id);
+                          }}
+                          className={clsx(
+                            "group hf-hr-request-item",
+                            newRequestIds.has(v.id) && "hf-hr-request-item-new",
+                          )}
                         >
                           <span
                             className={clsx(
@@ -1213,6 +1300,21 @@ export default function Layout() {
                           />
                         </span>
                       </button>
+                      {/* Глаз: показать / скрыть список вакансий (Мария,
+                          11.11.2026: у Эльвиры длинный список; владелец —
+                          «иконку глазика, анимированную»). */}
+                      {sidebarOpenVacancies.length > 0 && (
+                        <button
+                          type="button"
+                          className="hf-hr-eye-toggle"
+                          onClick={() => setFunnelsListOpen(!funnelsListOpen)}
+                          aria-expanded={funnelsListOpen}
+                          aria-label={funnelsListOpen ? "Скрыть вакансии" : `Показать вакансии · ${sidebarOpenVacancies.length}`}
+                          title={funnelsListOpen ? "Скрыть вакансии" : `Показать вакансии · ${sidebarOpenVacancies.length}`}
+                        >
+                          <EyeToggleIcon open={funnelsListOpen} />
+                        </button>
+                      )}
                     </div>
                     <AnimatePresence>
                       {showHrFunnelsPicker && (
@@ -1332,7 +1434,7 @@ export default function Layout() {
                       иначе при длинном списке (много принятых вакансий)
                       вакансии внизу выглядывают из-под попапа, который
                       рассчитан на компактную высоту (поиск + один пункт). */}
-                  {!showHrFunnelsPicker && sidebarOpenVacancies.length > 0 && (
+                  {!showHrFunnelsPicker && funnelsListOpen && sidebarOpenVacancies.length > 0 && (
                     <div className="hf-hr-subnav">
                       {sidebarOpenVacancies.map((v) => (
                         <NavLink
@@ -1354,60 +1456,68 @@ export default function Layout() {
                             )
                           }
                         >
-                          <span className="hf-hr-request-title">
+                          {/* Одна строка на вакансию (Мария, 11.11.2026: «уменьшить
+                              панель»). Подпись «IT» под каждой стояла у всех
+                              одинаково — заглушка, когда отдел не указан, — и
+                              удваивала длину списка. Отдел, если указан, — в
+                              подсказке. */}
+                          <span
+                            className="hf-hr-request-title"
+                            title={(() => {
+                              const dept = (v.extra_data as Record<string, unknown> | undefined)?.department;
+                              return typeof dept === "string" && dept.trim() ? `${v.title} · ${dept}` : v.title;
+                            })()}
+                          >
                             {v.title}
-                          </span>
-                          <span className="hf-hr-request-meta">
-                            {typeof (
-                              v.extra_data as
-                                | Record<string, unknown>
-                                | undefined
-                            )?.department === "string"
-                              ? ((v.extra_data as Record<string, unknown>)
-                                  .department as string)
-                              : "IT"}
                           </span>
                         </NavLink>
                       ))}
                     </div>
                   )}
                 </div>
-
-                <div className="hf-hr-sidebar-divider hf-hr-sidebar-divider-closed" />
-
-                <NavLink
-                  to="/my-funnels?status=closed"
-                  className={clsx(
-                    "hf-hr-nav-item",
-                    isClosedFunnelsView
-                      ? "hf-hr-nav-item-active"
-                      : "hf-hr-nav-item-white",
-                  )}
-                >
-                  <HfSpriteIcon
-                    id="archive-2-20"
-                    className="hf-hr-nav-icon"
-                  />
-                  <span className="min-w-0 flex-1">Закрытые вакансии</span>
-                </NavLink>
-
-                {/* Корзина (09.11.2026, владелец): была спрятана в «Настройках HR».
-                    Название «Корзина кандидатов», чтобы не путали с закрытыми
-                    вакансиями: тут удалённые и убранные из воронки, 7 дней на возврат. */}
-                <NavLink
-                  to="/deleted-candidates"
-                  title="Удалённые кандидаты и убранные из воронки. Можно открыть и вернуть в течение 7 дней"
-                  className={({ isActive }) =>
-                    clsx(
-                      "hf-hr-nav-item",
-                      isActive ? "hf-hr-nav-item-active" : "hf-hr-nav-item-white",
-                    )
-                  }
-                >
-                  <Trash2 className="hf-hr-nav-icon" strokeWidth={1.75} />
-                  <span className="min-w-0 flex-1">Корзина кандидатов</span>
-                </NavLink>
               </nav>
+              )}
+              {!isFactorial && (
+                // Низ панели закреплён (Мария, 11.11.2026: «как ей неудобно
+                // листать все свои вакансии и искать закрытые вакансии…
+                // можно ли закрепить вот эту часть»): прокручивается только
+                // верх со списком вакансий, «Закрытые» и «Корзина» видны всегда.
+                <div className="hf-hr-nav-footer">
+                  <div className="hf-hr-sidebar-divider hf-hr-sidebar-divider-closed" />
+
+                  <NavLink
+                    to="/my-funnels?status=closed"
+                    className={clsx(
+                      "hf-hr-nav-item",
+                      isClosedFunnelsView
+                        ? "hf-hr-nav-item-active"
+                        : "hf-hr-nav-item-white",
+                    )}
+                  >
+                    <HfSpriteIcon
+                      id="archive-2-20"
+                      className="hf-hr-nav-icon"
+                    />
+                    <span className="min-w-0 flex-1">Закрытые вакансии</span>
+                  </NavLink>
+
+                  {/* Корзина (09.11.2026, владелец): была спрятана в «Настройках HR».
+                      Название «Корзина кандидатов», чтобы не путали с закрытыми
+                      вакансиями: тут удалённые и убранные из воронки, 7 дней на возврат. */}
+                  <NavLink
+                    to="/deleted-candidates"
+                    title="Удалённые кандидаты и убранные из воронки. Можно открыть и вернуть в течение 7 дней"
+                    className={({ isActive }) =>
+                      clsx(
+                        "hf-hr-nav-item",
+                        isActive ? "hf-hr-nav-item-active" : "hf-hr-nav-item-white",
+                      )
+                    }
+                  >
+                    <Trash2 className="hf-hr-nav-icon" strokeWidth={1.75} />
+                    <span className="min-w-0 flex-1">Корзина кандидатов</span>
+                  </NavLink>
+                </div>
               )}
 
               {!isFactorial && (

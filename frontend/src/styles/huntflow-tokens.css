@@ -187,7 +187,9 @@
   --hf-sidebar-block-lh:         10px;
   --hf-sidebar-block-stroke:     1.8;
   --hf-sidebar-scroll-pr:        6px;
-  --hf-sidebar-nav-item-h:       40px;
+  /* Плотнее с 11.11.2026 (Мария: «уменьшить расстояние между кнопками»):
+     пункт 40→34, разделители 19/14/17/18→10/8/8/8. */
+  --hf-sidebar-nav-item-h:       34px;
   --hf-sidebar-nav-gap:          12px;
   --hf-sidebar-nav-px:           12px;
   --hf-sidebar-nav-radius:       var(--hf-radius-s);
@@ -197,10 +199,10 @@
   --hf-sidebar-nav-fw:           var(--hf-fw-regular);
   --hf-sidebar-secondary-fs:     var(--hf-fs-xxs);
   --hf-sidebar-secondary-lh:     var(--hf-lh-secondary);
-  --hf-sidebar-divider-requests-mt: 19px;
-  --hf-sidebar-divider-requests-mb: 14px;
-  --hf-sidebar-divider-funnels-y:   17px;
-  --hf-sidebar-divider-closed-y:    18px;
+  --hf-sidebar-divider-requests-mt: 10px;
+  --hf-sidebar-divider-requests-mb: 8px;
+  --hf-sidebar-divider-funnels-y:   8px;
+  --hf-sidebar-divider-closed-y:    8px;
   --hf-sidebar-dot-size:         8px;
   --hf-sidebar-dot-mt:           6px;
   --hf-sidebar-request-gap:      10px;
