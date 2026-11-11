@@ -1934,6 +1934,60 @@ def _clean_scope(raw: str) -> str:
     return key
 
 
+# --- Общий вид доски (11.11.2026) -------------------------------------------
+# Клиент: «этот вид не должен быть у каждого разным — он должен быть единым у
+# всех, кто использует АТС: если Маша уберёт столбец „2 недели“, он уберётся у
+# всех». Менять может любой HR (решение владельца). Один вид на всю доску —
+# на всех вкладках. Храним СКРЫТЫЕ колонки, а не показанные: новая колонка
+# тогда сама появляется у всех. Секций в виде больше нет — видны все.
+# Личные наборы (/status-views ниже) с этого дня доской не читаются.
+_BOARD_VIEW_KEY = "board_view"
+
+
+class BoardView(BaseModel):
+    hidden: List[str] = []
+
+
+def _board_view(org: Organization) -> BoardView:
+    raw = (org.settings if isinstance(org.settings, dict) else {}).get(_BOARD_VIEW_KEY) or {}
+    hidden = [c for c in (raw.get("hidden") or []) if c in BOARD_COLUMNS]
+    return BoardView(hidden=list(dict.fromkeys(hidden)))
+
+
+@router.get("/board-view", response_model=BoardView)
+async def get_board_view(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    return _board_view(org)
+
+
+@router.put("/board-view", response_model=BoardView)
+async def save_board_view(
+    data: BoardView,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    hidden = [c for c in dict.fromkeys(data.hidden) if c in BOARD_COLUMNS]
+    settings = dict(org.settings) if isinstance(org.settings, dict) else {}
+    view = dict(settings.get(_BOARD_VIEW_KEY) or {})
+    view["hidden"] = hidden
+    settings[_BOARD_VIEW_KEY] = view
+    org.settings = settings
+    flag_modified(org, "settings")
+    await db.commit()
+    logger.info(f"BOARD_VIEW: скрыты {hidden or 'ничего'} by user {current_user.id}")
+    return _board_view(org)
+
+
 @router.get("/status-views", response_model=List[BoardStatusViewOut])
 async def list_status_views(
     db: AsyncSession = Depends(get_db),

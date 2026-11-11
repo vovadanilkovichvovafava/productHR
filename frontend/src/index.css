@@ -10608,6 +10608,110 @@ body.performance-mode .glass-card:hover {
   cursor: pointer;
 }
 .hf-statuses-mark-btn { cursor: pointer; }
+.hf-statuses-person-empty { color: var(--hf-main-300); }
+.hf-statuses-assignee-open:hover .hf-statuses-person-empty { color: var(--hf-main-500); }
+
+/* Шестерёнка и панель «Поля» — как в ClickUp (11.11.2026). */
+.hf-statuses-gear {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: var(--hf-border-xs) solid var(--hf-ui-border);
+  border-radius: var(--hf-radius-s);
+  background: var(--hf-white);
+  color: var(--hf-main-700);
+}
+.hf-statuses-gear:hover { background: var(--hf-main-100); }
+.hf-fields-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  width: 319px;
+  padding: 12px 8px;
+  border-left: 1px solid var(--hf-ui-border);
+  background: var(--hf-white);
+  box-shadow: -8px 0 24px rgba(15, 23, 42, 0.08);
+}
+.hf-fields-head { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 10px; }
+.hf-fields-head h3 { font-size: 14px; font-weight: 600; color: var(--hf-main-900); }
+.hf-fields-search {
+  margin: 0 8px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--hf-cyan-500);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+}
+.hf-fields-note { padding: 0 8px 8px; font-size: 12px; color: var(--hf-main-500); }
+.hf-fields-list { flex: 1; min-height: 0; overflow-y: auto; }
+.hf-fields-group {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 8px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--hf-main-500);
+}
+.hf-fields-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--hf-main-900);
+  cursor: pointer;
+}
+.hf-fields-row:hover { background: var(--hf-main-50, #f1f5f9); }
+.hf-fields-row.is-locked { color: var(--hf-main-400); cursor: default; }
+.hf-fields-ico { display: grid; place-items: center; width: 18px; color: var(--hf-main-500); }
+.hf-fields-aa { font-size: 13px; font-weight: 600; }
+.hf-fields-ico-date { color: #16a34a; }
+.hf-fields-ico-drop { color: #16a34a; }
+.hf-fields-ico-text { color: #2563eb; }
+.hf-fields-ico-file { color: #7c3aed; }
+.hf-fields-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hf-fields-switch {
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 24px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--hf-main-300);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.hf-fields-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.hf-fields-switch:checked { background: #7b68ee; }
+.hf-fields-switch:checked::after { transform: translateX(10px); }
+.hf-fields-switch:disabled { opacity: 0.5; cursor: default; }
+.hf-fields-empty { padding: 4px 8px; font-size: 12px; color: var(--hf-main-400); }
+.hf-fields-reset {
+  margin: 8px;
+  padding: 8px;
+  border: 1px solid var(--hf-ui-border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--hf-main-800);
+}
+.hf-fields-reset:hover { background: var(--hf-main-50, #f1f5f9); }
 .hf-statuses-avatar {
   display: grid;
   place-items: center;

@@ -315,33 +315,18 @@ export async function removeBoardPlacement(placementId: number): Promise<void> {
 
 // ─── Личные наборы секций доски ─────────────────────────────
 
-/** Какие секции доски показывать на одной вкладке. Своё у каждого человека и у
- *  каждого отдела (мит 07.10.2026: «у Маши в SANDBOX видны „Перевёлся“ и
- *  „Практика“, а у Насти только „Уволился“»). Нет записи — показываем все. */
-export interface BoardStatusView {
-  /** 'all' | 'none' (без отдела) | id отдела строкой */
-  scope_key: string;
-  statuses: string[];
-  /** Ключи видимых колонок таблицы; пусто — показываем все. */
-  columns: string[];
+/** Общий вид доски (клиент, 11.11.2026): одна настройка колонок на всех HR и
+ *  все вкладки. Храним скрытые колонки — новая колонка появляется у всех сама. */
+export interface BoardView {
+  hidden: string[];
 }
 
-export async function getBoardStatusViews(): Promise<BoardStatusView[]> {
-  const { data } = await api.get('/staff-board/status-views');
-  return data || [];
+export async function getBoardView(): Promise<BoardView> {
+  const { data } = await api.get('/staff-board/board-view');
+  return data || { hidden: [] };
 }
 
-/** Сохранить СВОЙ набор для вкладки. Пустой список или «отмечено всё» —
- *  сбросить: вкладка снова показывает все секции. */
-export async function saveBoardStatusView(
-  scopeKey: string,
-  view: { statuses?: string[]; columns?: string[] }
-): Promise<BoardStatusView[]> {
-  // Не переданное поле сервер оставляет как было: можно менять только секции
-  // или только колонки, не сбивая второе.
-  const { data } = await api.put('/staff-board/status-views', {
-    scope_key: scopeKey,
-    ...view,
-  });
-  return data || [];
+export async function saveBoardView(hidden: string[]): Promise<BoardView> {
+  const { data } = await api.put('/staff-board/board-view', { hidden });
+  return data || { hidden: [] };
 }

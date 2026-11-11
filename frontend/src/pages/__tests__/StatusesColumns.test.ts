@@ -35,3 +35,15 @@ describe("pickColumns", () => {
     expect(pickColumns(["мусор"]).map((c) => c.key)).toEqual(["name"]);
   });
 });
+
+describe("visibleOf — общий вид (11.11.2026)", () => {
+  it("скрытые колонки убраны, «ФИО» — всегда, новые (не в списке скрытых) видны", async () => {
+    const { visibleOf } = await import("../StatusesPage");
+    const keys = visibleOf(["w2", "w2_done", "name"]).map((c) => c.key);
+    expect(keys[0]).toBe("name");
+    expect(keys).not.toContain("w2");
+    expect(keys).not.toContain("w2_done");
+    expect(keys).toContain("rejection_reason");
+    expect(visibleOf([]).length).toBe(visibleOf(null).length);
+  });
+});

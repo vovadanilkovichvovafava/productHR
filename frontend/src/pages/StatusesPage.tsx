@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { ReactNode } from "react";
 import {
   Search, Loader2, Plus, Pencil, Check, Copy, Download, X, MoreHorizontal, Trash2,
-  ChevronRight, ChevronDown, Paperclip, Upload, SlidersHorizontal, ListChecks,
+  Settings, Calendar, ChevronDownSquare, Type, User as UserIcon,
+  ChevronRight, ChevronDown, Paperclip, Upload, SlidersHorizontal,
 } from "lucide-react";
 import clsx from "clsx";
 import * as XLSX from "xlsx";
@@ -18,10 +19,10 @@ import {
 } from "@/services/api/staffBoard";
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
 import {
-  getBoardStatusViews, saveBoardStatusView,
+  getBoardView, saveBoardView,
 } from "@/services/api/staffBoard";
 import { getOrgMembers } from "@/services/api/accessHub";
-import { addTagToEntity, getTags, removeTagFromEntity, type Tag } from "@/services/api/tags";
+import { addTagToEntity, createTag, getTags, removeTagFromEntity, type Tag } from "@/services/api/tags";
 import { useUrlTab } from "@/hooks/useUrlTab";
 import { useAuthStore } from "@/stores/authStore";
 import { STATUS_LABELS } from "@/types";
@@ -115,6 +116,11 @@ const HIDEABLE_COLUMNS = COLUMNS.filter((c) => c.key !== "name");
 /** Колонки вкладки: пусто — показываем все, иначе только отмеченные, и
  *  «Сотрудник» всегда первым (его прятать нельзя). Порядок всегда из COLUMNS,
  *  чтобы таблица не переставлялась от порядка галочек. */
+/** Колонки на экране по общему виду: всё, кроме скрытых; «ФИО» — всегда. */
+export function visibleOf(hidden?: string[] | null): typeof COLUMNS {
+  return COLUMNS.filter((c) => c.key === "name" || !(hidden ?? []).includes(c.key));
+}
+
 export function pickColumns(chosen?: string[] | null): typeof COLUMNS {
   if (!chosen?.length) return COLUMNS;
   return COLUMNS.filter((c) => c.key === "name" || chosen.includes(c.key));
@@ -547,19 +553,12 @@ export default function StatusesPage() {
     );
 
   const months = useMemo(() => recentMonths(), []);
-  // Какие секции показывать: СВОЙ набор у каждого и на каждой вкладке (мит
-  // 07.10.2026 — «у Маши в SANDBOX видны „Перевёлся“ и „Практика“, а у Насти
-  // только „Уволился“»). Ключ — та же строка, что у вкладки: «all», «__none__»
-  // или id отдела. Нет записи — показываем все секции.
-  const [statusViews, setStatusViews] = useState<Record<string, string[]>>({});
-  const [columnViews, setColumnViews] = useState<Record<string, string[]>>({});
-  const [showSections, setShowSections] = useState(false);
-  /** Ответ сервера → два словаря: наборы секций и наборы колонок по вкладкам. */
-  const applyViews = useCallback((list: { scope_key: string; statuses: string[]; columns: string[] }[]) => {
-    setStatusViews(Object.fromEntries(list.map((v) => [v.scope_key, v.statuses])));
-    setColumnViews(Object.fromEntries(list.map((v) => [v.scope_key, v.columns || []])));
-  }, []);
-  const [savingSections, setSavingSections] = useState(false);
+  // Вид доски — ОБЩИЙ для всех HR и всех вкладок (клиент, 11.11.2026: «если
+  // Маша уберёт столбец „2 недели“, он уберётся у всех»). Секций в виде больше
+  // нет — видны все. До 11.11 у каждого был свой набор секций и колонок на
+  // каждой вкладке (мит 07.10.2026).
+  const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
+  const [showFields, setShowFields] = useState(false);
   // Окно выгрузки: месяцы и вехи стажа выбирают галочками, книга собирается
   // листами (Мария, 07.10.2026 — «выгрузка за сентябрь, октябрь и декабрь»).
   const [showExport, setShowExport] = useState(false);
@@ -600,9 +599,7 @@ export default function StatusesPage() {
     for (const kind of ["positions", "managers", "marks"] as CatalogKind[]) {
       getCatalog(kind).then((list) => setCatalog(kind, list)).catch(() => setCatalog(kind, []));
     }
-    getBoardStatusViews()
-      .then(applyViews)
-      .catch(() => { setStatusViews({}); setColumnViews({}); });
+    getBoardView().then((v) => setHiddenColumns(v.hidden)).catch(() => setHiddenColumns([]));
     getTags().then(setSourcerTags).catch(() => setSourcerTags([]));
     // Вести сотрудника может только HR. В организации числятся все
     // работники, и без фильтра в список попадали бы полсотни человек,
@@ -724,24 +721,18 @@ export default function StatusesPage() {
     return out;
   }, [rows, q, filters]);
 
-  /** Видны ли секции этой вкладки у ЭТОГО пользователя. Нет записи — все. */
-  const sectionsOf = useCallback(
-    (scope: string) => statusViews[scope],
-    [statusViews],
-  );
-  const sectionShown = useCallback(
-    (scope: string, row: BoardRow) => {
-      const set = sectionsOf(scope);
-      return !set || !set.length || set.includes(groupOf(row.status));
-    },
-    [sectionsOf],
-  );
-  const mySections = statusViews[dept];
-  // Колонки тоже настраиваются лично и по вкладкам («лист-вью не только по
-  // статусам, но и по столбцам» — Мария, 08.10.2026). Имя не прячем: без него
-  // строка бессмысленна, поэтому в наборе его нет и он всегда первый.
-  const myColumns = columnViews[dept];
-  const visibleColumns = useMemo(() => pickColumns(myColumns), [myColumns]);
+  const visibleColumns = useMemo(() => visibleOf(hiddenColumns), [hiddenColumns]);
+  /** Скрыть/показать колонку у всех. Сразу на экране, потом на сервере. */
+  const setColumnHidden = async (key: string, hide: boolean) => {
+    const next = hide ? [...hiddenColumns, key] : hiddenColumns.filter((k) => k !== key);
+    setHiddenColumns(next);
+    try {
+      setHiddenColumns((await saveBoardView(next)).hidden);
+    } catch (e: any) {
+      setHiddenColumns(hiddenColumns);
+      toast.error(e?.response?.data?.detail || "Не удалось сохранить вид");
+    }
+  };
 
   const counts = useMemo(() => {
     // У отдела — сколько в нём строк, у «Все» — сколько ЛЮДЕЙ: человек в
@@ -751,13 +742,13 @@ export default function StatusesPage() {
     const c: Record<string, number> = { [UNASSIGNED]: 0 };
     const people = new Set<number>();
     for (const r of searched) {
-      if (sectionShown("all", r)) people.add(r.entity_id);
+      people.add(r.entity_id);
       const key = r.department_id != null ? String(r.department_id) : UNASSIGNED;
-      if (sectionShown(key, r)) c[key] = (c[key] || 0) + 1;
+      c[key] = (c[key] || 0) + 1;
     }
     c.all = people.size;
     return c;
-  }, [searched, sectionShown]);
+  }, [searched]);
 
   const visible = useMemo(() => {
     // В отделе — только его строки. «Без отдела» — те, кого ещё никуда не
@@ -873,7 +864,7 @@ export default function StatusesPage() {
   };
 
   const grouped = useMemo(
-    () => STATUSES.filter((s) => !mySections || !mySections.length || mySections.includes(s.key)).map((s) => {
+    () => STATUSES.map((s) => {
       const items = visible.filter((r) => (s.members as readonly string[]).includes(r.status));
       if (!sort) return { ...s, items };
       // Пустая дата — всегда в конце, в любую сторону: строка без даты не
@@ -888,7 +879,7 @@ export default function StatusesPage() {
         }),
       };
     }),
-    [visible, sort, mySections]
+    [visible, sort]
   );
 
   return (
@@ -920,21 +911,15 @@ export default function StatusesPage() {
           </div>
 
 
+          {/* Шестерёнка вместо «Вида» (клиент, 11.11.2026 — как в ClickUp):
+              боковая панель «Поля» с бегунками, вид общий для всех. */}
           <button
-            className={clsx(
-              "hf-statuses-export-btn",
-              (mySections?.length || myColumns?.length) && "hf-statuses-filters-btn-on",
-            )}
-            onClick={() => setShowSections(true)}
-            title="Какие секции и колонки показывать на этой вкладке — только у вас"
+            className={clsx("hf-statuses-gear", hiddenColumns.length > 0 && "hf-statuses-filters-btn-on")}
+            onClick={() => setShowFields((v) => !v)}
+            title="Поля: какие колонки показывать — у всех"
+            aria-label="Поля"
           >
-            <ListChecks size={15} />
-            Вид
-            {!!(mySections?.length || myColumns?.length) && (
-              <span className="hf-statuses-filters-badge">
-                {(mySections?.length ? 1 : 0) + (myColumns?.length ? 1 : 0)}
-              </span>
-            )}
+            <Settings size={16} />
           </button>
 
           {/* «Выгрузить» сразу отдаёт в Excel тех, кто на экране после
@@ -1130,30 +1115,20 @@ export default function StatusesPage() {
         </div>
       ) : (
         <div className="hf-statuses-body">
-          {showSections && (
-            <ViewModal
-              hideable={HIDEABLE_COLUMNS}
-              scopeLabel={
-                dept === "all" ? "Все"
-                  : dept === UNASSIGNED ? "Без отдела"
-                    : (departments.find((d) => String(d.id) === dept)?.name || "вкладке")
-              }
-              sections={mySections?.length ? mySections : STATUSES.map((s) => s.key)}
-              columns={myColumns?.length ? myColumns : HIDEABLE_COLUMNS.map((c) => c.key)}
-              
-              busy={savingSections}
-              onClose={() => setShowSections(false)}
-              onSave={async (view) => {
-                setSavingSections(true);
-                try {
-                  applyViews(await saveBoardStatusView(dept, view));
-                  setShowSections(false);
-                } catch (e: any) {
+          {showFields && (
+            <FieldsPanel
+              hidden={hiddenColumns}
+              onToggle={setColumnHidden}
+              onShowAll={async () => {
+                const before = hiddenColumns;
+                setHiddenColumns([]);
+                try { setHiddenColumns((await saveBoardView([])).hidden); }
+                catch (e: any) {
+                  setHiddenColumns(before);
                   toast.error(e?.response?.data?.detail || "Не удалось сохранить вид");
-                } finally {
-                  setSavingSections(false);
                 }
               }}
+              onClose={() => setShowFields(false)}
             />
           )}
 
@@ -1161,8 +1136,8 @@ export default function StatusesPage() {
             <ExportModal
               months={months}
               hideable={HIDEABLE_COLUMNS}
-              sections={mySections?.length ? mySections : STATUSES.map((s) => s.key)}
-              columns={myColumns?.length ? myColumns : HIDEABLE_COLUMNS.map((c) => c.key)}
+              sections={STATUSES.map((s) => s.key)}
+              columns={visibleColumns.filter((c) => c.key !== "name").map((c) => c.key)}
               onClose={() => setShowExport(false)}
               onExport={(plan, pick) => { exportToExcel(plan, pick); setShowExport(false); }}
             />
@@ -1237,6 +1212,7 @@ export default function StatusesPage() {
                           onCatalog={setCatalog}
                           people={people}
                           sourcerTags={sourcerTags}
+                          onSourcerTags={setSourcerTags}
                           saving={savingId === rowKey(r)}
                           onPatch={patch}
                           onStatus={changeStatus}
@@ -1496,98 +1472,97 @@ export function sandboxTabs(departments: BoardDepartment[]): BoardDepartment[] {
   return departments.filter((d) => d.kind === "sandbox" && !d.hidden);
 }
 
-/** Окно «Вид»: какие секции И какие колонки показывать на этой вкладке.
- *
- *  Мит 07.10.2026: «разные лист-вью под каждого пользователя и под каждый
- *  отдел — у Маши в SANDBOX видны „Перевёлся“ и „Практика“, а у Насти только
- *  „Уволился“»; 08.10.2026 Мария попросила то же и по столбцам. Набор привязан
- *  к паре «человек + вкладка»: у соседа и на другой вкладке он свой. Снял все
- *  галочки — показывается всё. Колонку «Сотрудник» не прячем: без имени строка
- *  бессмысленна. */
-function ViewModal({
-  scopeLabel, sections, columns, hideable, busy, onClose, onSave,
+/** Тип поля — значок слева в панели «Поля», как в ClickUp (клиент, 11.11.2026:
+ *  «значки показывают тип сущности: дропдаун, дата, текст»). */
+const FIELD_TYPE: Record<string, "name" | "person" | "dropdown" | "text" | "date" | "file"> = {
+  name: "name", assignee: "person", sourcer: "dropdown", position: "dropdown",
+  department: "dropdown", telegram: "text", practice_start_date: "date", manager: "dropdown",
+  offer: "file", department_start_date: "date", dept_done: "dropdown", w2: "date",
+  w2_done: "dropdown", m1: "date", m1_done: "dropdown", m3: "date", m3_done: "dropdown",
+  y1: "date", y1_done: "dropdown", dismissal_date: "date", rejection_reason: "text",
+};
+
+function FieldTypeIcon({ k }: { k: string }) {
+  const t = FIELD_TYPE[k] ?? "text";
+  if (t === "name") return <span className="hf-fields-aa">Aa</span>;
+  if (t === "person") return <UserIcon size={16} />;
+  if (t === "dropdown") return <ChevronDownSquare size={16} className="hf-fields-ico-drop" />;
+  if (t === "date") return <Calendar size={16} className="hf-fields-ico-date" />;
+  if (t === "file") return <Paperclip size={16} className="hf-fields-ico-file" />;
+  return <Type size={16} className="hf-fields-ico-text" />;
+}
+
+/** Панель «Поля» по шестерёнке — как в ClickUp (клиент, 11.11.2026): справа,
+ *  поиск, «Показаны» и «Скрыты», бегунки. Вид общий для всех HR: выключил
+ *  колонку — она пропала у всех. «ФИО» не выключается — по нему читается
+ *  строка. Секций здесь больше нет: на доске видны все. */
+function FieldsPanel({
+  hidden, onToggle, onShowAll, onClose,
 }: {
-  scopeLabel: string;
-  hideable: typeof COLUMNS;
-  sections: string[];
-  columns: string[];
-  busy: boolean;
+  hidden: string[];
+  onToggle: (key: string, hide: boolean) => void;
+  onShowAll: () => void;
   onClose: () => void;
-  onSave: (view: { statuses: string[]; columns: string[] }) => void;
 }) {
-  const [keys, setKeys] = useState<string[]>(sections);
-  const [cols, setCols] = useState<string[]>(columns);
-  const flip = (list: string[], k: string) =>
-    list.includes(k) ? list.filter((x) => x !== k) : [...list, k];
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const label = (c: (typeof COLUMNS)[number]) => FILTER_LABELS[c.key as FilterKey] || c.label;
+  const match = (c: (typeof COLUMNS)[number]) => !needle || label(c).toLowerCase().includes(needle);
+  const shown = COLUMNS.filter((c) => (c.key === "name" || !hidden.includes(c.key)) && match(c));
+  const off = COLUMNS.filter((c) => c.key !== "name" && hidden.includes(c.key) && match(c));
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const row = (c: (typeof COLUMNS)[number], on: boolean) => (
+    <label key={c.key} className={clsx("hf-fields-row", c.key === "name" && "is-locked")}>
+      <span className="hf-fields-ico"><FieldTypeIcon k={c.key} /></span>
+      <span className="hf-fields-name">{label(c)}</span>
+      <input
+        type="checkbox"
+        role="switch"
+        className="hf-fields-switch"
+        checked={on}
+        disabled={c.key === "name"}
+        onChange={() => onToggle(c.key, on)}
+      />
+    </label>
+  );
 
   return (
-    <div className="hf-statuses-modal-back" onClick={onClose}>
-      <div className="hf-statuses-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="hf-statuses-modal-head">
-          <h3>Вид вкладки «{scopeLabel}»</h3>
-          <button className="hf-statuses-folder-action" onClick={onClose} title="Закрыть">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="hf-statuses-modal-label">
-          Секции
-          <span className="hf-statuses-modal-note">
-            Набор только ваш и только для этой вкладки: у коллег и в других отделах — свой.
-          </span>
-          {STATUSES.map((st) => (
-            <label key={st.key} className="hf-statuses-modal-check">
-              <input
-                type="checkbox"
-                checked={keys.includes(st.key)}
-                disabled={busy}
-                onChange={() => setKeys((cur) => flip(cur, st.key))}
-              />
-              {st.label}
-            </label>
-          ))}
-        </div>
-
-        <div className="hf-statuses-modal-label">
-          Колонки
-          <span className="hf-statuses-modal-note">
-            «ФИО» остаётся всегда — по нему и читается строка.
-          </span>
-          <div className="hf-statuses-view-cols">
-            {hideable.map((c) => (
-              <label key={c.key} className="hf-statuses-modal-check">
-                <input
-                  type="checkbox"
-                  checked={cols.includes(c.key)}
-                  disabled={busy}
-                  onChange={() => setCols((cur) => flip(cur, c.key))}
-                />
-                {FILTER_LABELS[c.key as FilterKey] || c.label}
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="hf-statuses-modal-foot">
-          <button
-            className="hf-statuses-modal-cancel"
-            onClick={() => onSave({ statuses: [], columns: [] })}
-            disabled={busy}
-            title="Показывать все секции и все колонки"
-          >
-            Показать всё
-          </button>
-          <button
-            className="hf-statuses-modal-save"
-            onClick={() => onSave({ statuses: keys, columns: cols })}
-            disabled={busy}
-          >
-            {busy ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} />}
-            Сохранить
-          </button>
-        </div>
+    <aside className="hf-fields-panel" aria-label="Поля">
+      <div className="hf-fields-head">
+        <h3>Поля</h3>
+        <button className="hf-statuses-folder-action" onClick={onClose} title="Закрыть">
+          <X size={16} />
+        </button>
       </div>
-    </div>
+      <input
+        autoFocus
+        className="hf-fields-search"
+        placeholder="Найти поле"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="hf-fields-note">Вид общий: что выключите — пропадёт у всех HR.</div>
+      <div className="hf-fields-list">
+        <div className="hf-fields-group">
+          <span>Показаны</span><span>{shown.length}</span>
+        </div>
+        {shown.map((c) => row(c, true))}
+        <div className="hf-fields-group">
+          <span>Скрыты</span><span>{off.length}</span>
+        </div>
+        {off.length === 0 && <div className="hf-fields-empty">Скрытых полей нет</div>}
+        {off.map((c) => row(c, false))}
+      </div>
+      {hidden.length > 0 && (
+        <button className="hf-fields-reset" onClick={onShowAll}>Показать все поля</button>
+      )}
+    </aside>
   );
 }
 
@@ -1942,7 +1917,7 @@ function DepartmentModal({
 
 function Row({
   row, columns, departments, onDepartments, catalogs, onCatalog,
-  people, sourcerTags, saving,
+  people, sourcerTags, onSourcerTags, saving,
   onPatch, onStatus, onPlace, onUnplace, onReload,
 }: {
   row: BoardRow;
@@ -1954,6 +1929,7 @@ function Row({
   onCatalog: (kind: CatalogKind, list: CatalogItem[]) => void;
   people: { user_id: number; user_name: string | null }[];
   sourcerTags: Tag[];
+  onSourcerTags: (list: Tag[]) => void;
   saving: boolean;
   onPatch: (row: BoardRow, body: BoardRowUpdate) => Promise<void>;
   onStatus: (row: BoardRow, status: string) => Promise<void>;
@@ -2024,7 +2000,7 @@ function Row({
         onSave={(ids) => onPatch(row, { assignee_user_ids: ids })}
       />
     ),
-    sourcer: <SourcerCell row={row} catalog={sourcerTags} onReload={onReload} />,
+    sourcer: <SourcerCell row={row} catalog={sourcerTags} onCatalog={onSourcerTags} onReload={onReload} />,
     // Должность — только из списка владельца (09.11.2026): должности отдела
     // человека, а без отдела — все, по отделам.
     position: choice("positions", row.position, (v) => onPatch(row, { position: v })),
@@ -2829,94 +2805,120 @@ function useCellMenu() {
   return { open, pos, menuStyle, plusRef, menuRef, toggle, close: () => setOpen(false) };
 }
 
-/**
- *  Сорсера можно не только снять, но и ПОСТАВИТЬ прямо из доски — «пусть будет
- *  аналогичная кнопка, что и для HR» (владелец, 15.10.2026). Раньше в пустой
- *  ячейке стоял прочерк, и чтобы вписать сорсера, приходилось открывать
- *  карточку кандидата. Список в «+» — тот же справочник меток, что и на
- *  карточке (`getTags`), поэтому новых сущностей не заводим: сорсер — это
- *  метка, крестик на чипе снимает её с кандидата.
- */
-function SourcerCell({ row, catalog, onReload }: { row: BoardRow; catalog: Tag[]; onReload: () => void }) {
+/** Сорсеры человека — как HR и «Assignees» в ClickUp (клиент, 11.11.2026):
+ *  чипы в ячейке, клик по ячейке открывает окно — сверху стоящие (клик снимает),
+ *  ниже справочник (клик ставит), поиск и «+ Добавить» нового сорсера. Сорсер —
+ *  это метка карточки (getTags), тот же справочник, что в «Все кандидаты».
+ *  Раньше клик по чипу сразу снимал сорсера, а рядом стоял «+». */
+const SOURCER_COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"];
+
+function SourcerCell({
+  row, catalog, onCatalog, onReload,
+}: {
+  row: BoardRow;
+  catalog: Tag[];
+  onCatalog: (list: Tag[]) => void;
+  onReload: () => void;
+}) {
   const sourcers = row.sourcers ?? [];
   const menu = useCellMenu();
-  const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const text = q.trim().replace(/\s+/g, " ");
+  const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
 
   const remove = async (tagId: number, name: string) => {
-    try {
-      await removeTagFromEntity(row.entity_id, tagId);
-      onReload();
-    } catch (e: any) {
-      toast.error(e?.response?.data?.detail || `Не удалось снять «${name}»`);
-    }
+    try { await removeTagFromEntity(row.entity_id, tagId); onReload(); }
+    catch (e) { fail(e, `Не удалось снять «${name}»`); }
   };
-
   const add = async (tag: Tag) => {
-    menu.close();
-    setBusy(true);
+    try { await addTagToEntity(row.entity_id, tag.id); onReload(); }
+    catch (e) { fail(e, `Не удалось поставить «${tag.name}»`); }
+  };
+  const create = async () => {
     try {
-      await addTagToEntity(row.entity_id, tag.id);
-      onReload();
-    } catch (e: any) {
-      toast.error(e?.response?.data?.detail || `Не удалось поставить «${tag.name}»`);
-    } finally {
-      setBusy(false);
-    }
+      const tag = await createTag({ name: text, color: SOURCER_COLORS[catalog.length % SOURCER_COLORS.length] });
+      onCatalog([...catalog, tag]);
+      setQ("");
+      await add(tag);
+    } catch (e) { fail(e, `Не удалось добавить «${text}»`); }
   };
 
-  // В меню — всё из справочника, чего на человеке ещё нет.
-  const options = catalog.filter((t) => !sourcers.some((s) => s.id === t.id));
+  const match = (name: string) => !needle || name.toLowerCase().includes(needle);
+  const mine = sourcers.filter((t) => match(t.name));
+  const others = catalog.filter((t) => !t.archived_at && !sourcers.some((s) => s.id === t.id) && match(t.name));
+  const canAdd = !!text && !catalog.some((t) => t.name.trim().toLowerCase() === text.toLowerCase());
+
+  const chip = (t: { name: string; color: string }) => (
+    <span
+      className="hf-statuses-pill hf-statuses-sourcer-pill"
+      style={{
+        backgroundColor: `color-mix(in srgb, ${t.color} 14%, transparent)`,
+        color: t.color,
+        borderColor: `color-mix(in srgb, ${t.color} 30%, transparent)`,
+      }}
+    >
+      {t.name}
+    </span>
+  );
 
   return (
     <div className="hf-statuses-sourcers">
-      {sourcers.map((t) => (
-        <button
-          key={t.id}
-          type="button"
-          className="hf-statuses-pill hf-statuses-sourcer-pill"
-          style={{
-            backgroundColor: `color-mix(in srgb, ${t.color} 14%, transparent)`,
-            color: t.color,
-            borderColor: `color-mix(in srgb, ${t.color} 30%, transparent)`,
-          }}
-          title={`Сорсер: ${t.name} — нажмите, чтобы снять`}
-          onClick={() => remove(t.id, t.name)}
-        >
-          {t.name}
-        </button>
-      ))}
       <button
         ref={menu.plusRef}
         type="button"
-        className="hf-statuses-avatar-add hf-statuses-avatar-add-sm"
-        title="Добавить сорсера"
-        aria-label="Добавить сорсера"
-        onClick={menu.toggle}
-        disabled={busy}
+        className="hf-statuses-assignee-open"
+        title={sourcers.length ? `Сорсер: ${sourcers.map((t) => t.name).join(", ")}` : "Поставить сорсера"}
+        aria-label="Выбрать сорсера"
+        onClick={() => { setQ(""); menu.toggle(); }}
       >
-        <Plus size={12} />
+        {sourcers.map((t) => <span key={t.id}>{chip(t)}</span>)}
+        {!sourcers.length && <UserIcon size={16} className="hf-statuses-person-empty" />}
       </button>
       {menu.open && menu.pos && (
-        <div ref={menu.menuRef} className="hf-statuses-hr-menu" style={menu.menuStyle}>
-          <div className="hf-statuses-hr-menu-hint">Добавить сорсера</div>
-          {options.length === 0 && (
-            <div className="hf-statuses-hr-menu-hint">
-              {catalog.length
-                ? "Все сорсеры уже стоят"
-                : "Список пуст — заведите метку в карточке кандидата"}
-            </div>
+        <div
+          ref={menu.menuRef}
+          className="hf-statuses-hr-menu hf-statuses-picker"
+          style={{ top: menu.pos.top, left: Math.max(8, Math.min(menu.pos.left, window.innerWidth - 288)) }}
+        >
+          <input
+            autoFocus
+            className="hf-statuses-picker-search"
+            placeholder="Найти или добавить сорсера…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              const exact = others.find((t) => t.name.toLowerCase() === needle);
+              if (exact) add(exact);
+              else if (canAdd) create();
+              else if (others[0]) add(others[0]);
+            }}
+          />
+          {mine.length > 0 && (
+            <>
+              <div className="hf-statuses-hr-menu-hint">Стоят</div>
+              {mine.map((t) => (
+                <button key={`on-${t.id}`} type="button" className="hf-statuses-hr-option is-current"
+                        title="Нажмите, чтобы снять" onClick={() => remove(t.id, t.name)}>
+                  {chip(t)}
+                  <X size={13} className="hf-statuses-picker-hint" />
+                </button>
+              ))}
+            </>
           )}
-          {options.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className="hf-statuses-hr-option"
-              onClick={() => add(t)}
-            >
-              <span className="hf-statuses-sourcer-dot" style={{ background: t.color }} />
-              {t.name}
+          <div className="hf-statuses-hr-menu-hint">Сорсеры</div>
+          {others.map((t) => (
+            <button key={t.id} type="button" className="hf-statuses-hr-option" onClick={() => add(t)}>
+              {chip(t)}
             </button>
           ))}
+          {canAdd && (
+            <button type="button" className="hf-statuses-hr-option hf-statuses-picker-add" onClick={create}>
+              <Plus size={13} /> Добавить «{text}»
+            </button>
+          )}
+          {!others.length && !canAdd && <div className="hf-statuses-hr-menu-hint">Никого не нашли</div>}
         </div>
       )}
     </div>
@@ -2976,7 +2978,9 @@ function AssigneeCell({
           <span key={`hr-${a.user_id}`}>{avatar(a.name)}</span>
         ))}
         {!assignees.length && (
-          <span className="hf-statuses-avatar-add"><Plus size={13} /></span>
+          /* Пусто — бледный значок человека, как в ClickUp: плюсики
+             занимали место (клиент, 11.11.2026). */
+          <UserIcon size={16} className="hf-statuses-person-empty" />
         )}
       </button>
       {open && pos && (
