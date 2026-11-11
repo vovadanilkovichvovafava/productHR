@@ -321,6 +321,23 @@ type MilestoneKey = (typeof MILESTONES)[number]["key"];
 
 export type ExportPlan = { months: string[]; marks: MilestoneKey[] };
 
+/** Что класть в файл: секции и колонки — тот же выбор, что в «Виде»
+ *  (владелец, 11.11.2026: «такой же выбор сделаем для выгрузки»). */
+export type ExportPick = { sections: string[]; columns: string[] };
+
+/** Колонки файла: «Сотрудник» всегда, порядок табличный. Пусто — все.
+ *  «Оффер» в файле — имя приложенного файла. */
+export function exportColumns(chosen?: string[] | null): typeof COLUMNS {
+  return pickColumns(chosen);
+}
+
+/** Строки выбранных секций, в порядке секций доски. Пусто — все секции. */
+export function rowsOfSections(rows: BoardRow[], sections?: string[] | null): BoardRow[] {
+  return STATUSES
+    .filter((st) => !sections?.length || sections.includes(st.key))
+    .flatMap((st) => rows.filter((r) => (st.members as readonly string[]).includes(r.status)));
+}
+
 /** Какие листы попадут в книгу и кто в каждом.
  *
  *  Ничего не отмечено — один лист с тем, что на экране (так кнопка работала
@@ -838,13 +855,13 @@ export default function StatusesPage() {
    *  таблице. Выгружаем РОВНО видимое — с учётом поиска, фильтров, выбранного
    *  отдела и сортировки, плюс колонку статуса: в файле групп нет. */
   /** Строки → лист: шапка как в таблице, плюс колонка со статусом. */
-  const sheetFrom = (items: BoardRow[]) => {
-    const cols = COLUMNS.filter((c) => c.key !== "offer");
+  const sheetFrom = (items: BoardRow[], cols: typeof COLUMNS) => {
     const header = ["Статус", ...cols.map((c) => FILTER_LABELS[c.key as FilterKey] || c.label)];
     const body: (string | number)[][] = items.map((r) => [
       STATUSES.find((s2) => (s2.members as readonly string[]).includes(r.status))?.label || r.status,
       ...cols.map((c) => {
         if (c.key === "sourcer") return (r.sourcers ?? []).map((t) => t.name).join(", ");
+        if (c.key === "offer") return r.offer_file_name || "";
         return cellText(r, c.key as FilterKey);
       }),
     ]);
@@ -863,12 +880,15 @@ export default function StatusesPage() {
    *  закрытие испытательного срока и как год работы» (Мария, 07.10.2026).
    *  Период считается по дате ВЫХОДА В ОТДЕЛ, веха — по её собственной дате.
    */
-  const exportToExcel = (plan?: ExportPlan) => {
+  /** Без выбора — ровно экран: секции и колонки из «Вида» этой вкладки. */
+  const exportToExcel = (plan?: ExportPlan, pick?: ExportPick) => {
     const wb = XLSX.utils.book_new();
     let total = 0;
-    for (const sheet of buildExportSheets(grouped.flatMap((g) => g.items), months, plan)) {
+    const items = pick ? rowsOfSections(visible, pick.sections) : grouped.flatMap((g) => g.items);
+    const cols = pick ? exportColumns(pick.columns) : visibleColumns;
+    for (const sheet of buildExportSheets(items, months, plan)) {
       if (!sheet.items.length) continue;
-      const { ws, count } = sheetFrom(sheet.items);
+      const { ws, count } = sheetFrom(sheet.items, cols);
       // Excel не принимает в имени листа : \ / ? * [ ] и больше 31 символа.
       XLSX.utils.book_append_sheet(wb, ws, sheet.title.replace(/[:\\/?*[\]]/g, " ").slice(0, 31));
       total += count;
@@ -997,7 +1017,7 @@ export default function StatusesPage() {
             <button
               className="hf-statuses-export-btn hf-statuses-export-main"
               onClick={() => exportToExcel()}
-              title="Выгрузить в Excel всех, кто сейчас на экране — с учётом фильтров, поиска и вкладки"
+              title="Выгрузить в Excel то, что сейчас на экране — с учётом фильтров, поиска, вкладки и «Вида»"
             >
               <Download size={15} />
               Выгрузить
@@ -1005,8 +1025,8 @@ export default function StatusesPage() {
             <button
               className="hf-statuses-export-btn hf-statuses-export-more"
               onClick={() => setShowExport(true)}
-              title="Выгрузить по периодам: лист на каждый месяц выхода в отдел и на вехи стажа"
-              aria-label="Выгрузить по периодам"
+              title="Выгрузка с выбором: секции, колонки, листы по месяцам и вехам стажа"
+              aria-label="Выгрузка с выбором"
             >
               <ChevronDown size={14} />
             </button>
@@ -1210,8 +1230,11 @@ export default function StatusesPage() {
           {showExport && (
             <ExportModal
               months={months}
+              hideable={HIDEABLE_COLUMNS}
+              sections={mySections?.length ? mySections : STATUSES.map((s) => s.key)}
+              columns={myColumns?.length ? myColumns : HIDEABLE_COLUMNS.map((c) => c.key)}
               onClose={() => setShowExport(false)}
-              onExport={(plan) => { exportToExcel(plan); setShowExport(false); }}
+              onExport={(plan, pick) => { exportToExcel(plan, pick); setShowExport(false); }}
             />
           )}
 
@@ -1627,18 +1650,25 @@ function ViewModal({
   );
 }
 
-/** Окно выгрузки: что именно класть в книгу.
+/** Окно выгрузки: кого и что класть в книгу.
  *
- *  «Как на экране» — один лист с текущим отбором (так работала кнопка раньше).
- *  Месяцы и вехи — по листу на каждый: «мне бы хотелось за месяц, за два
- *  месяца, за три месяца работы, за год работы» (Мария, 07.10.2026). */
+ *  Секции и колонки — тот же выбор, что в «Виде» (владелец, 11.11.2026), по
+ *  умолчанию отмечено то, что сейчас на экране. Месяцы и вехи — по листу на
+ *  каждый: «мне бы хотелось за месяц, за два месяца, за три месяца работы, за
+ *  год работы» (Мария, 07.10.2026); не отмечены — один лист. Выбор в окне
+ *  разовый: «Вид» вкладки он не меняет. */
 function ExportModal({
-  months, onClose, onExport,
+  months, hideable, sections, columns, onClose, onExport,
 }: {
   months: { label: string; from: string; to: string }[];
+  hideable: typeof COLUMNS;
+  sections: string[];
+  columns: string[];
   onClose: () => void;
-  onExport: (plan: ExportPlan) => void;
+  onExport: (plan: ExportPlan, pick: ExportPick) => void;
 }) {
+  const [keys, setKeys] = useState<string[]>(sections);
+  const [cols, setCols] = useState<string[]>(columns);
   const [picked, setPicked] = useState<string[]>([]);
   const [marks, setMarks] = useState<MilestoneKey[]>([]);
   const toggle = <T,>(list: T[], v: T) =>
@@ -1646,17 +1676,55 @@ function ExportModal({
 
   return (
     <div className="hf-statuses-modal-back" onClick={onClose}>
-      <div className="hf-statuses-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="hf-statuses-modal hf-statuses-modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="hf-statuses-modal-head">
-          <h3>Выгрузка по периодам</h3>
+          <h3>Выгрузка</h3>
           <button className="hf-statuses-folder-action" onClick={onClose} title="Закрыть">
             <X size={16} />
           </button>
         </div>
 
         <div className="hf-statuses-modal-label">
+          Секции
+          <span className="hf-statuses-modal-note">
+            Только для этой выгрузки — «Вид» вкладки не меняется.
+          </span>
+          {STATUSES.map((st) => (
+            <label key={st.key} className="hf-statuses-modal-check">
+              <input
+                type="checkbox"
+                checked={keys.includes(st.key)}
+                onChange={() => setKeys((cur) => toggle(cur, st.key))}
+              />
+              {st.label}
+            </label>
+          ))}
+        </div>
+
+        <div className="hf-statuses-modal-label">
+          Колонки
+          <span className="hf-statuses-modal-note">
+            «Сотрудник» и «Статус» попадают в файл всегда.
+          </span>
+          <div className="hf-statuses-view-cols">
+            {hideable.map((c) => (
+              <label key={c.key} className="hf-statuses-modal-check">
+                <input
+                  type="checkbox"
+                  checked={cols.includes(c.key)}
+                  onChange={() => setCols((cur) => toggle(cur, c.key))}
+                />
+                {FILTER_LABELS[c.key as FilterKey] || c.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="hf-statuses-modal-label">
           Месяцы выхода в отдел
-          <span className="hf-statuses-modal-note">Каждый — отдельным листом книги.</span>
+          <span className="hf-statuses-modal-note">
+            Необязательно. Каждый — отдельным листом книги.
+          </span>
           <div className="hf-statuses-export-months">
             {months.map((m) => (
               <button
@@ -1674,7 +1742,7 @@ function ExportModal({
         <div className="hf-statuses-modal-label">
           Вехи стажа
           <span className="hf-statuses-modal-note">
-            Кто доходит до вехи в выбранные месяцы; месяцы не отмечены — за всё время.
+            Необязательно. Кто доходит до вехи в выбранные месяцы; месяцы не отмечены — за всё время.
           </span>
           {MILESTONES.map((m) => (
             <label key={m.key} className="hf-statuses-modal-check">
@@ -1691,16 +1759,17 @@ function ExportModal({
         <div className="hf-statuses-modal-foot">
           <span className="hf-statuses-modal-note">
             {picked.length || marks.length
-              ? "Листы соберутся из тех, кто сейчас на экране, — фильтры учитываются."
-              : "Отметьте месяцы или вехи. Просто выгрузить экран — кнопка «Выгрузить»."}
+              ? "Листы по периодам — из тех, кто сейчас на экране: фильтры учитываются."
+              : "Один лист — те, кто сейчас на экране: фильтры и поиск учитываются."}
           </span>
           <button
             className="hf-statuses-modal-save"
-            onClick={() => onExport({ months: picked, marks })}
-            disabled={!picked.length && !marks.length}
+            onClick={() => onExport({ months: picked, marks }, { sections: keys, columns: cols })}
+            disabled={!keys.length}
+            title={keys.length ? "" : "Отметьте хотя бы одну секцию"}
           >
             <Download size={14} />
-            Выгрузить по периодам
+            Выгрузить
           </button>
         </div>
       </div>

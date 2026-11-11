@@ -9584,6 +9584,8 @@ body.performance-mode .glass-card:hover {
   font-weight: 400;
 }
 /* Колонки в окне «Вид» — в две колонки, чтобы список не уезжал за экран. */
+/* Окно выгрузки шире: секции, колонки в два столбца, месяцы и вехи. */
+.hf-statuses-modal-wide { width: min(560px, 100%); }
 .hf-statuses-view-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;

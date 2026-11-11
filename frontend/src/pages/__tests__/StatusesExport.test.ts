@@ -78,3 +78,20 @@ describe("buildExportSheets", () => {
     expect(sheets[0].items.map((r) => r.name)).toEqual(["Прошлогодний"]);
   });
 });
+
+describe("выбор секций и колонок для выгрузки (11.11.2026)", () => {
+  const row = (entity_id: number, status: string) => ({ entity_id, status } as unknown as BoardRow);
+
+  it("секции: только отмеченные, в порядке доски; пусто — все", async () => {
+    const { rowsOfSections } = await import("../StatusesPage");
+    const rows = [row(1, "probation"), row(2, "quit"), row(3, "transferred"), row(4, "rejected")];
+    expect(rowsOfSections(rows, ["probation", "dismissed"]).map((r) => r.entity_id)).toEqual([4, 1]);
+    expect(rowsOfSections(rows, []).map((r) => r.entity_id)).toEqual([3, 4, 2, 1]);
+  });
+
+  it("колонки: «Сотрудник» всегда, порядок табличный, а не порядок галочек", async () => {
+    const { exportColumns } = await import("../StatusesPage");
+    expect(exportColumns(["rejection_reason", "offer", "position"]).map((c) => c.key))
+      .toEqual(["name", "position", "offer", "rejection_reason"]);
+  });
+});
