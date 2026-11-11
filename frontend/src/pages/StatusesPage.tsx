@@ -12,12 +12,12 @@ import toast from "react-hot-toast";
 import {
   getBoardRows, updateBoardRow, addBoardPlacement, removeBoardPlacement,
   getBoardDepartments, createBoardDepartment, updateBoardDepartment, deleteBoardDepartment,
-  getPositionCatalog, addPosition, renamePosition, deletePosition, type PositionItem,
+  getCatalog, addCatalogItem, renameCatalogItem, deleteCatalogItem,
+  type CatalogItem, type CatalogKind,
   type BoardDepartment, type BoardRow, type BoardRowUpdate, type BoardTeamStint,
 } from "@/services/api/staffBoard";
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
 import {
-  getBoardManagers,
   getBoardStatusViews, saveBoardStatusView,
 } from "@/services/api/staffBoard";
 import { getOrgMembers } from "@/services/api/accessHub";
@@ -81,7 +81,7 @@ type FilterKey =
  *  попало, длинная должность раздувала свою, а даты сжимались до переноса.
  *  Суммарно таблица шире экрана — прокрутка есть, но имя закреплено слева. */
 const COLUMNS: { key: FilterKey | "offer"; label: string; filter: boolean; narrow?: boolean; width: number }[] = [
-  { key: "name",                  label: "Сотрудник",         filter: true, width: 250 },
+  { key: "name",                  label: "ФИО",               filter: true, width: 250 },
   { key: "assignee",              label: "HR",                filter: true, width: 130 },
   { key: "sourcer",               label: "Сорсер",            filter: true, width: 150 },
   { key: "position",              label: "Должность",         filter: true, width: 160 },
@@ -415,11 +415,16 @@ const rowKey = (r: BoardRow) =>
 export default function StatusesPage() {
   const [rows, setRows] = useState<BoardRow[]>([]);
   const [departments, setDepartments] = useState<BoardDepartment[]>([]);
-  // Справочник должностей для окна выбора (список владельца + свои, 11.11.2026).
-  const [positionCatalog, setPositionCatalog] = useState<PositionItem[]>([]);
+  // Справочники окон выбора: должности, «Рук-ль», отметки (11.11.2026).
+  const [catalogs, setCatalogs] = useState<Record<CatalogKind, CatalogItem[]>>(
+    { positions: [], managers: [], marks: [] },
+  );
+  const setCatalog = useCallback(
+    (kind: CatalogKind, list: CatalogItem[]) => setCatalogs((cur) => ({ ...cur, [kind]: list })),
+    [],
+  );
   // Справочники для выпадающих списков: должности и руководители собираются
   // из уже существующих значений, HR — из участников организации.
-  const [managers, setManagers] = useState<string[]>([]);
   const [people, setPeople] = useState<{ user_id: number; user_name: string | null }[]>([]);
   // Справочник сорсеров (те же метки кандидата) — для «+» в колонке «Сорсер».
   const [sourcerTags, setSourcerTags] = useState<Tag[]>([]);
@@ -436,27 +441,15 @@ export default function StatusesPage() {
     if (!sandboxTabs(departments).some((d) => String(d.id) === dept)) setDept("all", { push: false });
   }, [departments, dept, setDept]);
   const [q, setQ] = useState("");
-  // Быстрый фильтр по HR — запоминаем: Лиза открывает доску и сразу видит своих
-  const [hrFilter, setHrFilter] = useState<string>(() => {
-    try { return localStorage.getItem(HR_FILTER_STORAGE_KEY) || ""; } catch { return ""; }
-  });
+  // Быстрых фильтров «HR: все» и «Сорсер: все» больше нет (клиент,
+  // 11.11.2026: «эти поля можно удалить — они есть в фильтрах»). Выбор,
+  // запомненный в браузере раньше, тоже не применяем — чистим его разово.
   useEffect(() => {
     try {
-      if (hrFilter) localStorage.setItem(HR_FILTER_STORAGE_KEY, hrFilter);
-      else localStorage.removeItem(HR_FILTER_STORAGE_KEY);
-    } catch { /* без хранилища просто не запоминаем */ }
-  }, [hrFilter]);
-
-  // Сорсер: «нажать Лиза и увидеть, скольких она вывела» (Мария, 29.09.2026)
-  const [sourcerFilter, setSourcerFilter] = useState<string>(() => {
-    try { return localStorage.getItem(SOURCER_FILTER_STORAGE_KEY) || ""; } catch { return ""; }
-  });
-  useEffect(() => {
-    try {
-      if (sourcerFilter) localStorage.setItem(SOURCER_FILTER_STORAGE_KEY, sourcerFilter);
-      else localStorage.removeItem(SOURCER_FILTER_STORAGE_KEY);
-    } catch { /* без хранилища просто не запоминаем */ }
-  }, [sourcerFilter]);
+      localStorage.removeItem("hf-statuses-hr");
+      localStorage.removeItem("hf-statuses-sourcer");
+    } catch { /* без хранилища нечего чистить */ }
+  }, []);
 
   const [filters, setFilters] = useState<BoardFilters>(() => {
     try {
@@ -596,11 +589,12 @@ export default function StatusesPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     getBoardDepartments().then(setDepartments).catch(() => setDepartments([]));
-    getPositionCatalog().then(setPositionCatalog).catch(() => setPositionCatalog([]));
+    for (const kind of ["positions", "managers", "marks"] as CatalogKind[]) {
+      getCatalog(kind).then((list) => setCatalog(kind, list)).catch(() => setCatalog(kind, []));
+    }
     getBoardStatusViews()
       .then(applyViews)
       .catch(() => { setStatusViews({}); setColumnViews({}); });
-    getBoardManagers().then(setManagers).catch(() => setManagers([]));
     getTags().then(setSourcerTags).catch(() => setSourcerTags([]));
     // Вести сотрудника может только HR. В организации числятся все
     // работники, и без фильтра в список попадали бы полсотни человек,
@@ -715,61 +709,12 @@ export default function StatusesPage() {
           .filter(Boolean).some((v) => String(v).toLowerCase().includes(needle))
       );
     }
-    // HR из воронки тоже считается: «кандидаты Лизы» — все, кого она ведёт,
-    // а не только те, за кем её закрепили руками.
-    if (hrFilter === HR_NONE) {
-      out = out.filter((r) => rowAssignees(r).length === 0);
-    } else if (hrFilter) {
-      const uid = Number(hrFilter);
-      out = out.filter((r) => rowAssignees(r).some((a) => a.user_id === uid));
-    }
-    if (sourcerFilter === SOURCER_NONE) {
-      out = out.filter((r) => (r.sourcers ?? []).length === 0);
-    } else if (sourcerFilter) {
-      out = out.filter((r) => (r.sourcers ?? []).some((t) => String(t.id) === sourcerFilter));
-    }
 
     // Условия панели складываются по правилу filters.mode: «любое» (по
     // умолчанию) или «все сразу». Значения внутри одной колонки — всегда «или».
     out = out.filter((r) => rowMatchesFilters(r, filters));
     return out;
-  }, [rows, q, filters, hrFilter, sourcerFilter]);
-
-  /** Сорсеры для быстрого фильтра — с количеством выведённых людей. */
-  const sourcerOptions = useMemo(() => {
-    const map = new Map<number, { name: string; color: string; count: number }>();
-    let none = 0;
-    for (const r of rows) {
-      const list = r.sourcers ?? [];
-      if (!list.length) none += 1;
-      for (const t of list) {
-        const cur = map.get(t.id);
-        map.set(t.id, { name: t.name, color: t.color, count: (cur?.count || 0) + 1 });
-      }
-    }
-    const list = [...map.entries()]
-      .map(([id, v]) => ({ id, ...v }))
-      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-    return { list, none };
-  }, [rows]);
-
-  /** HR для быстрого фильтра — только те, у кого на доске кто-то есть. */
-  const hrOptions = useMemo(() => {
-    const map = new Map<number, { name: string; count: number }>();
-    let none = 0;
-    for (const r of rows) {
-      const list = rowAssignees(r);
-      if (list.length === 0) none += 1;
-      for (const a of list) {
-        const cur = map.get(a.user_id);
-        map.set(a.user_id, { name: cur?.name || a.name || `#${a.user_id}`, count: (cur?.count || 0) + 1 });
-      }
-    }
-    const list = [...map.entries()]
-      .map(([id, v]) => ({ id, ...v }))
-      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-    return { list, none };
-  }, [rows]);
+  }, [rows, q, filters]);
 
   /** Видны ли секции этой вкладки у ЭТОГО пользователя. Нет записи — все. */
   const sectionsOf = useCallback(
@@ -962,46 +907,10 @@ export default function StatusesPage() {
               className="hf-statuses-search-input"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Поиск по имени, должности, отделу…"
+              placeholder="Поиск"
             />
           </div>
 
-          <select
-            className={clsx("hf-statuses-hr-filter", hrFilter && "hf-statuses-hr-filter-on")}
-            value={hrFilter}
-            onChange={(e) => setHrFilter(e.target.value)}
-            title="Показать людей конкретного HR"
-          >
-            <option value="">HR: все</option>
-            {hrOptions.list.map((h) => (
-              <option key={h.id} value={String(h.id)}>{h.name} · {h.count}</option>
-            ))}
-            {/* выбранный HR мог пропасть с доски — не сбрасываем выбор молча */}
-            {hrFilter && hrFilter !== HR_NONE && !hrOptions.list.some((h) => String(h.id) === hrFilter) && (
-              <option value={hrFilter}>HR #{hrFilter} · 0</option>
-            )}
-            {hrOptions.none > 0 && <option value={HR_NONE}>Без HR · {hrOptions.none}</option>}
-          </select>
-
-          <select
-            className={clsx("hf-statuses-hr-filter", sourcerFilter && "hf-statuses-hr-filter-on")}
-            value={sourcerFilter}
-            onChange={(e) => setSourcerFilter(e.target.value)}
-            title="Показать, кого вывел конкретный сорсер"
-          >
-            <option value="">Сорсер: все</option>
-            {sourcerOptions.list.map((t) => (
-              <option key={t.id} value={String(t.id)}>{t.name} · {t.count}</option>
-            ))}
-            {/* выбранный сорсер мог исчезнуть с доски — выбор не сбрасываем молча */}
-            {sourcerFilter && sourcerFilter !== SOURCER_NONE
-              && !sourcerOptions.list.some((t) => String(t.id) === sourcerFilter) && (
-              <option value={sourcerFilter}>Сорсер #{sourcerFilter} · 0</option>
-            )}
-            {sourcerOptions.none > 0 && (
-              <option value={SOURCER_NONE}>Без сорсера · {sourcerOptions.none}</option>
-            )}
-          </select>
 
           <button
             className={clsx(
@@ -1316,9 +1225,8 @@ export default function StatusesPage() {
                           columns={visibleColumns}
                           departments={departments}
                           onDepartments={setDepartments}
-                          positionCatalog={positionCatalog}
-                          onPositionCatalog={setPositionCatalog}
-                          managers={managers}
+                          catalogs={catalogs}
+                          onCatalog={setCatalog}
                           people={people}
                           sourcerTags={sourcerTags}
                           saving={savingId === rowKey(r)}
@@ -1635,7 +1543,7 @@ function ViewModal({
         <div className="hf-statuses-modal-label">
           Колонки
           <span className="hf-statuses-modal-note">
-            «Сотрудник» остаётся всегда — по нему и читается строка.
+            «ФИО» остаётся всегда — по нему и читается строка.
           </span>
           <div className="hf-statuses-view-cols">
             {hideable.map((c) => (
@@ -1729,7 +1637,7 @@ function ExportModal({
         <div className="hf-statuses-modal-label">
           Колонки
           <span className="hf-statuses-modal-note">
-            «Сотрудник» и «Статус» попадают в файл всегда.
+            «ФИО» и «Статус» попадают в файл всегда.
           </span>
           <div className="hf-statuses-view-cols">
             {hideable.map((c) => (
@@ -2025,8 +1933,8 @@ function DepartmentModal({
 // ============================================================
 
 function Row({
-  row, columns, departments, onDepartments, positionCatalog, onPositionCatalog,
-  managers, people, sourcerTags, saving,
+  row, columns, departments, onDepartments, catalogs, onCatalog,
+  people, sourcerTags, saving,
   onPatch, onStatus, onPlace, onUnplace, onReload,
 }: {
   row: BoardRow;
@@ -2034,9 +1942,8 @@ function Row({
   columns: typeof COLUMNS;
   departments: BoardDepartment[];
   onDepartments: (update: (cur: BoardDepartment[]) => BoardDepartment[]) => void;
-  positionCatalog: PositionItem[];
-  onPositionCatalog: (list: PositionItem[]) => void;
-  managers: string[];
+  catalogs: Record<CatalogKind, CatalogItem[]>;
+  onCatalog: (kind: CatalogKind, list: CatalogItem[]) => void;
   people: { user_id: number; user_name: string | null }[];
   sourcerTags: Tag[];
   saving: boolean;
@@ -2050,9 +1957,20 @@ function Row({
                 auto?: boolean) => (
     <DateCell value={row[key]} auto={auto} onSave={(v) => onPatch(row, { [key]: v } as BoardRowUpdate)} />
   );
-  const mark = (key: "dept_done" | "w2_done" | "m1_done" | "m3_done" | "y1_done") => (
-    <MarkCell value={row[key]} onSave={(v) => onPatch(row, { [key]: v } as BoardRowUpdate)} />
+  const choice = (kind: CatalogKind, value: string | null, save: (v: string | null) => void,
+                  look: "pill" | "mark" = "pill") => (
+    <ChoiceCell
+      kind={kind}
+      value={value}
+      look={look}
+      catalog={catalogs[kind]}
+      onCatalog={(list) => onCatalog(kind, list)}
+      onSave={save}
+      onReload={onReload}
+    />
   );
+  const mark = (key: "dept_done" | "w2_done" | "m1_done" | "m3_done" | "y1_done") =>
+    choice("marks", row[key], (v) => onPatch(row, { [key]: v } as BoardRowUpdate), "mark");
 
   // Ячейки заведены по ключу колонки, а рисуются по списку видимых: колонки
   // прячутся лично и по вкладкам (просьба Марии 08.10.2026 — «лист-вью не
@@ -2101,15 +2019,7 @@ function Row({
     sourcer: <SourcerCell row={row} catalog={sourcerTags} onReload={onReload} />,
     // Должность — только из списка владельца (09.11.2026): должности отдела
     // человека, а без отдела — все, по отделам.
-    position: (
-      <PositionCell
-        value={row.position}
-        catalog={positionCatalog}
-        onCatalog={onPositionCatalog}
-        onSave={(v) => onPatch(row, { position: v })}
-        onReload={onReload}
-      />
-    ),
+    position: choice("positions", row.position, (v) => onPatch(row, { position: v })),
     department: (
       <DepartmentCell
         row={row}
@@ -2122,13 +2032,7 @@ function Row({
     ),
     telegram: <TelegramCell value={row.telegram} onSave={(v) => onPatch(row, { telegram: v })} />,
     practice_start_date: date("practice_start_date"),
-    manager: (
-      <PillCell
-        value={row.manager}
-        options={managers}
-        onSave={(v) => onPatch(row, { manager: v })}
-      />
-    ),
+    manager: choice("managers", row.manager, (v) => onPatch(row, { manager: v })),
     offer: <OfferCell row={row} onReload={onReload} />,
     department_start_date: date("department_start_date"),
     dept_done: mark("dept_done"),
@@ -2375,12 +2279,6 @@ const rowAssignees = (r: BoardRow) =>
     ? [{ user_id: r.assignee_user_id, name: r.assignee_name, auto: !!r.assignee_auto }]
     : []);
 
-/** Быстрый фильтр «кандидаты Лизы»: id HR или «без HR». */
-const HR_NONE = "none";
-const HR_FILTER_STORAGE_KEY = "hf-statuses-hr";
-/** Быстрый фильтр «кого вывела Катя»: сорсеров считают отдельно от HR. */
-const SOURCER_NONE = "none";
-const SOURCER_FILTER_STORAGE_KEY = "hf-statuses-sourcer";
 
 /** Кого можно добавить в колонку HR через «+». Решение владельца 21.09.2026:
  *  доску ведут не все HR, остальные в списке мешали. С 15.10.2026 их трое —
@@ -2617,122 +2515,69 @@ function pillHue(value: string): number {
   return h;
 }
 
-/** Значение из списка с цветной пилюлей — как «Должность» и «Рук-ль» в ClickUp.
- *
- *  Ввод свободный намеренно: в ClickUp список пополняется на лету, и жёсткий
- *  выбор не дал бы завести новую должность, не трогая справочник. */
-function PillCell({
-  value, options, onSave,
-}: { value: string | null; options: string[]; onSave: (v: string | null) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value || "");
-  const listId = useRef(`pill-${Math.random().toString(36).slice(2)}`).current;
 
-  useEffect(() => { setDraft(value || ""); }, [value]);
+/** Ячейка с выпадающим списком «как в ClickUp» — одна на должность, «Рук-ль»
+ *  и отметки у вех (клиент, 11.11.2026: «логика у всех дропдаунов одна, а мы
+ *  уже будем наполнять их так, как нам нужно»). В окне — справочник этого
+ *  списка: основа + дописанное HR, поиск, «+ Добавить». Своё можно
+ *  переименовать (новое имя появится у всех, у кого стоит) и удалить, если
+ *  оно ни у кого не стоит. Старое значение не из списка показывается как было. */
+const CHOICE_TEXT: Record<CatalogKind, { placeholder: string; group: string; empty: string }> = {
+  positions: { placeholder: "Найти или добавить должность…", group: "Должности", empty: "Выбрать должность" },
+  managers: { placeholder: "Найти или добавить руководителя…", group: "Руководители", empty: "Выбрать руководителя" },
+  marks: { placeholder: "Найти или добавить отметку…", group: "Отметки", empty: "Поставить отметку" },
+};
 
-  const commit = () => {
-    setEditing(false);
-    const next = draft.trim();
-    if (next !== (value || "")) onSave(next || null);
-  };
-
-  if (editing) {
-    return (
-      <>
-        <input
-          className="hf-statuses-input"
-          autoFocus
-          list={listId}
-          placeholder="впишите или выберите"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            if (e.key === "Escape") { setDraft(value || ""); setEditing(false); }
-          }}
-        />
-        <datalist id={listId}>
-          {options.map((o) => <option key={o} value={o} />)}
-        </datalist>
-      </>
-    );
-  }
-
-  if (!value) {
-    return (
-      <button className="hf-statuses-empty-cell" onClick={() => setEditing(true)}>—</button>
-    );
-  }
-
-  const hue = pillHue(value);
-  return (
-    <button
-      className="hf-statuses-pill"
-      onClick={() => setEditing(true)}
-      style={{
-        background: `hsl(${hue} 70% 94%)`,
-        color: `hsl(${hue} 55% 32%)`,
-        borderColor: `hsl(${hue} 60% 84%)`,
-      }}
-      title={value}
-    >
-      {value}
-    </button>
-  );
-}
-
-/** Должность — окно «как в ClickUp» (клиент, 11.11.2026): общий список
- *  должностей (из списка владельца + дописанные HR), поиск, «+ Добавить».
- *  Свою должность можно переименовать — имя поменяется у всех, у кого она
- *  стоит, — и удалить, если она ни у кого не стоит. Старое значение не из
- *  списка показывается как было: молча стирать вписанное раньше нельзя. */
-function PositionCell({
-  value, catalog, onCatalog, onSave, onReload,
+function ChoiceCell({
+  kind, value, look, catalog, onCatalog, onSave, onReload,
 }: {
+  kind: CatalogKind;
   value: string | null;
-  catalog: PositionItem[];
-  onCatalog: (list: PositionItem[]) => void;
+  look: "pill" | "mark";
+  catalog: CatalogItem[];
+  onCatalog: (list: CatalogItem[]) => void;
   onSave: (v: string | null) => void;
   onReload: () => void;
 }) {
   const menu = useCellMenu();
+  const text = CHOICE_TEXT[kind];
   const known = catalog.some((p) => p.name === value);
-  const fail = (e: any, text: string) => toast.error(e?.response?.data?.detail || text);
+  const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
 
   const picker = menu.open && menu.pos && (
     <CatalogPicker
       menuRef={menu.menuRef}
       pos={menu.pos}
-      placeholder="Найти или добавить должность…"
+      placeholder={text.placeholder}
       groups={[{
-        label: "Должности",
+        label: text.group,
         options: catalog.map((p) => ({
           key: p.name, label: p.name, editable: !p.locked,
           hint: p.count ? `${p.count}` : undefined,
+          style: look === "mark" ? markStyle(p.name) : undefined,
         })),
       }]}
       taken={catalog.map((p) => p.name)}
       current={value}
       onClear={value ? () => { menu.close(); onSave(null); } : undefined}
       onPick={(key) => { menu.close(); if (key !== value) onSave(key); }}
-      onAdd={async (text) => {
+      onAdd={async (name) => {
         menu.close();
         try {
-          onCatalog(await addPosition(text));
-          onSave(text);
-        } catch (e) { fail(e, `Не удалось добавить «${text}»`); }
+          onCatalog(await addCatalogItem(kind, name));
+          onSave(name);
+        } catch (e) { fail(e, `Не удалось добавить «${name}»`); }
       }}
-      onRename={async (key, text) => {
+      onRename={async (key, name) => {
         try {
-          onCatalog(await renamePosition(key, text));
+          onCatalog(await renameCatalogItem(kind, key, name));
           onReload();
-        } catch (e) { fail(e, "Не удалось переименовать должность"); }
+        } catch (e) { fail(e, "Не удалось переименовать"); }
       }}
       onDelete={async (key) => {
         try {
-          onCatalog(await deletePosition(key));
-          toast.success(`Должность «${key}» удалена`);
+          onCatalog(await deleteCatalogItem(kind, key));
+          toast.success(`«${key}» удалено из списка`);
         } catch (e) { fail(e, `Не удалось удалить «${key}»`); }
       }}
     />
@@ -2741,7 +2586,7 @@ function PositionCell({
   if (!value) {
     return (
       <>
-        <button ref={menu.plusRef} className="hf-statuses-empty-cell" onClick={menu.toggle}>—</button>
+        <button ref={menu.plusRef} className="hf-statuses-empty-cell" onClick={menu.toggle} title={text.empty}>—</button>
         {picker}
       </>
     );
@@ -2752,14 +2597,14 @@ function PositionCell({
     <>
       <button
         ref={menu.plusRef}
-        className="hf-statuses-pill"
+        className={look === "mark" ? "hf-statuses-mark-pill hf-statuses-mark-btn" : "hf-statuses-pill"}
         onClick={menu.toggle}
-        style={{
+        style={look === "mark" ? markStyle(value) : {
           background: `hsl(${hue} 70% 94%)`,
           color: `hsl(${hue} 55% 32%)`,
           borderColor: `hsl(${hue} 60% 84%)`,
         }}
-        title={known ? value : `${value} — не из списка должностей`}
+        title={known ? value : `${value} — не из списка`}
       >
         {value}
       </button>
@@ -2768,7 +2613,11 @@ function PositionCell({
   );
 }
 
-type PickerOption = { key: string; label: string; editable?: boolean; hint?: string };
+type PickerOption = {
+  key: string; label: string; editable?: boolean; hint?: string;
+  /** Свой цвет пункта (отметки: зелёная галочка, красный крестик…). */
+  style?: React.CSSProperties;
+};
 
 /** Окно выбора «как в ClickUp» для отделов и должностей (клиент, 11.11.2026):
  *  поиск сверху, ниже группы вариантов; набрал то, чего нет, — «+ Добавить».
@@ -2859,7 +2708,7 @@ function CatalogPicker({
                 >
                   <span
                     className="hf-statuses-picker-pill"
-                    style={{
+                    style={o.style ?? {
                       background: `hsl(${pillHue(o.label)} 70% 94%)`,
                       color: `hsl(${pillHue(o.label)} 55% 32%)`,
                     }}
@@ -3066,6 +2915,10 @@ function SourcerCell({ row, catalog, onReload }: { row: BoardRow; catalog: Tag[]
   );
 }
 
+/** HR человека — как «Assignees» в ClickUp (клиент, 11.11.2026): клик по
+ *  кружкам или «+» открывает окно — сверху назначенные (клик снимает), ниже
+ *  все люди (клик добавляет), поиск по имени. Раньше клик по кружку сразу
+ *  снимал HR — «это не совсем удобно». */
 function AssigneeCell({
   row, people, onSave,
 }: {
@@ -3073,66 +2926,92 @@ function AssigneeCell({
   people: { user_id: number; user_name: string | null }[];
   onSave: (ids: number[]) => void;
 }) {
-  const { open, pos, menuStyle, plusRef, menuRef, toggle, close } = useCellMenu();
+  const { open, pos, plusRef, menuRef, toggle } = useCellMenu();
+  const [q, setQ] = useState("");
 
   const assignees = rowAssignees(row);
   const ids = assignees.map((a) => a.user_id);
+  const needle = q.trim().toLowerCase();
+  const match = (name: string | null | undefined) => !needle || (name || "").toLowerCase().includes(needle);
 
-  const openMenu = () => {
-    // Предел — как на бэке; говорим о нём ДО открытия, иначе человек выбрал бы
-    // имя из списка и получил ошибку уже на сохранении.
-    if (!open && ids.length >= MAX_HR) { toast.error(`Не больше ${MAX_HR} HR на человека`); return; }
-    toggle();
-  };
-
+  const openMenu = () => { setQ(""); toggle(); };
   const add = (uid: number) => {
-    close();
+    // Предел — как на бэке: говорим сразу, а не ошибкой на сохранении.
+    if (ids.length >= MAX_HR) { toast.error(`Не больше ${MAX_HR} HR на человека`); return; }
     onSave([...ids, uid]);
   };
+  const remove = (uid: number) => onSave(ids.filter((x) => x !== uid));
 
-  const options = people.filter((p) => !ids.includes(p.user_id));
+  const avatar = (name: string | null | undefined, small = false) => (
+    <span
+      className={clsx("hf-statuses-avatar", small && "hf-statuses-avatar-sm")}
+      style={{ background: `hsl(${pillHue(name || "")} 60% 45%)` }}
+    >
+      {initialsOf(name)}
+    </span>
+  );
+
+  const others = people.filter((p) => !ids.includes(p.user_id) && match(p.user_name));
+  const mine = assignees.filter((a) => match(a.name));
 
   return (
     <div className="hf-statuses-assignee" data-many={assignees.length > 2}>
-      {assignees.map((a) => {
-        const name = a.name || `#${a.user_id}`;
-        return (
-          <button
-            key={`hr-${a.user_id}`}
-            type="button"
-            className="hf-statuses-avatar hf-statuses-avatar-removable"
-            style={{ background: `hsl(${pillHue(a.name || "")} 60% 45%)` }}
-            title={`HR: ${name} — убрать`}
-            aria-label={`Убрать HR ${name}`}
-            onClick={() => onSave(ids.filter((x) => x !== a.user_id))}
-          >
-            <span className="hf-statuses-avatar-text">{initialsOf(a.name)}</span>
-            <X className="hf-statuses-avatar-x" size={13} />
-          </button>
-        );
-      })}
       <button
         ref={plusRef}
         type="button"
-        className="hf-statuses-avatar-add"
-        title="Добавить HR"
-        aria-label="Добавить HR"
+        className="hf-statuses-assignee-open"
+        title={assignees.length ? `HR: ${assignees.map((a) => a.name).join(", ")}` : "Назначить HR"}
+        aria-label="Выбрать HR"
         onClick={openMenu}
       >
-        <Plus size={13} />
+        {assignees.map((a) => (
+          <span key={`hr-${a.user_id}`}>{avatar(a.name)}</span>
+        ))}
+        {!assignees.length && (
+          <span className="hf-statuses-avatar-add"><Plus size={13} /></span>
+        )}
       </button>
       {open && pos && (
-        <div ref={menuRef} className="hf-statuses-hr-menu" style={menuStyle}>
-          <div className="hf-statuses-hr-menu-hint">Добавить HR</div>
-          {options.length === 0 && <div className="hf-statuses-hr-menu-hint">Все HR уже добавлены</div>}
-          {options.map((p) => (
+        <div
+          ref={menuRef}
+          className="hf-statuses-hr-menu hf-statuses-picker"
+          style={{ top: pos.top, left: Math.max(8, Math.min(pos.left, window.innerWidth - 288)) }}
+        >
+          <input
+            autoFocus
+            className="hf-statuses-picker-search"
+            placeholder="Поиск…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              if (others[0]) add(others[0].user_id);
+              else if (mine[0]) remove(mine[0].user_id);
+            }}
+          />
+          {mine.length > 0 && (
+            <>
+              <div className="hf-statuses-hr-menu-hint">Назначены</div>
+              {mine.map((a) => (
+                <button
+                  key={`on-${a.user_id}`}
+                  type="button"
+                  className="hf-statuses-hr-option is-current"
+                  title="Нажмите, чтобы снять"
+                  onClick={() => remove(a.user_id)}
+                >
+                  {avatar(a.name, true)}
+                  {a.name || `#${a.user_id}`}
+                  <X size={13} className="hf-statuses-picker-hint" />
+                </button>
+              ))}
+            </>
+          )}
+          <div className="hf-statuses-hr-menu-hint">Люди</div>
+          {others.length === 0 && <div className="hf-statuses-hr-menu-hint">Никого не нашли</div>}
+          {others.map((p) => (
             <button key={p.user_id} type="button" className="hf-statuses-hr-option" onClick={() => add(p.user_id)}>
-              <span
-                className="hf-statuses-avatar hf-statuses-avatar-sm"
-                style={{ background: `hsl(${pillHue(p.user_name || "")} 60% 45%)` }}
-              >
-                {initialsOf(p.user_name)}
-              </span>
+              {avatar(p.user_name, true)}
               {p.user_name || `#${p.user_id}`}
             </button>
           ))}
@@ -3145,12 +3024,7 @@ function AssigneeCell({
 /** Отметка «веха пройдена» — в ClickUp это колонки в скобках. */
 /** Отметка у вехи. В ClickUp это не просто галочка: там ставили ✓, ✗, месяц
  *  («Сентябрь») или «Бонус сотруднику» — Мария попросила так же (28.09.2026). */
-const MONTHS = [
-  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-];
 const BONUS_MARK = "Бонус сотруднику";
-const MARK_OPTIONS = ["✓", "✗", ...MONTHS, BONUS_MARK];
 
 /** Цвет отметки: галочка зелёная, крестик красный, месяц синий, бонус тёмный. */
 function markStyle(value: string): React.CSSProperties {
@@ -3160,29 +3034,3 @@ function markStyle(value: string): React.CSSProperties {
   return { background: "#e0e7ff", color: "#3730a3", borderColor: "#c7d2fe" };
 }
 
-function MarkCell({
-  value, onSave,
-}: { value: string | null; onSave: (v: string | null) => void }) {
-  return (
-    <div className="hf-statuses-mark">
-      {value ? (
-        <span className="hf-statuses-mark-pill" style={markStyle(value)} title={value}>
-          {value}
-        </span>
-      ) : (
-        <span className="hf-statuses-empty-cell">—</span>
-      )}
-      <select
-        className="hf-statuses-mark-select"
-        value={value || ""}
-        title={value || "Поставить отметку"}
-        onChange={(e) => onSave(e.target.value || null)}
-      >
-        <option value="">—</option>
-        {MARK_OPTIONS.map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
-      </select>
-    </div>
-  );
-}

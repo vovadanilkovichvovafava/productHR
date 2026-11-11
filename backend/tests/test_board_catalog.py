@@ -138,13 +138,13 @@ async def test_own_department_is_offered_editable_and_deletable_when_empty(
 async def test_position_catalog_add_rename_delete(client, db_session, admin_user, organization, org_owner):
     """Один общий список должностей: из списка владельца + свои (11.11.2026)."""
     h = _h(admin_user)
-    cat = (await client.get("/api/staff-board/position-catalog", headers=h)).json()
+    cat = (await client.get("/api/staff-board/catalog/positions", headers=h)).json()
     assert cat[0] == {"name": "SEO Buyer Team Lead", "locked": True, "count": 0}
 
-    cat = (await client.post("/api/staff-board/position-catalog", json={"name": "  Финансист "}, headers=h)).json()
+    cat = (await client.post("/api/staff-board/catalog/positions", json={"name": "  Финансист "}, headers=h)).json()
     assert {"name": "Финансист", "locked": False, "count": 0} in cat
     # повтор без учёта регистра — не дублируется
-    cat = (await client.post("/api/staff-board/position-catalog", json={"name": "финансист"}, headers=h)).json()
+    cat = (await client.post("/api/staff-board/catalog/positions", json={"name": "финансист"}, headers=h)).json()
     assert [p["name"] for p in cat].count("Финансист") == 1
 
     e = Entity(org_id=organization.id, name="Сотрудник Фин", type=EntityType.candidate,
@@ -153,17 +153,59 @@ async def test_position_catalog_add_rename_delete(client, db_session, admin_user
     db_session.add(e)
     await db_session.commit()
 
-    r = await client.request("DELETE", "/api/staff-board/position-catalog", params={"name": "Финансист"}, headers=h)
+    r = await client.request("DELETE", "/api/staff-board/catalog/positions", params={"name": "Финансист"}, headers=h)
     assert r.status_code == 409   # стоит у человека
-    r = await client.patch("/api/staff-board/position-catalog",
+    r = await client.patch("/api/staff-board/catalog/positions",
                            json={"name": "Финансист", "new_name": "Финансовый аналитик"}, headers=h)
     assert r.status_code == 200
     await db_session.refresh(e)
     assert e.position == "Финансовый аналитик"   # переименование доходит до людей
-    r = await client.patch("/api/staff-board/position-catalog",
+    r = await client.patch("/api/staff-board/catalog/positions",
                            json={"name": "SEO Buyer", "new_name": "Сеошник"}, headers=h)
     assert r.status_code == 409
 
-    await client.post("/api/staff-board/position-catalog", json={"name": "Курьер"}, headers=h)
-    r = await client.request("DELETE", "/api/staff-board/position-catalog", params={"name": "Курьер"}, headers=h)
+    await client.post("/api/staff-board/catalog/positions", json={"name": "Курьер"}, headers=h)
+    r = await client.request("DELETE", "/api/staff-board/catalog/positions", params={"name": "Курьер"}, headers=h)
     assert r.status_code == 200 and "Курьер" not in [p["name"] for p in r.json()]
+
+
+@pytest.mark.asyncio
+async def test_manager_and_marks_catalogs(client, db_session, admin_user, organization, org_owner):
+    """«Рук-ль» и отметки у вех — те же окна (клиент, 11.11.2026: «логика у всех
+    дропдаунов одна»). Уже вписанное у людей тоже в списке — его можно выбрать
+    снова и переименовать у всех разом."""
+    h = _h(admin_user)
+    e = Entity(org_id=organization.id, name="Практикант Рук", type=EntityType.candidate,
+               status=EntityStatus.probation, created_by=admin_user.id,
+               extra_data={"manager_name": "Влад", "m1_done": "Сентябрь"})
+    db_session.add(e)
+    await db_session.commit()
+
+    managers = (await client.get("/api/staff-board/catalog/managers", headers=h)).json()
+    assert {"name": "Влад", "locked": False, "count": 1} in managers
+    managers = (await client.post("/api/staff-board/catalog/managers", json={"name": "Вова"}, headers=h)).json()
+    assert "Вова" in [m["name"] for m in managers]
+
+    # Выбор в ячейке главнее тега и сохраняется даже пустым
+    r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"manager": "Вова"}, headers=h)
+    assert r.json()["manager"] == "Вова"
+    r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"manager": None}, headers=h)
+    assert r.json()["manager"] is None
+
+    r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"manager": "Влад"}, headers=h)
+    r = await client.patch("/api/staff-board/catalog/managers",
+                           json={"name": "Влад", "new_name": "Владислав"}, headers=h)
+    assert r.status_code == 200
+    await db_session.refresh(e)
+    assert e.extra_data["board_manager"] == "Владислав" and e.extra_data["manager_name"] == "Владислав"
+
+    marks = (await client.get("/api/staff-board/catalog/marks", headers=h)).json()
+    assert marks[0] == {"name": "✓", "locked": True, "count": 0}
+    assert {"name": "Сентябрь", "locked": True, "count": 1} in marks
+    marks = (await client.post("/api/staff-board/catalog/marks", json={"name": "Премия"}, headers=h)).json()
+    r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"m3_done": "Премия"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["m3_done"] == "Премия"
+    r = await client.request("DELETE", "/api/staff-board/catalog/marks", params={"name": "Премия"}, headers=h)
+    assert r.status_code == 409
+    assert (await client.get("/api/staff-board/catalog/nope", headers=h)).status_code == 404

@@ -41,8 +41,8 @@ from ..models.database import (
     NameTag, entity_name_tag_association,
 )
 from ..services.board_catalog import (
-    canon_index, canon_positions, own_department_ids, own_positions, positions_for,
-    set_own_department_ids, set_own_positions,
+    OWN_ITEMS_KEYS, canon_index, canon_positions, own_department_ids, own_items,
+    positions_for, set_own_department_ids, set_own_items,
 )
 from ..services.auth import get_current_user, get_user_org
 from ..services.stage_change import log_moves
@@ -181,6 +181,10 @@ PLACEMENT_KEYS = (
 
 TEAM_KEYS = tuple(k for k in PLACEMENT_KEYS if k != "practice_start_date")
 _K_MANAGER = "manager_name"
+# «Рук-ль», выбранный в окне на доске (11.11.2026). Главнее наставника из тега
+# у ФИО: раньше правка в ячейке писала в manager_name, который тег перекрывал,
+# и выбор «не применялся». Ключ есть, но пустой — «убрали руками».
+_K_MANAGER_PICK = "board_manager"
 # «Рук-ль» подставлен из руководителей отдела, а не вписан руками. Такой при
 # смене отдела заменяется руководителями нового; вписанный руками — никогда.
 _K_MANAGER_AUTO = "manager_auto"
@@ -1061,8 +1065,12 @@ def _row_from_entity(
         # «Рук-ль» = наставник практики из тегов у ФИО. Нет тега — пусто;
         # вписанное руками остаётся запасным вариантом.
         manager=(
-            ", ".join((mentors_by_entity or {}).get(entity.id, []))
-            or _pick(ex, _K_MANAGER, _CF_MANAGER)
+            (str(ex.get(_K_MANAGER_PICK) or "").strip() or None)
+            if _K_MANAGER_PICK in ex
+            else (
+                ", ".join((mentors_by_entity or {}).get(entity.id, []))
+                or _pick(ex, _K_MANAGER, _CF_MANAGER)
+            )
         ),
         w2=w2, m1=m1, m3=m3, y1=y1,
         w2_auto=w2_auto, m1_auto=m1_auto, m3_auto=m3_auto, y1_auto=y1_auto,
@@ -1470,136 +1478,209 @@ async def delete_board_department(
     return {"ok": True}
 
 
-# --- Справочник должностей (11.11.2026) ------------------------------------
-# Один общий список: должности из списка владельца + дописанные HR. Свою можно
-# переименовать (у всех, у кого она стоит, имя меняется тоже) и удалить, если
-# она ни у кого не стоит.
+# --- Справочники выпадающих списков (11.11.2026) ---------------------------
+# Должности, «Рук-ль», отметки у вех — одно устройство на все (клиент:
+# «логика у всех дропдаунов одна»): основа (locked — не правится) + дописанное
+# HR. Своё можно переименовать — новое имя появится у всех, у кого стоит, — и
+# удалить, если оно ни у кого не стоит. У «Рук-ля» и отметок в список попадает
+# и то, что уже стоит у людей, хотя его никто не добавлял: иначе вписанные
+# раньше имена нельзя было бы ни выбрать снова, ни переименовать.
 
-class PositionItem(BaseModel):
+CATALOG_KINDS = tuple(OWN_ITEMS_KEYS)
+
+
+class CatalogItem(BaseModel):
     name: str
     locked: bool = False
     count: int = 0
 
 
-class PositionAdd(BaseModel):
+class CatalogAdd(BaseModel):
     name: str
 
 
-class PositionRename(BaseModel):
+class CatalogRename(BaseModel):
     name: str
     new_name: str
 
 
-def _clean_position(raw: str) -> str:
+def _clean_item(raw: str) -> str:
     name = " ".join((raw or "").split())
     if not name:
-        raise HTTPException(400, "Название должности пустое")
+        raise HTTPException(400, "Название пустое")
     if len(name) > 100:
-        raise HTTPException(400, "Слишком длинное название должности")
+        raise HTTPException(400, "Слишком длинное название")
     return name
 
 
-async def _position_counts(db: AsyncSession, org_id: int) -> Dict[str, int]:
-    rows = (await db.execute(
-        select(Entity.position, func.count(Entity.id))
-        .where(Entity.org_id == org_id, Entity.position.is_not(None), Entity.position != "")
-        .group_by(Entity.position)
-    )).all()
-    return {str(p): int(c) for p, c in rows}
+def _check_kind(kind: str) -> str:
+    if kind not in CATALOG_KINDS:
+        raise HTTPException(404, "Нет такого списка")
+    return kind
 
 
-async def _position_catalog(db: AsyncSession, org: Organization) -> List[PositionItem]:
-    counts = await _position_counts(db, org.id)
-    locked = canon_positions()
-    out = [PositionItem(name=p, locked=True, count=counts.get(p, 0)) for p in locked]
-    seen = {p.lower() for p in locked}
-    for p in own_positions(org):
-        if p.lower() not in seen:
-            seen.add(p.lower())
-            out.append(PositionItem(name=p, count=counts.get(p, 0)))
+def _locked_items(kind: str) -> List[str]:
+    if kind == "positions":
+        return canon_positions()
+    if kind == "marks":
+        return list(MARK_OPTIONS)
+    return []
+
+
+async def _org_entities_extra(db: AsyncSession, org_id: int) -> List[Entity]:
+    return (await db.execute(
+        select(Entity).where(Entity.org_id == org_id, Entity.extra_data.is_not(None))
+    )).scalars().all()
+
+
+async def _item_usage(db: AsyncSession, org_id: int, kind: str) -> Dict[str, int]:
+    """Сколько людей с каждым значением."""
+    if kind == "positions":
+        rows = (await db.execute(
+            select(Entity.position, func.count(Entity.id))
+            .where(Entity.org_id == org_id, Entity.position.is_not(None), Entity.position != "")
+            .group_by(Entity.position)
+        )).all()
+        return {str(p): int(c) for p, c in rows}
+    usage: Dict[str, int] = {}
+    for e in await _org_entities_extra(db, org_id):
+        ex = _extra(e)
+        if kind == "managers":
+            val = ex.get(_K_MANAGER_PICK) if _K_MANAGER_PICK in ex else _pick(ex, _K_MANAGER, _CF_MANAGER)
+            vals = [str(val).strip()] if val and str(val).strip() else []
+        else:
+            vals = [v for v in (_as_done(ex, k) for k in _K_DONE) if v]
+        for v in set(vals):
+            usage[v] = usage.get(v, 0) + 1
+    return usage
+
+
+async def _rename_usage(db: AsyncSession, org_id: int, kind: str, old: str, new: str) -> int:
+    """Переименовать значение у всех людей. Возвращает, у скольких поменяли."""
+    if kind == "positions":
+        people = (await db.execute(
+            select(Entity).where(Entity.org_id == org_id, Entity.position == old)
+        )).scalars().all()
+        for e in people:
+            e.position = new
+        return len(people)
+    keys = [_K_MANAGER_PICK, _K_MANAGER] if kind == "managers" else list(_K_DONE.values())
+    changed = 0
+    for e in await _org_entities_extra(db, org_id):
+        ex = dict(_extra(e))
+        hit = False
+        for k in keys:
+            if str(ex.get(k) or "").strip() == old:
+                ex[k] = new
+                hit = True
+        if hit:
+            e.extra_data = ex
+            flag_modified(e, "extra_data")
+            changed += 1
+    return changed
+
+
+async def _catalog(db: AsyncSession, org: Organization, kind: str) -> List[CatalogItem]:
+    usage = await _item_usage(db, org.id, kind)
+    out: List[CatalogItem] = []
+    seen: set = set()
+    for name in _locked_items(kind):
+        seen.add(name.lower())
+        out.append(CatalogItem(name=name, locked=True, count=usage.get(name, 0)))
+    for name in own_items(org, kind):
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(CatalogItem(name=name, count=usage.get(name, 0)))
+    if kind != "positions":
+        for name in sorted(usage, key=str.lower):
+            if name.lower() not in seen:
+                seen.add(name.lower())
+                out.append(CatalogItem(name=name, count=usage[name]))
     return out
 
 
-@router.get("/position-catalog", response_model=List[PositionItem])
-async def get_position_catalog(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+async def _catalog_org(db: AsyncSession, current_user: User) -> Organization:
     current_user = await db.merge(current_user)
     org = await get_user_org(current_user, db)
     if not org:
         raise HTTPException(403, "No organization access")
-    return await _position_catalog(db, org)
+    return org
 
 
-@router.post("/position-catalog", response_model=List[PositionItem])
-async def add_position(
-    data: PositionAdd,
+@router.get("/catalog/{kind}", response_model=List[CatalogItem])
+async def get_catalog(
+    kind: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    current_user = await db.merge(current_user)
-    org = await get_user_org(current_user, db)
-    if not org:
-        raise HTTPException(403, "No organization access")
-    name = _clean_position(data.name)
-    known = {p.name.lower() for p in await _position_catalog(db, org)}
-    if name.lower() not in known:
-        set_own_positions(org, [*own_positions(org), name])
+    org = await _catalog_org(db, current_user)
+    return await _catalog(db, org, _check_kind(kind))
+
+
+@router.post("/catalog/{kind}", response_model=List[CatalogItem])
+async def add_catalog_item(
+    kind: str,
+    data: CatalogAdd,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org = await _catalog_org(db, current_user)
+    _check_kind(kind)
+    name = _clean_item(data.name)
+    if name.lower() not in {i.name.lower() for i in await _catalog(db, org, kind)}:
+        set_own_items(org, kind, [*own_items(org, kind), name])
         await db.commit()
-        logger.info(f"BOARD_POSITION add: «{name}» by user {current_user.id}")
-    return await _position_catalog(db, org)
+        logger.info(f"BOARD_CATALOG add: {kind} «{name}» by user {current_user.id}")
+    return await _catalog(db, org, kind)
 
 
-@router.patch("/position-catalog", response_model=List[PositionItem])
-async def rename_position(
-    data: PositionRename,
+@router.patch("/catalog/{kind}", response_model=List[CatalogItem])
+async def rename_catalog_item(
+    kind: str,
+    data: CatalogRename,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    current_user = await db.merge(current_user)
-    org = await get_user_org(current_user, db)
-    if not org:
-        raise HTTPException(403, "No organization access")
-    old = _clean_position(data.name)
-    new = _clean_position(data.new_name)
-    own = own_positions(org)
-    if old not in own:
-        raise HTTPException(409, "Должность из основного списка не переименовывается")
-    if new.lower() != old.lower() and new.lower() in {p.name.lower() for p in await _position_catalog(db, org)}:
-        raise HTTPException(409, f"Должность «{new}» уже есть")
-    set_own_positions(org, [new if p == old else p for p in own])
-    people = (await db.execute(
-        select(Entity).where(Entity.org_id == org.id, Entity.position == old)
-    )).scalars().all()
-    for e in people:
-        e.position = new
+    org = await _catalog_org(db, current_user)
+    _check_kind(kind)
+    old, new = _clean_item(data.name), _clean_item(data.new_name)
+    items = await _catalog(db, org, kind)
+    item = next((i for i in items if i.name == old), None)
+    if item is None:
+        raise HTTPException(404, f"«{old}» нет в списке")
+    if item.locked:
+        raise HTTPException(409, "Это значение из основного списка — его не переименовывают")
+    if new.lower() != old.lower() and new.lower() in {i.name.lower() for i in items}:
+        raise HTTPException(409, f"«{new}» уже есть")
+    own = own_items(org, kind)
+    set_own_items(org, kind, [new if p == old else p for p in own] if old in own else [*own, new])
+    changed = await _rename_usage(db, org.id, kind, old, new)
     await db.commit()
-    logger.info(f"BOARD_POSITION rename: «{old}» → «{new}», у {len(people)} чел. by user {current_user.id}")
-    return await _position_catalog(db, org)
+    logger.info(f"BOARD_CATALOG rename: {kind} «{old}» → «{new}», у {changed} чел. by user {current_user.id}")
+    return await _catalog(db, org, kind)
 
 
-@router.delete("/position-catalog", response_model=List[PositionItem])
-async def delete_position(
+@router.delete("/catalog/{kind}", response_model=List[CatalogItem])
+async def delete_catalog_item(
+    kind: str,
     name: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    current_user = await db.merge(current_user)
-    org = await get_user_org(current_user, db)
-    if not org:
-        raise HTTPException(403, "No organization access")
-    name = _clean_position(name)
-    own = own_positions(org)
-    if name not in own:
-        raise HTTPException(409, "Должность из основного списка не удаляется")
-    people = (await _position_counts(db, org.id)).get(name, 0)
-    if people:
-        raise HTTPException(409, f"Должность «{name}» стоит у {people} чел. — сначала поменяйте её у них")
-    set_own_positions(org, [p for p in own if p != name])
+    org = await _catalog_org(db, current_user)
+    _check_kind(kind)
+    name = _clean_item(name)
+    item = next((i for i in await _catalog(db, org, kind) if i.name == name), None)
+    if item is None:
+        raise HTTPException(404, f"«{name}» нет в списке")
+    if item.locked:
+        raise HTTPException(409, "Это значение из основного списка — его не удаляют")
+    if item.count:
+        raise HTTPException(409, f"«{name}» стоит у {item.count} чел. — сначала поменяйте у них")
+    set_own_items(org, kind, [p for p in own_items(org, kind) if p != name])
     await db.commit()
-    logger.info(f"BOARD_POSITION delete: «{name}» by user {current_user.id}")
-    return await _position_catalog(db, org)
+    logger.info(f"BOARD_CATALOG delete: {kind} «{name}» by user {current_user.id}")
+    return await _catalog(db, org, kind)
 
 
 def _person_sandboxes(
@@ -2265,7 +2346,6 @@ async def update_row(
         "direction": _K_DIRECTION,
         "practice_start_date": _K_PRACTICE,
         "department_start_date": _K_DEPT_START,
-        "manager": _K_MANAGER,
         "w2": _K_W2,
         "m1": _K_M1,
         "m3": _K_M3,
@@ -2305,6 +2385,11 @@ async def update_row(
         touched_extra = True
     elif "assignee_user_id" in payload:
         ex.pop(_K_ASSIGNEES, None)
+    if "manager" in payload:
+        # Пусто — тоже выбор («убрали»), поэтому ключ остаётся: иначе снова
+        # всплыл бы наставник из тега.
+        ex[_K_MANAGER_PICK] = str(payload["manager"] or "").strip()
+        touched_extra = True
     for field, key in extra_map.items():
         if field not in payload:
             continue
@@ -2354,7 +2439,8 @@ async def update_row(
         store = bucket(key)
         if value:
             mark = _normalize_mark(value)
-            if mark not in MARK_OPTIONS:
+            # Кроме основных — свои отметки из окна выбора (11.11.2026).
+            if mark not in MARK_OPTIONS and mark not in own_items(org, "marks"):
                 raise HTTPException(400, f"Недопустимая отметка «{value}»")
             store[key] = mark
         else:

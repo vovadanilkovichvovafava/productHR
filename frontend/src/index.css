@@ -10333,14 +10333,6 @@ body.performance-mode .glass-card:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.hf-statuses-mark-select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
-}
 
 /* Сорсеры: своя колонка, метки в строку, клик снимает метку */
 .hf-statuses-sourcers {
@@ -10475,24 +10467,6 @@ body.performance-mode .glass-card:hover {
   color: var(--hf-main-900);
   font-size: var(--hf-fs-4xs);
 }
-/* Быстрый фильтр «HR: …» рядом с поиском */
-.hf-statuses-hr-filter {
-  height: 36px;
-  padding: 0 var(--hf-space-s);
-  border-radius: var(--hf-radius-s);
-  border: var(--hf-border-xs) solid var(--hf-main-200);
-  background: var(--hf-white);
-  font-size: var(--hf-fs-3xs);
-  color: var(--hf-main-800);
-  cursor: pointer;
-  max-width: 200px;
-}
-.hf-statuses-hr-filter-on {
-  border-color: #16a34a;
-  background: #f0fdf4;
-  color: #166534;
-  font-weight: var(--hf-fw-semibold);
-}
 
 /* HR и сорсеры: кружки с инициалами, «×» при наведении, «+» — добавить HR */
 /* HR + метки-сорсеры в одной ячейке (решение юзера — не разводить по колонкам).
@@ -10514,20 +10488,6 @@ body.performance-mode .glass-card:hover {
 .hf-statuses-assignee[data-many="true"]:hover .hf-statuses-avatar + .hf-statuses-avatar {
   margin-left: 0;
 }
-/* Кружок HR/сорсера — кнопка: при наведении инициалы сменяются на «×». */
-.hf-statuses-avatar.hf-statuses-avatar-removable {
-  position: relative;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  pointer-events: auto;
-}
-.hf-statuses-avatar-x { display: none; }
-.hf-statuses-avatar.hf-statuses-avatar-removable:hover .hf-statuses-avatar-text,
-.hf-statuses-avatar.hf-statuses-avatar-removable:focus-visible .hf-statuses-avatar-text { display: none; }
-.hf-statuses-avatar.hf-statuses-avatar-removable:hover .hf-statuses-avatar-x,
-.hf-statuses-avatar.hf-statuses-avatar-removable:focus-visible .hf-statuses-avatar-x { display: block; }
-.hf-statuses-avatar.hf-statuses-avatar-removable:hover { filter: brightness(0.85); }
 .hf-statuses-avatar-add {
   display: grid;
   place-items: center;
@@ -10636,6 +10596,18 @@ body.performance-mode .glass-card:hover {
 .hf-statuses-picker-actions .is-danger { color: var(--hf-red-600); }
 .hf-statuses-picker-add { color: var(--hf-cyan-700); font-weight: var(--hf-fw-semibold); }
 .hf-statuses-picker-clear { color: var(--hf-main-500); }
+/* HR: вся ячейка — одна кнопка, открывающая окно (как Assignees в ClickUp). */
+.hf-statuses-assignee-open {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.hf-statuses-mark-btn { cursor: pointer; }
 .hf-statuses-avatar {
   display: grid;
   place-items: center;

@@ -232,31 +232,37 @@ export async function deleteBoardDepartment(id: number): Promise<void> {
   await api.delete(`/staff-board/departments/${id}`);
 }
 
-/** Справочник должностей: из списка владельца (locked) и дописанные HR. */
-export interface PositionItem {
+/** Выпадающие списки доски с одной логикой (клиент, 11.11.2026): должности,
+ *  «Рук-ль», отметки у вех. Основа (locked) + дописанное HR. */
+export type CatalogKind = 'positions' | 'managers' | 'marks';
+
+export interface CatalogItem {
   name: string;
+  /** Из основного списка — не переименовывается и не удаляется. */
   locked: boolean;
-  /** У скольких людей стоит — удалить можно только неиспользуемую. */
+  /** У скольких людей стоит — удалить можно только неиспользуемое. */
   count: number;
 }
 
-export async function getPositionCatalog(): Promise<PositionItem[]> {
-  const { data } = await api.get('/staff-board/position-catalog');
+export async function getCatalog(kind: CatalogKind): Promise<CatalogItem[]> {
+  const { data } = await api.get(`/staff-board/catalog/${kind}`);
   return data || [];
 }
 
-export async function addPosition(name: string): Promise<PositionItem[]> {
-  const { data } = await api.post('/staff-board/position-catalog', { name });
+export async function addCatalogItem(kind: CatalogKind, name: string): Promise<CatalogItem[]> {
+  const { data } = await api.post(`/staff-board/catalog/${kind}`, { name });
   return data || [];
 }
 
-export async function renamePosition(name: string, newName: string): Promise<PositionItem[]> {
-  const { data } = await api.patch('/staff-board/position-catalog', { name, new_name: newName });
+export async function renameCatalogItem(
+  kind: CatalogKind, name: string, newName: string,
+): Promise<CatalogItem[]> {
+  const { data } = await api.patch(`/staff-board/catalog/${kind}`, { name, new_name: newName });
   return data || [];
 }
 
-export async function deletePosition(name: string): Promise<PositionItem[]> {
-  const { data } = await api.delete('/staff-board/position-catalog', { params: { name } });
+export async function deleteCatalogItem(kind: CatalogKind, name: string): Promise<CatalogItem[]> {
+  const { data } = await api.delete(`/staff-board/catalog/${kind}`, { params: { name } });
   return data || [];
 }
 

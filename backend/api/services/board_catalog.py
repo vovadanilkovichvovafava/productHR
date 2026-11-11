@@ -117,6 +117,14 @@ def positions_for(name: Optional[str]) -> List[str]:
 # заново через то же окно.
 OWN_DEPTS_KEY = "board_own_departments"
 OWN_POSITIONS_KEY = "board_own_positions"
+# Остальные выпадающие списки доски устроены так же (клиент, 11.11.2026:
+# «логика у всех дропдаунов одна, а мы уже будем наполнять их так, как нам
+# нужно»): «Рук-ль» и отметки у вех. Ключ настроек — на каждый список свой.
+OWN_ITEMS_KEYS = {
+    "positions": OWN_POSITIONS_KEY,
+    "managers": "board_own_managers",
+    "marks": "board_own_marks",
+}
 
 
 def _settings(org) -> dict:
@@ -152,15 +160,16 @@ def canon_positions() -> List[str]:
     return out
 
 
-def own_positions(org) -> List[str]:
-    return [str(p) for p in (_settings(org).get(OWN_POSITIONS_KEY) or []) if str(p).strip()]
+def own_items(org, kind: str) -> List[str]:
+    key = OWN_ITEMS_KEYS[kind]
+    return [str(p) for p in (_settings(org).get(key) or []) if str(p).strip()]
 
 
-def set_own_positions(org, names: List[str]) -> None:
+def set_own_items(org, kind: str, names: List[str]) -> None:
     from sqlalchemy.orm.attributes import flag_modified
 
     settings = dict(_settings(org))
-    settings[OWN_POSITIONS_KEY] = names
+    settings[OWN_ITEMS_KEYS[kind]] = names
     org.settings = settings
     flag_modified(org, "settings")
 
