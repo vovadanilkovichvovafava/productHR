@@ -315,18 +315,26 @@ export async function removeBoardPlacement(placementId: number): Promise<void> {
 
 // ─── Личные наборы секций доски ─────────────────────────────
 
-/** Общий вид доски (клиент, 11.11.2026): одна настройка колонок на всех HR и
- *  все вкладки. Храним скрытые колонки — новая колонка появляется у всех сама. */
+/** Общий вид доски (клиент, 11.11.2026): одна настройка на всех HR и все
+ *  вкладки — скрытые колонки, порядок (перетаскивание), свои названия
+ *  (карандаш) и ширины (край заголовка). Храним скрытые, а не показанные —
+ *  новая колонка появляется у всех сама. */
 export interface BoardView {
   hidden: string[];
+  order: string[];
+  labels: Record<string, string>;
+  widths: Record<string, number>;
 }
+
+export const EMPTY_BOARD_VIEW: BoardView = { hidden: [], order: [], labels: {}, widths: {} };
 
 export async function getBoardView(): Promise<BoardView> {
   const { data } = await api.get('/staff-board/board-view');
-  return data || { hidden: [] };
+  return { ...EMPTY_BOARD_VIEW, ...(data || {}) };
 }
 
-export async function saveBoardView(hidden: string[]): Promise<BoardView> {
-  const { data } = await api.put('/staff-board/board-view', { hidden });
-  return data || { hidden: [] };
+/** Сохранить часть вида: не переданное поле сервер не трогает. */
+export async function saveBoardView(patch: Partial<BoardView>): Promise<BoardView> {
+  const { data } = await api.put('/staff-board/board-view', patch);
+  return { ...EMPTY_BOARD_VIEW, ...(data || {}) };
 }

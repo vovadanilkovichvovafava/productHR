@@ -36,14 +36,31 @@ describe("pickColumns", () => {
   });
 });
 
-describe("visibleOf — общий вид (11.11.2026)", () => {
-  it("скрытые колонки убраны, «ФИО» — всегда, новые (не в списке скрытых) видны", async () => {
-    const { visibleOf } = await import("../StatusesPage");
-    const keys = visibleOf(["w2", "w2_done", "name"]).map((c) => c.key);
+describe("arrangeColumns — общий вид (11.11.2026)", () => {
+  it("скрытые убраны, «ФИО» — всегда первым, новые колонки видны", async () => {
+    const { arrangeColumns } = await import("../StatusesPage");
+    const keys = arrangeColumns({ hidden: ["w2", "w2_done", "name"] }).map((c) => c.key);
     expect(keys[0]).toBe("name");
     expect(keys).not.toContain("w2");
     expect(keys).not.toContain("w2_done");
     expect(keys).toContain("rejection_reason");
-    expect(visibleOf([]).length).toBe(visibleOf(null).length);
+  });
+
+  it("порядок из перетаскивания, остальные — следом в исходном порядке; ширины свои", async () => {
+    const { arrangeColumns } = await import("../StatusesPage");
+    const cols = arrangeColumns({ order: ["telegram", "name", "position", "мусор"], widths: { telegram: 90 } });
+    expect(cols.map((c) => c.key).slice(0, 4)).toEqual(["name", "telegram", "position", "assignee"]);
+    expect(cols.find((c) => c.key === "telegram")!.width).toBe(90);
+    // скрытые в withHidden остаются — для панели «Поля»
+    expect(arrangeColumns({ hidden: ["w2"] }, true).map((c) => c.key)).toContain("w2");
+  });
+
+  it("свои названия видны в подписях", async () => {
+    const { setFieldLabels, fieldLabel } = await import("../StatusesPage");
+    setFieldLabels({ position: "Роль" });
+    expect(fieldLabel("position")).toBe("Роль");
+    expect(fieldLabel("m1_done")).toBe("1 мес ✓");
+    setFieldLabels({});
+    expect(fieldLabel("position")).toBe("Должность");
   });
 });

@@ -1944,14 +1944,52 @@ def _clean_scope(raw: str) -> str:
 _BOARD_VIEW_KEY = "board_view"
 
 
+# Порядок колонок (перетаскивание), свои названия (карандаш) и ширины
+# (край заголовка) — тоже общие (клиент, 11.11.2026: «в ClickUp мы можем сами
+# менять ширину столбцов», «карандашик, чтобы изменить название»). «ФИО»
+# всегда первое, его можно переименовать и растянуть, но не скрыть и не
+# передвинуть.
+_VIEW_KEYS = ("name", *BOARD_COLUMNS)
+_MIN_W, _MAX_W = 60, 600
+
+
 class BoardView(BaseModel):
     hidden: List[str] = []
+    order: List[str] = []
+    labels: Dict[str, str] = {}
+    widths: Dict[str, int] = {}
+
+
+class BoardViewUpdate(BaseModel):
+    """Не переданное поле не трогаем: бегунок не сбивает ширины и наоборот."""
+    hidden: Optional[List[str]] = None
+    order: Optional[List[str]] = None
+    labels: Optional[Dict[str, str]] = None
+    widths: Optional[Dict[str, int]] = None
+
+
+def _clean_view(raw: Dict[str, Any]) -> BoardView:
+    hidden = [c for c in dict.fromkeys(raw.get("hidden") or []) if c in BOARD_COLUMNS]
+    order = [c for c in dict.fromkeys(raw.get("order") or []) if c in BOARD_COLUMNS]
+    labels: Dict[str, str] = {}
+    for k, v in (raw.get("labels") or {}).items():
+        text = " ".join(str(v or "").split())[:40]
+        if k in _VIEW_KEYS and text:
+            labels[k] = text
+    widths: Dict[str, int] = {}
+    for k, v in (raw.get("widths") or {}).items():
+        try:
+            w = int(v)
+        except (TypeError, ValueError):
+            continue
+        if k in _VIEW_KEYS:
+            widths[k] = max(_MIN_W, min(_MAX_W, w))
+    return BoardView(hidden=hidden, order=order, labels=labels, widths=widths)
 
 
 def _board_view(org: Organization) -> BoardView:
     raw = (org.settings if isinstance(org.settings, dict) else {}).get(_BOARD_VIEW_KEY) or {}
-    hidden = [c for c in (raw.get("hidden") or []) if c in BOARD_COLUMNS]
-    return BoardView(hidden=list(dict.fromkeys(hidden)))
+    return _clean_view(raw if isinstance(raw, dict) else {})
 
 
 @router.get("/board-view", response_model=BoardView)
@@ -1968,7 +2006,7 @@ async def get_board_view(
 
 @router.put("/board-view", response_model=BoardView)
 async def save_board_view(
-    data: BoardView,
+    data: BoardViewUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1976,16 +2014,16 @@ async def save_board_view(
     org = await get_user_org(current_user, db)
     if not org:
         raise HTTPException(403, "No organization access")
-    hidden = [c for c in dict.fromkeys(data.hidden) if c in BOARD_COLUMNS]
     settings = dict(org.settings) if isinstance(org.settings, dict) else {}
-    view = dict(settings.get(_BOARD_VIEW_KEY) or {})
-    view["hidden"] = hidden
-    settings[_BOARD_VIEW_KEY] = view
+    current = _board_view(org).model_dump()
+    changes = data.model_dump(exclude_none=True)
+    view = _clean_view({**current, **changes})
+    settings[_BOARD_VIEW_KEY] = view.model_dump()
     org.settings = settings
     flag_modified(org, "settings")
     await db.commit()
-    logger.info(f"BOARD_VIEW: скрыты {hidden or 'ничего'} by user {current_user.id}")
-    return _board_view(org)
+    logger.info(f"BOARD_VIEW: {sorted(changes)} → {view.model_dump()} by user {current_user.id}")
+    return view
 
 
 @router.get("/status-views", response_model=List[BoardStatusViewOut])

@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { ReactNode } from "react";
 import {
   Search, Loader2, Plus, Pencil, Check, Copy, Download, X, MoreHorizontal, Trash2,
-  Settings, Calendar, ChevronDownSquare, Type, User as UserIcon,
+  Settings, Calendar, ChevronDownSquare, Type, User as UserIcon, GripVertical,
   ChevronRight, ChevronDown, Paperclip, Upload, SlidersHorizontal,
 } from "lucide-react";
 import clsx from "clsx";
@@ -19,7 +19,7 @@ import {
 } from "@/services/api/staffBoard";
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
 import {
-  getBoardView, saveBoardView,
+  getBoardView, saveBoardView, EMPTY_BOARD_VIEW, type BoardView,
 } from "@/services/api/staffBoard";
 import { getOrgMembers } from "@/services/api/accessHub";
 import { addTagToEntity, createTag, getTags, removeTagFromEntity, type Tag } from "@/services/api/tags";
@@ -113,17 +113,30 @@ const COLUMNS: { key: FilterKey | "offer"; label: string; filter: boolean; narro
  *  строка бессмысленна (просьба Марии 08.10.2026 про лист-вью по столбцам). */
 const HIDEABLE_COLUMNS = COLUMNS.filter((c) => c.key !== "name");
 
-/** Колонки вкладки: пусто — показываем все, иначе только отмеченные, и
- *  «Сотрудник» всегда первым (его прятать нельзя). Порядок всегда из COLUMNS,
- *  чтобы таблица не переставлялась от порядка галочек. */
-/** Колонки на экране по общему виду: всё, кроме скрытых; «ФИО» — всегда. */
-export function visibleOf(hidden?: string[] | null): typeof COLUMNS {
-  return COLUMNS.filter((c) => c.key === "name" || !(hidden ?? []).includes(c.key));
+/** Колонки по общему виду (11.11.2026): «ФИО» первым, дальше в порядке,
+ *  который выставили перетаскиванием (новые колонки — в конце), с общими
+ *  ширинами; скрытые выброшены, если не просили всех. */
+export function arrangeColumns(
+  view: Partial<Pick<BoardView, "hidden" | "order" | "widths">>,
+  withHidden = false,
+): typeof COLUMNS {
+  const known = new Set(COLUMNS.map((c) => c.key as string));
+  const order = (view.order ?? []).filter((k) => k !== "name" && known.has(k));
+  const rest = COLUMNS.map((c) => c.key as string).filter((k) => k !== "name" && !order.includes(k));
+  const hidden = view.hidden ?? [];
+  return ["name", ...order, ...rest]
+    .filter((k) => withHidden || k === "name" || !hidden.includes(k))
+    .map((k) => {
+      const c = COLUMNS.find((x) => x.key === k)!;
+      const w = view.widths?.[k];
+      return w ? { ...c, width: w } : c;
+    });
 }
 
-export function pickColumns(chosen?: string[] | null): typeof COLUMNS {
-  if (!chosen?.length) return COLUMNS;
-  return COLUMNS.filter((c) => c.key === "name" || chosen.includes(c.key));
+/** Колонки из выбора (выгрузка): «ФИО» всегда, порядок — как у base. */
+export function pickColumns(chosen?: string[] | null, base: typeof COLUMNS = COLUMNS): typeof COLUMNS {
+  if (!chosen?.length) return base;
+  return base.filter((c) => c.key === "name" || chosen.includes(c.key));
 }
 
 /** Подписи для списка «Фильтры»: там «✓» ничего не сказало бы. */
@@ -135,9 +148,22 @@ const FILTER_LABELS: Partial<Record<FilterKey, string>> = {
   y1_done: "1 год ✓",
 };
 
+/** Свои названия полей — карандаш в «Полях» (общий вид, 11.11.2026: «тоже
+ *  добавьте, чтобы мы сами могли гибко менять»). Карта на уровне модуля:
+ *  подписи читают и чистые функции (фразы фильтров, выгрузка), страница
+ *  обновляет её при загрузке вида и при каждой правке. */
+let FIELD_LABELS: Record<string, string> = {};
+export const setFieldLabels = (map: Record<string, string>) => { FIELD_LABELS = { ...map }; };
+
+/** Название поля в списках, фильтрах и выгрузке (у отметок — с «✓»). */
+export const fieldLabel = (key: string) =>
+  FIELD_LABELS[key] || FILTER_LABELS[key as FilterKey] || COLUMNS.find((c) => c.key === key)?.label || key;
+
+/** Подпись в шапке таблицы: у отметок по умолчанию короткая «✓». */
+const headerLabel = (c: { key: string; label: string }) => FIELD_LABELS[c.key] || c.label;
+
 /** Имя колонки для фразы в панели и для чипов. */
-const filterLabel = (key: FilterKey) =>
-  FILTER_LABELS[key] || COLUMNS.find((c) => c.key === key)?.label || String(key);
+const filterLabel = (key: FilterKey) => fieldLabel(key);
 
 const fmt = (iso: string | null) => {
   if (!iso) return "";
@@ -335,8 +361,8 @@ export type ExportPick = { sections: string[]; columns: string[] };
 
 /** Колонки файла: «Сотрудник» всегда, порядок табличный. Пусто — все.
  *  «Оффер» в файле — имя приложенного файла. */
-export function exportColumns(chosen?: string[] | null): typeof COLUMNS {
-  return pickColumns(chosen);
+export function exportColumns(chosen?: string[] | null, base: typeof COLUMNS = COLUMNS): typeof COLUMNS {
+  return pickColumns(chosen, base);
 }
 
 /** Строки выбранных секций, в порядке секций доски. Пусто — все секции. */
@@ -557,7 +583,11 @@ export default function StatusesPage() {
   // Маша уберёт столбец „2 недели“, он уберётся у всех»). Секций в виде больше
   // нет — видны все. До 11.11 у каждого был свой набор секций и колонок на
   // каждой вкладке (мит 07.10.2026).
-  const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
+  const [view, setView] = useState<BoardView>(EMPTY_BOARD_VIEW);
+  const hiddenColumns = view.hidden;
+  // Ширина, которую тянут прямо сейчас: на экране сразу, на сервер — по
+  // отпусканию мыши, чтобы не слать запрос на каждый пиксель.
+  const [liveWidths, setLiveWidths] = useState<Record<string, number>>({});
   const [showFields, setShowFields] = useState(false);
   // Окно выгрузки: месяцы и вехи стажа выбирают галочками, книга собирается
   // листами (Мария, 07.10.2026 — «выгрузка за сентябрь, октябрь и декабрь»).
@@ -599,7 +629,9 @@ export default function StatusesPage() {
     for (const kind of ["positions", "managers", "marks"] as CatalogKind[]) {
       getCatalog(kind).then((list) => setCatalog(kind, list)).catch(() => setCatalog(kind, []));
     }
-    getBoardView().then((v) => setHiddenColumns(v.hidden)).catch(() => setHiddenColumns([]));
+    getBoardView()
+      .then((v) => { setFieldLabels(v.labels); setView(v); })
+      .catch(() => setView(EMPTY_BOARD_VIEW));
     getTags().then(setSourcerTags).catch(() => setSourcerTags([]));
     // Вести сотрудника может только HR. В организации числятся все
     // работники, и без фильтра в список попадали бы полсотни человек,
@@ -721,17 +753,51 @@ export default function StatusesPage() {
     return out;
   }, [rows, q, filters]);
 
-  const visibleColumns = useMemo(() => visibleOf(hiddenColumns), [hiddenColumns]);
-  /** Скрыть/показать колонку у всех. Сразу на экране, потом на сервере. */
-  const setColumnHidden = async (key: string, hide: boolean) => {
-    const next = hide ? [...hiddenColumns, key] : hiddenColumns.filter((k) => k !== key);
-    setHiddenColumns(next);
+  const visibleColumns = useMemo(
+    () => arrangeColumns({ ...view, widths: { ...view.widths, ...liveWidths } }),
+    [view, liveWidths],
+  );
+  /** Поменять часть общего вида: сразу на экране, потом на сервере; не
+   *  вышло — вернуть как было. */
+  const saveView = async (patch: Partial<BoardView>) => {
+    const before = view;
+    const next = { ...view, ...patch };
+    if (patch.labels) setFieldLabels(next.labels);
+    setView(next);
     try {
-      setHiddenColumns((await saveBoardView(next)).hidden);
+      const saved = await saveBoardView(patch);
+      setFieldLabels(saved.labels);
+      setView(saved);
     } catch (e: any) {
-      setHiddenColumns(hiddenColumns);
+      setFieldLabels(before.labels);
+      setView(before);
       toast.error(e?.response?.data?.detail || "Не удалось сохранить вид");
     }
+  };
+  const setColumnHidden = (key: string, hide: boolean) =>
+    saveView({ hidden: hide ? [...view.hidden, key] : view.hidden.filter((k) => k !== key) });
+
+  /** Ширина колонки: тянут край заголовка (клиент, 11.11.2026 — «как в
+   *  ClickUp, сами меняем ширину столбцов»). Общая для всех. */
+  const startResize = (key: string, startWidth: number) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const x0 = e.clientX;
+    let w = startWidth;
+    const move = (ev: MouseEvent) => {
+      w = Math.max(60, Math.min(600, Math.round(startWidth + ev.clientX - x0)));
+      setLiveWidths((cur) => ({ ...cur, [key]: w }));
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      document.body.style.cursor = "";
+      setLiveWidths((cur) => { const { [key]: _drop, ...rest } = cur; return rest; });
+      if (w !== startWidth) saveView({ widths: { ...view.widths, [key]: w } });
+    };
+    document.body.style.cursor = "col-resize";
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
   };
 
   const counts = useMemo(() => {
@@ -813,7 +879,7 @@ export default function StatusesPage() {
    *  отдела и сортировки, плюс колонку статуса: в файле групп нет. */
   /** Строки → лист: шапка как в таблице, плюс колонка со статусом. */
   const sheetFrom = (items: BoardRow[], cols: typeof COLUMNS) => {
-    const header = ["Статус", ...cols.map((c) => FILTER_LABELS[c.key as FilterKey] || c.label)];
+    const header = ["Статус", ...cols.map((c) => fieldLabel(c.key))];
     const body: (string | number)[][] = items.map((r) => [
       STATUSES.find((s2) => (s2.members as readonly string[]).includes(r.status))?.label || r.status,
       ...cols.map((c) => {
@@ -842,7 +908,7 @@ export default function StatusesPage() {
     const wb = XLSX.utils.book_new();
     let total = 0;
     const items = pick ? rowsOfSections(visible, pick.sections) : grouped.flatMap((g) => g.items);
-    const cols = pick ? exportColumns(pick.columns) : visibleColumns;
+    const cols = pick ? exportColumns(pick.columns, arrangeColumns(view, true)) : visibleColumns;
     for (const sheet of buildExportSheets(items, months, plan)) {
       if (!sheet.items.length) continue;
       const { ws, count } = sheetFrom(sheet.items, cols);
@@ -995,7 +1061,7 @@ export default function StatusesPage() {
                   {FILTERABLE.map((c) => (
                     <FilterSection
                       key={c.key}
-                      label={FILTER_LABELS[c.key] || c.label}
+                      label={fieldLabel(c.key)}
                       column={c.key}
                       values={filters.values[c.key] || []}
                       range={filters.dates[c.key]}
@@ -1117,17 +1183,10 @@ export default function StatusesPage() {
         <div className="hf-statuses-body">
           {showFields && (
             <FieldsPanel
-              hidden={hiddenColumns}
+              view={view}
               onToggle={setColumnHidden}
-              onShowAll={async () => {
-                const before = hiddenColumns;
-                setHiddenColumns([]);
-                try { setHiddenColumns((await saveBoardView([])).hidden); }
-                catch (e: any) {
-                  setHiddenColumns(before);
-                  toast.error(e?.response?.data?.detail || "Не удалось сохранить вид");
-                }
-              }}
+              onSave={saveView}
+              onShowAll={() => saveView({ hidden: [] })}
               onClose={() => setShowFields(false)}
             />
           )}
@@ -1138,6 +1197,7 @@ export default function StatusesPage() {
               hideable={HIDEABLE_COLUMNS}
               sections={STATUSES.map((s) => s.key)}
               columns={visibleColumns.filter((c) => c.key !== "name").map((c) => c.key)}
+              order={arrangeColumns(view, true)}
               onClose={() => setShowExport(false)}
               onExport={(plan, pick) => { exportToExcel(plan, pick); setShowExport(false); }}
             />
@@ -1164,17 +1224,23 @@ export default function StatusesPage() {
                         )}
                         title={
                           sortable
-                            ? `${c.label} — сортировать по дате`
-                            : FILTER_LABELS[c.key as FilterKey] || c.label
+                            ? `${fieldLabel(c.key)} — сортировать по дате`
+                            : fieldLabel(c.key)
                         }
                         onClick={sortable ? () => toggleSort(c.key as SortKey) : undefined}
                       >
-                        {c.label}
+                        {headerLabel(c)}
                         {sortable && (
                           <span className="hf-statuses-th-arrow">
                             {on ? (sort!.dir === "desc" ? "↓" : "↑") : "↕"}
                           </span>
                         )}
+                        <span
+                          className="hf-statuses-th-resize"
+                          title="Потяните, чтобы изменить ширину (у всех)"
+                          onMouseDown={startResize(c.key, c.width)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
                       </th>
                     );
                   })}
@@ -1493,44 +1559,117 @@ function FieldTypeIcon({ k }: { k: string }) {
 }
 
 /** Панель «Поля» по шестерёнке — как в ClickUp (клиент, 11.11.2026): справа,
- *  поиск, «Показаны» и «Скрыты», бегунки. Вид общий для всех HR: выключил
- *  колонку — она пропала у всех. «ФИО» не выключается — по нему читается
- *  строка. Секций здесь больше нет: на доске видны все. */
+ *  поиск, «Показаны» и «Скрыты», бегунки. По наведению на строку — ручка
+ *  (перетащить: порядок колонок) и карандаш (своё название). Вид общий для
+ *  всех HR: выключил колонку — она пропала у всех. «ФИО» не выключается и не
+ *  двигается — по нему читается строка, но переименовать его можно. Секций
+ *  здесь больше нет: на доске видны все. */
 function FieldsPanel({
-  hidden, onToggle, onShowAll, onClose,
+  view, onToggle, onSave, onShowAll, onClose,
 }: {
-  hidden: string[];
+  view: BoardView;
   onToggle: (key: string, hide: boolean) => void;
+  onSave: (patch: Partial<BoardView>) => void;
   onShowAll: () => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
+  const [renaming, setRenaming] = useState<{ key: string; text: string } | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
   const needle = q.trim().toLowerCase();
-  const label = (c: (typeof COLUMNS)[number]) => FILTER_LABELS[c.key as FilterKey] || c.label;
-  const match = (c: (typeof COLUMNS)[number]) => !needle || label(c).toLowerCase().includes(needle);
-  const shown = COLUMNS.filter((c) => (c.key === "name" || !hidden.includes(c.key)) && match(c));
-  const off = COLUMNS.filter((c) => c.key !== "name" && hidden.includes(c.key) && match(c));
+  const all = arrangeColumns(view, true);
+  const match = (c: (typeof COLUMNS)[number]) => !needle || fieldLabel(c.key).toLowerCase().includes(needle);
+  const shown = all.filter((c) => (c.key === "name" || !view.hidden.includes(c.key)) && match(c));
+  const off = all.filter((c) => c.key !== "name" && view.hidden.includes(c.key) && match(c));
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !renaming) onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, renaming]);
 
-  const row = (c: (typeof COLUMNS)[number], on: boolean) => (
-    <label key={c.key} className={clsx("hf-fields-row", c.key === "name" && "is-locked")}>
-      <span className="hf-fields-ico"><FieldTypeIcon k={c.key} /></span>
-      <span className="hf-fields-name">{label(c)}</span>
-      <input
-        type="checkbox"
-        role="switch"
-        className="hf-fields-switch"
-        checked={on}
-        disabled={c.key === "name"}
-        onChange={() => onToggle(c.key, on)}
-      />
-    </label>
-  );
+  const saveRename = () => {
+    if (!renaming) return;
+    const text = renaming.text.trim().replace(/\s+/g, " ");
+    const labels = { ...view.labels };
+    const base = COLUMNS.find((c) => c.key === renaming.key);
+    const deflt = FILTER_LABELS[renaming.key as FilterKey] || base?.label || "";
+    if (!text || text === deflt) delete labels[renaming.key]; else labels[renaming.key] = text;
+    setRenaming(null);
+    onSave({ labels });
+  };
+
+  /** Перетащили строку на другую — ставим перед ней. Порядок общий. */
+  const drop = (target: string) => {
+    const from = dragKey;
+    setDragKey(null);
+    setOverKey(null);
+    if (!from || from === target || target === "name") return;
+    const keys = all.map((c) => c.key as string).filter((k) => k !== "name" && k !== from);
+    keys.splice(keys.indexOf(target), 0, from);
+    onSave({ order: keys });
+  };
+
+  const row = (c: (typeof COLUMNS)[number], on: boolean) => {
+    const locked = c.key === "name";
+    const custom = !!view.labels[c.key];
+    return (
+      <div
+        key={c.key}
+        className={clsx(
+          "hf-fields-row",
+          locked && "is-locked",
+          dragKey === c.key && "is-dragging",
+          overKey === c.key && dragKey !== c.key && "is-over",
+        )}
+        draggable={!locked && on && !renaming}
+        onDragStart={() => setDragKey(c.key)}
+        onDragEnd={() => { setDragKey(null); setOverKey(null); }}
+        onDragOver={(e) => { if (dragKey && on && !locked) { e.preventDefault(); setOverKey(c.key); } }}
+        onDrop={(e) => { e.preventDefault(); drop(c.key); }}
+      >
+        <span className="hf-fields-grip">{!locked && on && <GripVertical size={14} />}</span>
+        <span className="hf-fields-ico"><FieldTypeIcon k={c.key} /></span>
+        {renaming?.key === c.key ? (
+          <input
+            autoFocus
+            className="hf-fields-rename"
+            value={renaming.text}
+            onChange={(e) => setRenaming({ key: c.key, text: e.target.value })}
+            onBlur={saveRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveRename();
+              if (e.key === "Escape") setRenaming(null);
+            }}
+          />
+        ) : (
+          <span className="hf-fields-name" title={custom ? `Своё название. Было: ${COLUMNS.find((x) => x.key === c.key)?.label}` : undefined}>
+            {fieldLabel(c.key)}
+          </span>
+        )}
+        {renaming?.key !== c.key && (
+          <button
+            type="button"
+            className="hf-fields-edit"
+            title="Переименовать поле (у всех)"
+            onClick={() => setRenaming({ key: c.key, text: fieldLabel(c.key) })}
+          >
+            <Pencil size={13} />
+          </button>
+        )}
+        <input
+          type="checkbox"
+          role="switch"
+          className="hf-fields-switch"
+          checked={on}
+          disabled={locked}
+          title={locked ? "ФИО видно всегда" : on ? "Скрыть у всех" : "Показать у всех"}
+          onChange={() => onToggle(c.key, on)}
+        />
+      </div>
+    );
+  };
 
   return (
     <aside className="hf-fields-panel" aria-label="Поля">
@@ -1547,7 +1686,9 @@ function FieldsPanel({
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
-      <div className="hf-fields-note">Вид общий: что выключите — пропадёт у всех HR.</div>
+      <div className="hf-fields-note">
+        Вид общий: что выключите, переставите или переименуете — изменится у всех HR.
+      </div>
       <div className="hf-fields-list">
         <div className="hf-fields-group">
           <span>Показаны</span><span>{shown.length}</span>
@@ -1559,8 +1700,20 @@ function FieldsPanel({
         {off.length === 0 && <div className="hf-fields-empty">Скрытых полей нет</div>}
         {off.map((c) => row(c, false))}
       </div>
-      {hidden.length > 0 && (
-        <button className="hf-fields-reset" onClick={onShowAll}>Показать все поля</button>
+      {(view.hidden.length > 0 || view.order.length > 0 || Object.keys(view.labels).length > 0
+        || Object.keys(view.widths).length > 0) && (
+        <div className="hf-fields-foot">
+          {view.hidden.length > 0 && (
+            <button className="hf-fields-reset" onClick={onShowAll}>Показать все поля</button>
+          )}
+          <button
+            className="hf-fields-reset"
+            title="Вернуть исходные порядок, названия и ширины (у всех)"
+            onClick={() => onSave({ order: [], labels: {}, widths: {} })}
+          >
+            Порядок и названия как было
+          </button>
+        </div>
       )}
     </aside>
   );
@@ -1574,10 +1727,12 @@ function FieldsPanel({
  *  год работы» (Мария, 07.10.2026); не отмечены — один лист. Выбор в окне
  *  разовый: «Вид» вкладки он не меняет. */
 function ExportModal({
-  months, hideable, sections, columns, onClose, onExport,
+  months, hideable, order, sections, columns, onClose, onExport,
 }: {
   months: { label: string; from: string; to: string }[];
   hideable: typeof COLUMNS;
+  /** Колонки в порядке общего вида — в окне идут так же, как на доске. */
+  order: typeof COLUMNS;
   sections: string[];
   columns: string[];
   onClose: () => void;
@@ -1623,14 +1778,14 @@ function ExportModal({
             «ФИО» и «Статус» попадают в файл всегда.
           </span>
           <div className="hf-statuses-view-cols">
-            {hideable.map((c) => (
+            {order.filter((c) => hideable.some((h) => h.key === c.key)).map((c) => (
               <label key={c.key} className="hf-statuses-modal-check">
                 <input
                   type="checkbox"
                   checked={cols.includes(c.key)}
                   onChange={() => setCols((cur) => toggle(cur, c.key))}
                 />
-                {FILTER_LABELS[c.key as FilterKey] || c.label}
+                {fieldLabel(c.key)}
               </label>
             ))}
           </div>
