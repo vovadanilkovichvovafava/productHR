@@ -110,13 +110,16 @@ async def create_tag(
     """Create a new tag for the organization."""
     org_id = await _get_org_id(db, current_user)
 
-    # Check for duplicate name
-    existing = (await db.execute(
-        select(EntityTag).where(
-            EntityTag.org_id == org_id,
-            EntityTag.name == data.name.strip(),
-        )
-    )).scalar_one_or_none()
+    # Повтор имени — без учёта регистра: «сорсер тест» рядом с «Сорсер Тест»
+    # заводился вторым сорсером (чёрный ящик 12.11.2026). Сравниваем в Python:
+    # lower() в SQLite не знает кириллицы.
+    wanted = data.name.strip().lower()
+    existing = next((
+        t for t in (await db.execute(
+            select(EntityTag).where(EntityTag.org_id == org_id)
+        )).scalars().all()
+        if (t.name or "").strip().lower() == wanted
+    ), None)
     if existing is not None:
         if existing.archived_at is None:
             raise HTTPException(409, "Tag with this name already exists")

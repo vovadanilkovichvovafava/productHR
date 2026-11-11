@@ -150,6 +150,13 @@ const reloadMetaAfterRename = () => {
   metaQueue = metaQueue.then(() => metaReloader()).catch(() => {});
   return metaQueue;
 };
+/** Тост об ошибке действия на доске. Наблюдателю запись режет клиентский
+ *  страж и сам показывает «Только просмотр»; второе «Не удалось …» поверх него
+ *  только путало (чёрный ящик 12.11.2026). */
+const errorToast = (e: any, fallback: string) => {
+  if (e?.isObserverBlock) return;
+  toast.error(e?.response?.data?.detail || fallback);
+};
 export const metaColor = (kind: string, key: string): string | undefined => DROPDOWN_META[kind]?.colors?.[key];
 
 /** Пункты в порядке, который выставили перетаскиванием; новые — в конце, в
@@ -725,7 +732,7 @@ export default function StatusesPage() {
         applyMeta(await saveDropdownMeta(kind, patch));
       } catch (e: any) {
         applyMeta(before);
-        toast.error(e?.response?.data?.detail || "Не удалось сохранить");
+        errorToast(e, "Не удалось сохранить");
       }
     });
   }, [applyMeta]);
@@ -766,17 +773,29 @@ export default function StatusesPage() {
   // рисовалась заново — открытое окно выбора закрывалось посреди работы,
   // прокрутка прыгала наверх (11.11.2026).
   const loadedOnce = useRef(false);
+  // Строки доски перечитываются после каждого действия. Ответы приходят не по
+  // порядку: при быстрых действиях подряд (добавил сорсера, сразу снял
+  // другого) ответ на РАННИЙ запрос приходил последним и затирал экран
+  // устаревшей картиной — в базе всё верно, а на экране не то, и следующее
+  // действие решало «поставить/снять» по неверным данным (чёрный ящик
+  // 12.11.2026). Поэтому на экран идёт только ответ на последний запрос.
+  const rowsSeq = useRef(0);
+  const fetchRows = useCallback(async () => {
+    const seq = ++rowsSeq.current;
+    const data = await getBoardRows();
+    if (seq === rowsSeq.current) setRows(data);
+  }, []);
   const load = useCallback(async () => {
     if (!loadedOnce.current) setLoading(true);
     try {
-      setRows(await getBoardRows());
+      await fetchRows();
     } catch {
       toast.error("Не удалось загрузить доску");
     } finally {
       loadedOnce.current = true;
       setLoading(false);
     }
-  }, []);
+  }, [fetchRows]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -842,7 +861,7 @@ export default function StatusesPage() {
       }));
     } catch (e: any) {
       setRows(prev);
-      toast.error(e?.response?.data?.detail || "Не удалось сохранить");
+      errorToast(e, "Не удалось сохранить");
     } finally {
       setSavingId(null);
     }
@@ -871,9 +890,9 @@ export default function StatusesPage() {
         row.entity_id, deptId,
         addition ? null : row.placement_id,
       );
-      setRows(await getBoardRows());
+      await fetchRows();
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail || "Не удалось поставить в отдел");
+      errorToast(e, "Не удалось поставить в отдел");
     } finally {
       setSavingId(null);
     }
@@ -886,9 +905,9 @@ export default function StatusesPage() {
     setSavingId(rowKey(row));
     try {
       await removeBoardPlacement(row.placement_id);
-      setRows(await getBoardRows());
+      await fetchRows();
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail || "Не удалось убрать из отдела");
+      errorToast(e, "Не удалось убрать из отдела");
     } finally {
       setSavingId(null);
     }
@@ -930,7 +949,7 @@ export default function StatusesPage() {
     } catch (e: any) {
       setFieldLabels(before.labels);
       setView(before);
-      toast.error(e?.response?.data?.detail || "Не удалось сохранить вид");
+      errorToast(e, "Не удалось сохранить вид");
     }
   };
   const setColumnHidden = (key: string, hide: boolean) =>
@@ -1724,7 +1743,7 @@ function FieldsPanel({
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<CustomFieldType>("text");
   const [busy, setBusy] = useState(false);
-  const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
+  const fail = (e: any, msg: string) => errorToast(e, msg);
   const create = async () => {
     const name = newName.trim();
     if (!name || busy) return;
@@ -2149,7 +2168,7 @@ function DepartmentModal({
         toast.success(`Отдел «${clean}» создан`);
       }
     } catch (e: any) {
-      toast.error(
+      if (!e?.isObserverBlock) toast.error(
         e?.response?.status === 403
           ? "Менять отделы может только владелец организации"
           : e?.response?.data?.detail || "Не удалось сохранить отдел"
@@ -2486,7 +2505,7 @@ function CustomCell({
   onFields: (list: CustomField[]) => void;
 }) {
   const menu = useCellMenu();
-  const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
+  const fail = (e: any, msg: string) => errorToast(e, msg);
   if (field.type === "checkbox") {
     return (
       <button
@@ -2685,7 +2704,7 @@ function OfferCell({ row, onReload }: { row: BoardRow; onReload: () => void }) {
       toast.success("Оффер загружен");
       onReload();
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail || "Не удалось загрузить");
+      errorToast(e, "Не удалось загрузить");
     } finally {
       setBusy(false);
     }
@@ -2713,8 +2732,8 @@ function OfferCell({ row, onReload }: { row: BoardRow; onReload: () => void }) {
     try {
       await deleteEntityFile(row.entity_id, row.offer_file_id);
       onReload();
-    } catch {
-      toast.error("Не удалось удалить");
+    } catch (e) {
+      errorToast(e, "Не удалось удалить");
     } finally {
       setBusy(false);
     }
@@ -2946,7 +2965,7 @@ function DepartmentCell({
                 ? cur.map((x) => (x.id === d.id ? d : x)) : [...cur, d]));
               onPlace(d.id);
             } catch (e: any) {
-              toast.error(e?.response?.data?.detail || `Не удалось добавить отдел «${text}»`);
+              errorToast(e, `Не удалось добавить отдел «${text}»`);
             }
           }}
           onRename={async (key, text) => {
@@ -2955,7 +2974,7 @@ function DepartmentCell({
               onDepartments((cur) => cur.map((x) => (x.id === d.id ? d : x)));
               onReload();
             } catch (e: any) {
-              toast.error(e?.response?.data?.detail || "Не удалось переименовать отдел");
+              errorToast(e, "Не удалось переименовать отдел");
             }
           }}
           deleteWarning="Отдел, в котором сейчас есть люди, удалить нельзя — сначала переведите их."
@@ -2965,7 +2984,7 @@ function DepartmentCell({
               onDepartments((cur) => cur.filter((x) => String(x.id) !== key));
               toast.success(`Отдел «${label}» удалён`);
             } catch (e: any) {
-              toast.error(e?.response?.data?.detail || `Не удалось удалить «${label}»`);
+              errorToast(e, `Не удалось удалить «${label}»`);
             }
           }}
         />
@@ -3053,7 +3072,7 @@ function ChoiceCell({
   const menu = useCellMenu();
   const text = CHOICE_TEXT[kind];
   const known = catalog.some((p) => p.name === value);
-  const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
+  const fail = (e: any, msg: string) => errorToast(e, msg);
 
   const picker = menu.open && menu.pos && (
     <CatalogPicker
@@ -3243,7 +3262,19 @@ export function CatalogPicker({
   // чистим сами: иначе набранное «Вера» оставалось в поле и прятало весь
   // остальной список — казалось, что прежние сорсеры пропали (11.11.2026).
   const pick = (key: string) => { setQ(""); onPick(key); };
-  const add = (name: string) => { setQ(""); onAdd?.(name); };
+  // Двойной Enter (или Enter + клик) по «Добавить» заводил ДВА отдела с одним
+  // именем: поле очищается только со следующей отрисовкой, и второе нажатие
+  // видело тот же текст (чёрный ящик 12.11.2026). То же имя повторно в
+  // течение пары секунд не отправляем.
+  const lastAdd = useRef<{ key: string; at: number } | null>(null);
+  const add = (name: string) => {
+    const key = name.trim().toLowerCase();
+    const now = Date.now();
+    if (lastAdd.current && lastAdd.current.key === key && now - lastAdd.current.at < 2000) return;
+    lastAdd.current = { key, at: now };
+    setQ("");
+    onAdd?.(name);
+  };
 
   /** Сохранить название из поля окошка «…», если его поменяли. */
   const commitRename = (m: { key: string; text: string } | null) => {
@@ -3667,23 +3698,51 @@ function SourcerCell({
 }) {
   const sourcers = row.sourcers ?? [];
   const menu = useCellMenu();
-  const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
-  const ids = sourcers.map((t) => String(t.id));
+  const fail = (e: any, msg: string) => errorToast(e, msg);
+  const serverIds = sourcers.map((t) => String(t.id));
+  // Что человек только что нажал, а сервер ещё не подтвердил: «поставить /
+  // снять» решается по этому, а не по строке доски, которая перечитывается с
+  // задержкой. Иначе быстрый второй клик по только что добавленному сорсеру
+  // ставил его ещё раз вместо «снять» (чёрный ящик 12.11.2026). Запись
+  // уходит, когда свежая строка с сервера с ней совпала.
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setPending((cur) => {
+      const next = Object.fromEntries(Object.entries(cur).filter(([k, on]) => serverIds.includes(k) !== on));
+      return Object.keys(next).length === Object.keys(cur).length ? cur : next;
+    });
+  }, [row.sourcers]); // eslint-disable-line react-hooks/exhaustive-deps
+  const isOn = (key: string) => (key in pending ? pending[key] : serverIds.includes(key));
+  const ids = [...new Set([...serverIds, ...Object.keys(pending)])].filter(isOn);
 
-  const toggle = async (key: string) => {
+  // Запросы одной ячейки — строго по очереди: «поставить» и сразу «снять»
+  // того же сорсера иначе могли дойти до сервера в обратном порядке.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const toggle = (key: string) => {
     const tag = catalog.find((t) => String(t.id) === key) || sourcers.find((t) => String(t.id) === key);
     if (!tag) return;
-    try {
-      if (ids.includes(key)) await removeTagFromEntity(row.entity_id, tag.id);
-      else await addTagToEntity(row.entity_id, tag.id);
-      onReload();
-    } catch (e) { fail(e, `Не удалось изменить «${tag.name}»`); }
+    const on = !isOn(key);
+    setPending((cur) => ({ ...cur, [key]: on }));
+    queue.current = queue.current.then(async () => {
+      try {
+        if (on) await addTagToEntity(row.entity_id, tag.id);
+        else await removeTagFromEntity(row.entity_id, tag.id);
+        onReload();
+      } catch (e) {
+        setPending((cur) => { const { [key]: _, ...rest } = cur; return rest; });
+        fail(e, `Не удалось изменить «${tag.name}»`);
+      }
+    });
   };
   // Справочник меняем от СВЕЖЕГО списка: два быстрых действия подряд по
   // снимку из замыкания затирали друг друга — новый сорсер пропадал из окна.
   const replaceTag = (tag: Tag) => onCatalog((list) => list.map((t) => (t.id === tag.id ? tag : t)));
 
   const options = sourcerOptions(catalog, sourcers);
+  // В ячейке — то же, что в окне (с учётом ещё не подтверждённых кликов).
+  const chips = ids
+    .map((k) => sourcers.find((t) => String(t.id) === k) || catalog.find((t) => String(t.id) === k))
+    .filter((t): t is { id: number; name: string; color: string } => !!t);
 
   return (
     <div className="hf-statuses-sourcers">
@@ -3691,14 +3750,14 @@ function SourcerCell({
         ref={menu.plusRef}
         type="button"
         className="hf-statuses-assignee-open"
-        title={sourcers.length ? `Сорсер: ${sourcers.map((t) => t.name).join(", ")}` : "Поставить сорсера"}
+        title={chips.length ? `Сорсер: ${chips.map((t) => t.name).join(", ")}` : "Поставить сорсера"}
         aria-label="Выбрать сорсера"
         onClick={menu.toggle}
       >
-        {sourcers.map((t) => (
+        {chips.map((t) => (
           <span key={t.id} className="hf-statuses-pill hf-statuses-sourcer-pill" style={colorPill(t.color)}>{t.name}</span>
         ))}
-        {!sourcers.length && <UserIcon size={16} className="hf-statuses-person-empty" />}
+        {!chips.length && <UserIcon size={16} className="hf-statuses-person-empty" />}
       </button>
       {menu.open && menu.pos && (
         <CatalogPicker
@@ -3713,6 +3772,7 @@ function SourcerCell({
             try {
               const tag = await createTag({ name, color: SOURCER_COLORS[catalog.length % SOURCER_COLORS.length] });
               onCatalog((list) => [...list.filter((t) => t.id !== tag.id), tag]);
+              setPending((cur) => ({ ...cur, [String(tag.id)]: true }));
               await addTagToEntity(row.entity_id, tag.id);
               onReload();
             } catch (e) { fail(e, `Не удалось добавить «${name}»`); }

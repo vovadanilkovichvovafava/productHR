@@ -34,7 +34,7 @@ async def _row(client, user, eid):
 
 
 @pytest.mark.asyncio
-async def test_two_hr_saved_and_shown(client, db_session, organization, admin_user, second_user, org_owner):
+async def test_two_hr_saved_and_shown(client, db_session, organization, admin_user, second_user, org_owner, org_member):
     e = await _mk(db_session, organization, admin_user)
     r = await client.patch(
         f"/api/staff-board/rows/{e.id}",
@@ -124,7 +124,7 @@ async def test_patch_keeps_sourcers_in_response(client, db_session, organization
 
 
 @pytest.mark.asyncio
-async def test_board_hr_becomes_card_label(client, db_session, organization, admin_user, second_user, org_owner):
+async def test_board_hr_becomes_card_label(client, db_session, organization, admin_user, second_user, org_owner, org_member):
     """Назначили HR на доске — он виден и в метках карточки (20.10.2026).
 
     Метка лежит СВОИМ ключом `board_hr_tags`: `system_hr_tags` считаются по

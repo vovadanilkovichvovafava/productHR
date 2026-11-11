@@ -1327,6 +1327,20 @@ async def save_board_department_order(
     return await list_board_departments(db=db, current_user=current_user)
 
 
+DEPT_NAME_MAX = 100   # staff_board_departments.name — String(100)
+
+
+def _dept_name(raw: Optional[str]) -> str:
+    """Название отдела: пробелы схлопнуты, не пустое, влезает в колонку. Без
+    проверки длины 300 символов падали в базе 500-й (чёрный ящик 12.11.2026)."""
+    name = " ".join((raw or "").split())
+    if not name:
+        raise HTTPException(400, "Название отдела пустое")
+    if len(name) > DEPT_NAME_MAX:
+        raise HTTPException(400, f"Название отдела длиннее {DEPT_NAME_MAX} символов")
+    return name
+
+
 @router.post("/departments", response_model=BoardDept, status_code=201)
 async def create_board_department(
     data: BoardDeptCreate,
@@ -1338,9 +1352,12 @@ async def create_board_department(
     org = await get_user_org(current_user, db)
     if not org:
         raise HTTPException(403, "No organization access")
-    name = " ".join((data.name or "").split())
-    if not name:
-        raise HTTPException(400, "Название отдела пустое")
+    name = _dept_name(data.name)
+    # Два одновременных «Добавить» с одним именем оба проходили проверку на
+    # повтор и заводили два отдела (чёрный ящик 12.11.2026). Строка
+    # организации блокируется до конца транзакции — заведение отделов в одной
+    # организации идёт по очереди (в SQLite тестов FOR UPDATE просто нет).
+    await db.execute(select(Organization.id).where(Organization.id == org.id).with_for_update())
 
     same = next((
         d for d in (await db.execute(
@@ -1402,9 +1419,17 @@ async def update_board_department(
         raise HTTPException(404, "Отдел не найден")
 
     if data.name is not None:
-        name = " ".join(data.name.split())
-        if not name:
-            raise HTTPException(400, "Название отдела пустое")
+        name = _dept_name(data.name)
+        # Имя другого отдела занимать нельзя: в окне выбора получились бы два
+        # одинаковых пункта, и не понять, какой куда (чёрный ящик 12.11.2026 —
+        # раньше переименование в чужое имя проходило молча).
+        taken = (await db.execute(
+            select(BoardDepartment.name).where(
+                BoardDepartment.org_id == org.id, BoardDepartment.id != dept.id
+            )
+        )).scalars().all()
+        if any((t or "").strip().lower() == name.lower() for t in taken):
+            raise HTTPException(409, f"Отдел «{name}» уже есть")
         # С 11.11.2026 переименовать можно любой отдел (клиент: «у дропдауна
         # должны быть одни функции для всех пунктов»): список «предлагаемых»
         # хранится по id, а не по названию.
@@ -2352,7 +2377,7 @@ async def update_custom_field(
         new = _clean_name(data.rename_option.get("to", ""), "Вариант")
         if old not in field["options"]:
             raise HTTPException(404, f"Варианта «{old}» нет")
-        if new != old and new in field["options"]:
+        if new.lower() != old.lower() and any(o.lower() == new.lower() for o in field["options"]):
             raise HTTPException(409, f"Вариант «{new}» уже есть")
         field["options"] = [new if o == old else o for o in field["options"]]
         _meta_rename(org, f"cf:{field_id}", old, new)
@@ -2365,6 +2390,11 @@ async def update_custom_field(
                 e.extra_data = {**e.extra_data, _K_CUSTOM: {**vals, field_id: new}}
     if data.options is not None:
         opts = list(dict.fromkeys(_clean_name(o, "Вариант") for o in data.options))
+        # «junior» рядом с «Junior» — два пункта, которые не различить в окне.
+        lowered = [o.lower() for o in opts]
+        dup = next((o for i, o in enumerate(opts) if o.lower() in lowered[:i]), None)
+        if dup:
+            raise HTTPException(409, f"Вариант «{dup}» уже есть")
         removed = [o for o in field["options"] if o not in opts]
         if removed:
             usage = await _custom_usage(db, org.id, field_id)
@@ -2845,6 +2875,23 @@ async def update_row(
                 ids.append(v)
         if len(ids) > MAX_ASSIGNEES:
             raise HTTPException(400, f"Не больше {MAX_ASSIGNEES} HR на человека")
+        # Назначать можно только людей организации. Уже стоящих (HR ушёл из
+        # организации) не отбрасываем: окно шлёт весь список, и иначе к такому
+        # человеку нельзя было бы ни добавить, ни снять HR. Чёрный ящик
+        # 12.11.2026: несуществующий id 999999 сохранялся молча.
+        # «Уже стоящие» — все, кого строка сейчас показывает: выбранные руками
+        # и HR из меток воронки (system_hr_tags) — там бывают и ушедшие.
+        already = set(_manual_assignee_ids(ex) or [])
+        for t in ex.get("system_hr_tags") or []:
+            if isinstance(t, dict) and _as_int(t.get("hr_id")) is not None:
+                already.add(_as_int(t.get("hr_id")))
+        new_ids = [i for i in ids if i not in already]
+        if new_ids:
+            members = set((await db.execute(
+                select(OrgMember.user_id).where(OrgMember.org_id == org.id, OrgMember.user_id.in_(new_ids))
+            )).scalars().all())
+            if any(i not in members for i in new_ids):
+                raise HTTPException(400, "Такого человека нет в организации")
         payload.pop("assignee_user_id", None)
         # Пустой список храним как есть: сняли всех — значит «без HR», а не
         # «вернуть из меток», иначе снятый «×» HR тут же появлялся бы снова.

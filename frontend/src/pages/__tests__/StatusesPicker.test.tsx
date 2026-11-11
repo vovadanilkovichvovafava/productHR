@@ -83,6 +83,16 @@ describe("CatalogPicker", () => {
     expect(screen.getByText("Боря")).toBeTruthy();
   });
 
+  it("двойной Enter по «Добавить» добавляет один раз", () => {
+    const { onAdd, input } = setup([]);
+    fireEvent.change(input, { target: { value: "Вера" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "вера" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onAdd).toHaveBeenCalledTimes(1);
+  });
+
   it("после выбора пункта поиск тоже пустеет", () => {
     const { onPick, input } = setup([]);
     fireEvent.change(input, { target: { value: "бор" } });
