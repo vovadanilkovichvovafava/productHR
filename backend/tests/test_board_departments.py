@@ -136,13 +136,19 @@ async def test_create_same_name_unhides(client, db_session, organization, admin_
 
 
 @pytest.mark.asyncio
-async def test_no_delete_endpoint(client, db_session, organization, admin_user, org_owner):
-    """Удаления у отделов доски нет — только скрытие."""
+async def test_delete_only_own_empty_department(client, db_session, organization, admin_user, org_owner):
+    """С 11.11.2026 свой пустой отдел удаляется; песочницу — нельзя (остальное —
+    в test_board_catalog). До этого удаления не было вовсе, только скрытие."""
     dept = (await client.post(
         "/api/staff-board/departments", json={"name": "Временный"}, headers=_h(admin_user)
     )).json()
+    sandbox = (await client.post(
+        "/api/staff-board/departments", json={"name": "SANDBOX", "kind": "sandbox"}, headers=_h(admin_user)
+    )).json()
+    r = await client.delete(f"/api/staff-board/departments/{sandbox['id']}", headers=_h(admin_user))
+    assert r.status_code == 409
     r = await client.delete(f"/api/staff-board/departments/{dept['id']}", headers=_h(admin_user))
-    assert r.status_code in (404, 405)
+    assert r.status_code == 200
 
 
 @pytest.mark.asyncio

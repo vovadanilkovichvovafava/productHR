@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import String, and_, cast, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -40,7 +40,10 @@ from ..models.database import (
     EntityTag, entity_tag_association, OrgMember, OrgRole, UserRole,
     NameTag, entity_name_tag_association,
 )
-from ..services.board_catalog import canon_index, positions_for
+from ..services.board_catalog import (
+    canon_index, canon_positions, own_department_ids, own_positions, positions_for,
+    set_own_department_ids, set_own_positions,
+)
 from ..services.auth import get_current_user, get_user_org
 from ..services.stage_change import log_moves
 from ..services.board_placements import DEFAULT_SANDBOX_KEY, place_current_practice
@@ -376,6 +379,10 @@ class BoardDept(BaseModel):
     canonical: bool = False
     canon_order: Optional[int] = None
     positions: List[str] = []
+    # Предлагается в окне выбора отдела: из списка владельца ИЛИ добавлен HR
+    # через это окно (11.11.2026). Свой отдел можно переименовать и удалить,
+    # отдел из списка — нет (его узнают по названию).
+    offered: bool = False
 
 
 DEPT_KINDS = ("sandbox", "team")
@@ -400,8 +407,8 @@ class BoardDeptOrder(BaseModel):
 
 
 class BoardDeptUpdate(BaseModel):
-    """Переименовать и/или скрыть-показать. Удаления у отделов доски нет:
-    неактуальный отдел прячут, данные при этом целы."""
+    """Переименовать и/или скрыть-показать. Удалить можно только свой пустой
+    отдел (DELETE, с 11.11.2026); остальные неактуальные отделы прячут."""
     name: Optional[str] = None
     hidden: Optional[bool] = None
     kind: Optional[str] = None
@@ -714,7 +721,10 @@ def _set_default_sandbox(org: Organization, dept_id: Optional[int]) -> None:
     flag_modified(org, "settings")
 
 
-def _dept_out(d: BoardDepartment, default_id: Optional[int] = None) -> "BoardDept":
+def _dept_out(
+    d: BoardDepartment, default_id: Optional[int] = None, own_ids: Optional[List[int]] = None,
+) -> "BoardDept":
+    canon = _canon_fields(d)
     return BoardDept(
         id=d.id,
         name=d.name,
@@ -724,7 +734,8 @@ def _dept_out(d: BoardDepartment, default_id: Optional[int] = None) -> "BoardDep
         visibility=(d.visibility or "all"),
         visible_to=[v for v in ([_as_int(x) for x in (d.visible_to or [])]) if v is not None],
         is_default=(default_id is not None and d.id == default_id),
-        **_canon_fields(d),
+        offered=bool(canon) or d.id in (own_ids or []),
+        **canon,
     )
 
 
@@ -1255,7 +1266,8 @@ async def list_board_departments(
     # Скрытые отдаём тоже: доска показывает их по кнопке «Показать скрытые», а
     # строка человека из скрытого отдела должна называть отдел, а не пустоту.
     default_id = _default_sandbox_id(org)
-    return [_dept_out(d, default_id) for d in rows]
+    own = own_department_ids(org)
+    return [_dept_out(d, default_id, own) for d in rows]
 
 
 @router.put("/departments/order", response_model=List[BoardDept])
@@ -1316,8 +1328,12 @@ async def create_board_department(
         # Заводят отдел с именем скрытого — значит он снова нужен: показываем.
         if same.hidden_at is not None:
             same.hidden_at = None
-            await db.commit()
-        return _dept_out(same, _default_sandbox_id(org))
+        # Старый отдел вне списка, который снова добавили через окно выбора, —
+        # теперь «свой»: его будут предлагать.
+        if (same.kind or "team") != "sandbox" and canon_index(same.name) is None:
+            set_own_department_ids(org, [*own_department_ids(org), same.id])
+        await db.commit()
+        return _dept_out(same, _default_sandbox_id(org), own_department_ids(org))
 
     kind, parent_id, visibility, visible_to = await _dept_role_fields(
         db, org.id, data.kind, data.parent_id, data.visibility, data.visible_to
@@ -1331,13 +1347,15 @@ async def create_board_department(
     await db.flush()
     if data.is_default and kind == "sandbox":
         _set_default_sandbox(org, dept.id)
+    if kind != "sandbox" and canon_index(name) is None:
+        set_own_department_ids(org, [*own_department_ids(org), dept.id])
     await db.commit()
     await db.refresh(dept)
     logger.info(
         f"BOARD_DEPT create: «{name}» (id={dept.id}, {kind}, parent={parent_id}, "
         f"visibility={visibility}) by user {current_user.id}"
     )
-    return _dept_out(dept, _default_sandbox_id(org))
+    return _dept_out(dept, _default_sandbox_id(org), own_department_ids(org))
 
 
 @router.patch("/departments/{dept_id}", response_model=BoardDept)
@@ -1363,6 +1381,11 @@ async def update_board_department(
         name = " ".join(data.name.split())
         if not name:
             raise HTTPException(400, "Название отдела пустое")
+        # Отдел из списка владельца узнаётся по названию — переименуешь, и он
+        # выпадет из списка вместе с должностями.
+        if (dept.kind or "team") != "sandbox" and canon_index(dept.name) is not None \
+                and canon_index(name) != canon_index(dept.name):
+            raise HTTPException(409, "Отдел из основного списка не переименовывается")
         dept.name = name
         logger.info(f"BOARD_DEPT rename: id={dept_id} → «{name}» by user {current_user.id}")
 
@@ -1405,9 +1428,178 @@ async def update_board_department(
         )
 
     await db.commit()
-    out = _dept_out(dept, _default_sandbox_id(org))
+    out = _dept_out(dept, _default_sandbox_id(org), own_department_ids(org))
     out.placed_now = placed_now
     return out
+
+
+@router.delete("/departments/{dept_id}")
+async def delete_board_department(
+    dept_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Удалить СВОЙ отдел — только пустой (11.11.2026).
+
+    Отделы из списка владельца и песочницы не удаляются. Отдел, где кто-то
+    стоит, — тоже: сначала людей переводят, иначе они остались бы «без отдела»
+    молча. Остальным отделам по-прежнему есть «скрыть».
+    """
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    dept = (await db.execute(
+        select(BoardDepartment).where(
+            BoardDepartment.id == dept_id, BoardDepartment.org_id == org.id
+        )
+    )).scalar_one_or_none()
+    if not dept:
+        raise HTTPException(404, "Отдел не найден")
+    if (dept.kind or "team") == "sandbox" or canon_index(dept.name) is not None:
+        raise HTTPException(409, "Этот отдел из основного списка — его не удаляют")
+    people = (await db.execute(
+        select(func.count(BoardPlacement.id)).where(BoardPlacement.department_id == dept.id)
+    )).scalar() or 0
+    if people:
+        raise HTTPException(409, f"В отделе «{dept.name}» сейчас {people} чел. — сначала переведите их")
+    set_own_department_ids(org, [i for i in own_department_ids(org) if i != dept.id])
+    await db.delete(dept)
+    await db.commit()
+    logger.info(f"BOARD_DEPT delete: «{dept.name}» (id={dept_id}) by user {current_user.id}")
+    return {"ok": True}
+
+
+# --- Справочник должностей (11.11.2026) ------------------------------------
+# Один общий список: должности из списка владельца + дописанные HR. Свою можно
+# переименовать (у всех, у кого она стоит, имя меняется тоже) и удалить, если
+# она ни у кого не стоит.
+
+class PositionItem(BaseModel):
+    name: str
+    locked: bool = False
+    count: int = 0
+
+
+class PositionAdd(BaseModel):
+    name: str
+
+
+class PositionRename(BaseModel):
+    name: str
+    new_name: str
+
+
+def _clean_position(raw: str) -> str:
+    name = " ".join((raw or "").split())
+    if not name:
+        raise HTTPException(400, "Название должности пустое")
+    if len(name) > 100:
+        raise HTTPException(400, "Слишком длинное название должности")
+    return name
+
+
+async def _position_counts(db: AsyncSession, org_id: int) -> Dict[str, int]:
+    rows = (await db.execute(
+        select(Entity.position, func.count(Entity.id))
+        .where(Entity.org_id == org_id, Entity.position.is_not(None), Entity.position != "")
+        .group_by(Entity.position)
+    )).all()
+    return {str(p): int(c) for p, c in rows}
+
+
+async def _position_catalog(db: AsyncSession, org: Organization) -> List[PositionItem]:
+    counts = await _position_counts(db, org.id)
+    locked = canon_positions()
+    out = [PositionItem(name=p, locked=True, count=counts.get(p, 0)) for p in locked]
+    seen = {p.lower() for p in locked}
+    for p in own_positions(org):
+        if p.lower() not in seen:
+            seen.add(p.lower())
+            out.append(PositionItem(name=p, count=counts.get(p, 0)))
+    return out
+
+
+@router.get("/position-catalog", response_model=List[PositionItem])
+async def get_position_catalog(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    return await _position_catalog(db, org)
+
+
+@router.post("/position-catalog", response_model=List[PositionItem])
+async def add_position(
+    data: PositionAdd,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    name = _clean_position(data.name)
+    known = {p.name.lower() for p in await _position_catalog(db, org)}
+    if name.lower() not in known:
+        set_own_positions(org, [*own_positions(org), name])
+        await db.commit()
+        logger.info(f"BOARD_POSITION add: «{name}» by user {current_user.id}")
+    return await _position_catalog(db, org)
+
+
+@router.patch("/position-catalog", response_model=List[PositionItem])
+async def rename_position(
+    data: PositionRename,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    old = _clean_position(data.name)
+    new = _clean_position(data.new_name)
+    own = own_positions(org)
+    if old not in own:
+        raise HTTPException(409, "Должность из основного списка не переименовывается")
+    if new.lower() != old.lower() and new.lower() in {p.name.lower() for p in await _position_catalog(db, org)}:
+        raise HTTPException(409, f"Должность «{new}» уже есть")
+    set_own_positions(org, [new if p == old else p for p in own])
+    people = (await db.execute(
+        select(Entity).where(Entity.org_id == org.id, Entity.position == old)
+    )).scalars().all()
+    for e in people:
+        e.position = new
+    await db.commit()
+    logger.info(f"BOARD_POSITION rename: «{old}» → «{new}», у {len(people)} чел. by user {current_user.id}")
+    return await _position_catalog(db, org)
+
+
+@router.delete("/position-catalog", response_model=List[PositionItem])
+async def delete_position(
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    name = _clean_position(name)
+    own = own_positions(org)
+    if name not in own:
+        raise HTTPException(409, "Должность из основного списка не удаляется")
+    people = (await _position_counts(db, org.id)).get(name, 0)
+    if people:
+        raise HTTPException(409, f"Должность «{name}» стоит у {people} чел. — сначала поменяйте её у них")
+    set_own_positions(org, [p for p in own if p != name])
+    await db.commit()
+    logger.info(f"BOARD_POSITION delete: «{name}» by user {current_user.id}")
+    return await _position_catalog(db, org)
 
 
 def _person_sandboxes(

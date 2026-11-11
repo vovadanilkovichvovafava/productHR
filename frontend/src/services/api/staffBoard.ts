@@ -188,8 +188,12 @@ export interface BoardDepartment {
   canonical?: boolean;
   /** Место в списке владельца — в этом порядке отделы идут в выборе. */
   canon_order?: number | null;
-  /** Должности этого отдела — выбор в колонке «Должность». */
+  /** Должности этого отдела по списку владельца. */
   positions?: string[];
+  /** Предлагается в окне выбора отдела: из списка владельца или добавлен HR
+   *  через это окно (11.11.2026). Свой (offered && !canonical) можно
+   *  переименовать и удалить. */
+  offered?: boolean;
 }
 
 export interface BoardDepartmentInput {
@@ -222,6 +226,40 @@ export async function renameBoardDepartment(id: number, name: string): Promise<B
 
 /** Правка отдела: название, роль (песочница/команда), песочница-родитель,
  *  видимость. Передаём только то, что меняем. */
+/** Удалить свой пустой отдел. Отдел из списка, песочницу и отдел с людьми
+ *  сервер не удалит (409 с объяснением). */
+export async function deleteBoardDepartment(id: number): Promise<void> {
+  await api.delete(`/staff-board/departments/${id}`);
+}
+
+/** Справочник должностей: из списка владельца (locked) и дописанные HR. */
+export interface PositionItem {
+  name: string;
+  locked: boolean;
+  /** У скольких людей стоит — удалить можно только неиспользуемую. */
+  count: number;
+}
+
+export async function getPositionCatalog(): Promise<PositionItem[]> {
+  const { data } = await api.get('/staff-board/position-catalog');
+  return data || [];
+}
+
+export async function addPosition(name: string): Promise<PositionItem[]> {
+  const { data } = await api.post('/staff-board/position-catalog', { name });
+  return data || [];
+}
+
+export async function renamePosition(name: string, newName: string): Promise<PositionItem[]> {
+  const { data } = await api.patch('/staff-board/position-catalog', { name, new_name: newName });
+  return data || [];
+}
+
+export async function deletePosition(name: string): Promise<PositionItem[]> {
+  const { data } = await api.delete('/staff-board/position-catalog', { params: { name } });
+  return data || [];
+}
+
 export async function updateBoardDepartment(
   id: number,
   patch: BoardDepartmentInput

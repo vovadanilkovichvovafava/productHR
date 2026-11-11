@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
-  Search, Loader2, Plus, Pencil, Check, Copy, Download, X,
+  Search, Loader2, Plus, Pencil, Check, Copy, Download, X, MoreHorizontal, Trash2,
   ChevronRight, ChevronDown, Paperclip, Upload, SlidersHorizontal, ListChecks,
 } from "lucide-react";
 import clsx from "clsx";
@@ -11,7 +11,8 @@ import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   getBoardRows, updateBoardRow, addBoardPlacement, removeBoardPlacement,
-  getBoardDepartments, createBoardDepartment, updateBoardDepartment,
+  getBoardDepartments, createBoardDepartment, updateBoardDepartment, deleteBoardDepartment,
+  getPositionCatalog, addPosition, renamePosition, deletePosition, type PositionItem,
   type BoardDepartment, type BoardRow, type BoardRowUpdate, type BoardTeamStint,
 } from "@/services/api/staffBoard";
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
@@ -414,6 +415,8 @@ const rowKey = (r: BoardRow) =>
 export default function StatusesPage() {
   const [rows, setRows] = useState<BoardRow[]>([]);
   const [departments, setDepartments] = useState<BoardDepartment[]>([]);
+  // Справочник должностей для окна выбора (список владельца + свои, 11.11.2026).
+  const [positionCatalog, setPositionCatalog] = useState<PositionItem[]>([]);
   // Справочники для выпадающих списков: должности и руководители собираются
   // из уже существующих значений, HR — из участников организации.
   const [managers, setManagers] = useState<string[]>([]);
@@ -593,6 +596,7 @@ export default function StatusesPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     getBoardDepartments().then(setDepartments).catch(() => setDepartments([]));
+    getPositionCatalog().then(setPositionCatalog).catch(() => setPositionCatalog([]));
     getBoardStatusViews()
       .then(applyViews)
       .catch(() => { setStatusViews({}); setColumnViews({}); });
@@ -836,14 +840,23 @@ export default function StatusesPage() {
         if (isBlank(v)) { blank += 1; continue; }
         map.set(v, (map.get(v) || 0) + 1);
       }
-      const list = [...map.entries()]
+      let entries = [...map.entries()];
+      // «Отдел» — только песочницы и отделы из списка, как в переводе
+      // (владелец, 11.11.2026: «в фильтрах забыл убрать»). Старое значение,
+      // уже отмеченное в фильтре, не прячем — иначе его нельзя было бы снять.
+      if (key === "department") {
+        const allowed = new Set(departmentFilterNames(departments));
+        const chosen = filters.values.department ?? [];
+        entries = entries.filter(([v]) => allowed.has(v) || chosen.includes(v));
+      }
+      const list = entries
         .map(([value, count]) => ({ value, count }))
         .sort((a, b) => a.value.localeCompare(b.value, "ru"));
       // «Пусто» — внизу: по нему находят незаполненные ячейки
       if (blank) list.push({ value: BLANK, count: blank });
       return list;
     },
-    [rows, q]
+    [rows, q, departments, filters.values.department]
   );
 
   const activeCount = countActive(filters);
@@ -1302,6 +1315,9 @@ export default function StatusesPage() {
                           row={r}
                           columns={visibleColumns}
                           departments={departments}
+                          onDepartments={setDepartments}
+                          positionCatalog={positionCatalog}
+                          onPositionCatalog={setPositionCatalog}
                           managers={managers}
                           people={people}
                           sourcerTags={sourcerTags}
@@ -1547,6 +1563,15 @@ function DeptTabs({
       )}
     </div>
   );
+}
+
+/** Какие отделы предлагать в фильтре «Отдел»: песочницы и отделы из списка
+ *  владельца — те же, что в переводе. Старые отделы вне списка не
+ *  предлагаются (решение владельца 09.11.2026). */
+export function departmentFilterNames(departments: BoardDepartment[]): string[] {
+  return departments
+    .filter((d) => d.kind === "sandbox" || d.canonical || d.offered)
+    .map((d) => d.name);
 }
 
 /** Песочницы для вкладок — в порядке, в котором их отдаёт сервер; скрытые
@@ -2000,13 +2025,17 @@ function DepartmentModal({
 // ============================================================
 
 function Row({
-  row, columns, departments, managers, people, sourcerTags, saving,
+  row, columns, departments, onDepartments, positionCatalog, onPositionCatalog,
+  managers, people, sourcerTags, saving,
   onPatch, onStatus, onPlace, onUnplace, onReload,
 }: {
   row: BoardRow;
   /** Колонки, которые показывает ЭТОТ пользователь на этой вкладке. */
   columns: typeof COLUMNS;
   departments: BoardDepartment[];
+  onDepartments: (update: (cur: BoardDepartment[]) => BoardDepartment[]) => void;
+  positionCatalog: PositionItem[];
+  onPositionCatalog: (list: PositionItem[]) => void;
   managers: string[];
   people: { user_id: number; user_name: string | null }[];
   sourcerTags: Tag[];
@@ -2075,16 +2104,20 @@ function Row({
     position: (
       <PositionCell
         value={row.position}
-        groups={positionChoices(row, departments)}
+        catalog={positionCatalog}
+        onCatalog={onPositionCatalog}
         onSave={(v) => onPatch(row, { position: v })}
+        onReload={onReload}
       />
     ),
     department: (
       <DepartmentCell
         row={row}
         departments={departments}
+        onDepartments={onDepartments}
         onPlace={(id) => onPlace(row, id)}
         onUnplace={() => onUnplace(row)}
+        onReload={onReload}
       />
     ),
     telegram: <TelegramCell value={row.telegram} onSave={(v) => onPatch(row, { telegram: v })} />,
@@ -2377,28 +2410,13 @@ export function rotationNote(
   return { short: `↻ ${last.name}${more}`, title: `Ротации:\n${lines.join("\n")}` };
 }
 
-/** Отделы из списка владельца — в его порядке. */
-export function canonicalTeams(departments: BoardDepartment[]): BoardDepartment[] {
+/** Отделы для окна выбора: сначала из списка владельца в его порядке, потом
+ *  добавленные HR — по алфавиту. Старые отделы вне списка не предлагаются. */
+export function offeredTeams(departments: BoardDepartment[]): BoardDepartment[] {
   return departments
-    .filter((d) => d.kind === "team" && d.canonical)
-    .sort((a, b) => (a.canon_order ?? 99) - (b.canon_order ?? 99) || a.id - b.id);
-}
-
-/** Выбор должности для строки. Отдел человека из списка — его должности одной
- *  группой; отдела нет или он вне списка — все должности, по отделам. В строке
- *  песочницы отдел человека — его рабочая команда (team_name). */
-export function positionChoices(
-  row: Pick<BoardRow, "department_id" | "department_is_sandbox" | "team_name">,
-  departments: BoardDepartment[],
-): { label: string; options: string[] }[] {
-  const team = row.department_is_sandbox
-    ? departments.find((d) => d.kind === "team" && d.name === row.team_name)
-    : departments.find((d) => d.id === row.department_id);
-  if (team?.positions?.length) return [{ label: team.name, options: team.positions }];
-  const seen = new Set<string>();
-  return canonicalTeams(departments)
-    .filter((d) => d.positions?.length && !seen.has(d.name) && seen.add(d.name))
-    .map((d) => ({ label: d.name, options: d.positions ?? [] }));
+    .filter((d) => d.kind === "team" && (d.offered || d.canonical))
+    .sort((a, b) =>
+      (a.canon_order ?? 99) - (b.canon_order ?? 99) || a.name.localeCompare(b.name, "ru"));
 }
 
 export const isBoardHr = (name: string | null | undefined) =>
@@ -2420,13 +2438,16 @@ const initialsOf = (name: string | null | undefined) =>
  *  один объект»). В строке команды выбор переносит её в другой отдел, а «×»
  *  убирает человека из отдела; из песочницы «×» не предлагаем. */
 function DepartmentCell({
-  row, departments, onPlace, onUnplace,
+  row, departments, onDepartments, onPlace, onUnplace, onReload,
 }: {
   row: BoardRow;
   departments: BoardDepartment[];
+  onDepartments: (update: (cur: BoardDepartment[]) => BoardDepartment[]) => void;
   onPlace: (id: number) => void;
   onUnplace: () => void;
+  onReload: () => void;
 }) {
+  const menu = useCellMenu();
   // Главным в ячейке всегда рабочий отдел — даже в строке песочницы: «нужно
   // видеть отделы везде, даже на сендбоксе» (Мария, 07.10.2026). Под ним —
   // подпись «из <песочницы>»: её убирали 09.10.2026 вместе с вложенностью
@@ -2446,9 +2467,9 @@ function DepartmentCell({
   // Песочница у человека одна: выбрал другую — переехал. Команда из песочницы —
   // наоборот, добавление: практика остаётся.
   const sandboxes = options.filter((d) => d.kind === "sandbox");
-  // Перевести можно только в отдел из списка владельца (09.11.2026). Старые
-  // отделы вне списка остаются у тех, кто в них стоит, но не предлагаются.
-  const teams = canonicalTeams(options);
+  // Перевести можно в отдел из списка владельца или в добавленный HR через
+  // это же окно (11.11.2026). Старые отделы вне списка не предлагаются.
+  const teams = offeredTeams(options);
   const teamsAdd = row.department_is_sandbox;
   const hint = row.department_id ? "Перевести или добавить в отдел" : "Поставить в отдел";
 
@@ -2482,28 +2503,64 @@ function DepartmentCell({
       ) : (
         <span className="hf-statuses-empty-cell">—</span>
       )}
-      <select
+      {/* Окно «как в ClickUp»: найти, выбрать или добавить свой отдел
+          (клиент, 11.11.2026). Кнопка прозрачная и лежит на всей ячейке. */}
+      <button
+        ref={menu.plusRef}
+        type="button"
         className="hf-statuses-dept-select"
-        value=""
         title={hint}
-        onChange={(e) => { if (e.target.value) onPlace(Number(e.target.value)); }}
-      >
-        <option value="">{hint}</option>
-        {sandboxes.length > 0 && (
-          <optgroup label={row.department_is_sandbox ? "Песочницы — перевести" : "Песочницы — вернуть на практику"}>
-            {sandboxes.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}{d.hidden ? " (скрыт)" : ""}</option>
-            ))}
-          </optgroup>
-        )}
-        {teams.length > 0 && (
-          <optgroup label={teamsAdd ? "Отделы — добавить (практика останется)" : "Отделы — перевести"}>
-            {teams.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}{d.hidden ? " (скрыт)" : ""}</option>
-            ))}
-          </optgroup>
-        )}
-      </select>
+        aria-label={hint}
+        onClick={menu.toggle}
+      />
+      {menu.open && menu.pos && (
+        <CatalogPicker
+          menuRef={menu.menuRef}
+          pos={menu.pos}
+          placeholder="Найти или добавить отдел…"
+          groups={[
+            {
+              label: row.department_is_sandbox ? "Песочницы — перевести" : "Песочницы — вернуть на практику",
+              options: sandboxes.map((d) => ({ key: String(d.id), label: d.name })),
+            },
+            {
+              label: teamsAdd ? "Отделы — добавить (практика останется)" : "Отделы — перевести",
+              options: teams.map((d) => ({ key: String(d.id), label: d.name, editable: !d.canonical })),
+            },
+          ]}
+          taken={departments.map((d) => d.name)}
+          onPick={(key) => { menu.close(); onPlace(Number(key)); }}
+          onAdd={async (text) => {
+            menu.close();
+            try {
+              const d = await createBoardDepartment(text, { kind: "team" });
+              onDepartments((cur) => (cur.some((x) => x.id === d.id)
+                ? cur.map((x) => (x.id === d.id ? d : x)) : [...cur, d]));
+              onPlace(d.id);
+            } catch (e: any) {
+              toast.error(e?.response?.data?.detail || `Не удалось добавить отдел «${text}»`);
+            }
+          }}
+          onRename={async (key, text) => {
+            try {
+              const d = await updateBoardDepartment(Number(key), { name: text });
+              onDepartments((cur) => cur.map((x) => (x.id === d.id ? d : x)));
+              onReload();
+            } catch (e: any) {
+              toast.error(e?.response?.data?.detail || "Не удалось переименовать отдел");
+            }
+          }}
+          onDelete={async (key, label) => {
+            try {
+              await deleteBoardDepartment(Number(key));
+              onDepartments((cur) => cur.filter((x) => String(x.id) !== key));
+              toast.success(`Отдел «${label}» удалён`);
+            } catch (e: any) {
+              toast.error(e?.response?.data?.detail || `Не удалось удалить «${label}»`);
+            }
+          }}
+        />
+      )}
       {row.placement_id != null && !row.department_is_sandbox && (
         <button
           type="button"
@@ -2625,64 +2682,233 @@ function PillCell({
   );
 }
 
-/** Должность — выбор из списка, вписать своё нельзя (владелец, 09.11.2026).
- *  Старое значение не из списка показывается как было и в выборе помечено
- *  «не из списка»: молча стирать вписанное раньше нельзя. */
+/** Должность — окно «как в ClickUp» (клиент, 11.11.2026): общий список
+ *  должностей (из списка владельца + дописанные HR), поиск, «+ Добавить».
+ *  Свою должность можно переименовать — имя поменяется у всех, у кого она
+ *  стоит, — и удалить, если она ни у кого не стоит. Старое значение не из
+ *  списка показывается как было: молча стирать вписанное раньше нельзя. */
 function PositionCell({
-  value, groups, onSave,
+  value, catalog, onCatalog, onSave, onReload,
 }: {
   value: string | null;
-  groups: { label: string; options: string[] }[];
+  catalog: PositionItem[];
+  onCatalog: (list: PositionItem[]) => void;
   onSave: (v: string | null) => void;
+  onReload: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const known = groups.some((g) => g.options.includes(value || ""));
+  const menu = useCellMenu();
+  const known = catalog.some((p) => p.name === value);
+  const fail = (e: any, text: string) => toast.error(e?.response?.data?.detail || text);
 
-  if (editing) {
-    return (
-      <select
-        className="hf-statuses-input"
-        autoFocus
-        value={value || ""}
-        onBlur={() => setEditing(false)}
-        onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
-        onChange={(e) => {
-          setEditing(false);
-          const next = e.target.value || null;
-          if (next !== (value || null)) onSave(next);
-        }}
-      >
-        <option value="">— не указана</option>
-        {value && !known && <option value={value}>{value} (не из списка)</option>}
-        {groups.map((g) => (
-          <optgroup key={g.label} label={g.label}>
-            {g.options.map((o) => <option key={o} value={o}>{o}</option>)}
-          </optgroup>
-        ))}
-      </select>
-    );
-  }
+  const picker = menu.open && menu.pos && (
+    <CatalogPicker
+      menuRef={menu.menuRef}
+      pos={menu.pos}
+      placeholder="Найти или добавить должность…"
+      groups={[{
+        label: "Должности",
+        options: catalog.map((p) => ({
+          key: p.name, label: p.name, editable: !p.locked,
+          hint: p.count ? `${p.count}` : undefined,
+        })),
+      }]}
+      taken={catalog.map((p) => p.name)}
+      current={value}
+      onClear={value ? () => { menu.close(); onSave(null); } : undefined}
+      onPick={(key) => { menu.close(); if (key !== value) onSave(key); }}
+      onAdd={async (text) => {
+        menu.close();
+        try {
+          onCatalog(await addPosition(text));
+          onSave(text);
+        } catch (e) { fail(e, `Не удалось добавить «${text}»`); }
+      }}
+      onRename={async (key, text) => {
+        try {
+          onCatalog(await renamePosition(key, text));
+          onReload();
+        } catch (e) { fail(e, "Не удалось переименовать должность"); }
+      }}
+      onDelete={async (key) => {
+        try {
+          onCatalog(await deletePosition(key));
+          toast.success(`Должность «${key}» удалена`);
+        } catch (e) { fail(e, `Не удалось удалить «${key}»`); }
+      }}
+    />
+  );
 
   if (!value) {
     return (
-      <button className="hf-statuses-empty-cell" onClick={() => setEditing(true)}>—</button>
+      <>
+        <button ref={menu.plusRef} className="hf-statuses-empty-cell" onClick={menu.toggle}>—</button>
+        {picker}
+      </>
     );
   }
 
   const hue = pillHue(value);
   return (
-    <button
-      className="hf-statuses-pill"
-      onClick={() => setEditing(true)}
-      style={{
-        background: `hsl(${hue} 70% 94%)`,
-        color: `hsl(${hue} 55% 32%)`,
-        borderColor: `hsl(${hue} 60% 84%)`,
-      }}
-      title={known ? value : `${value} — не из списка должностей`}
+    <>
+      <button
+        ref={menu.plusRef}
+        className="hf-statuses-pill"
+        onClick={menu.toggle}
+        style={{
+          background: `hsl(${hue} 70% 94%)`,
+          color: `hsl(${hue} 55% 32%)`,
+          borderColor: `hsl(${hue} 60% 84%)`,
+        }}
+        title={known ? value : `${value} — не из списка должностей`}
+      >
+        {value}
+      </button>
+      {picker}
+    </>
+  );
+}
+
+type PickerOption = { key: string; label: string; editable?: boolean; hint?: string };
+
+/** Окно выбора «как в ClickUp» для отделов и должностей (клиент, 11.11.2026):
+ *  поиск сверху, ниже группы вариантов; набрал то, чего нет, — «+ Добавить».
+ *  У своих вариантов (не из списка владельца) «…» — переименовать и удалить.
+ *  Открывается под ячейкой поверх доски (useCellMenu: закрытие по клику мимо,
+ *  Escape и прокрутке доски). */
+function CatalogPicker({
+  menuRef, pos, placeholder, groups, taken, current, onPick, onAdd, onRename, onDelete, onClear,
+}: {
+  menuRef: React.RefObject<HTMLDivElement>;
+  pos: { top: number; left: number };
+  placeholder: string;
+  groups: { label: string; options: PickerOption[] }[];
+  /** Все существующие названия — «Добавить» не предлагаем, если такое уже есть. */
+  taken: string[];
+  current?: string | null;
+  onPick: (key: string) => void;
+  onAdd: (text: string) => void;
+  onRename: (key: string, text: string) => void;
+  onDelete: (key: string, label: string) => void;
+  onClear?: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<{ key: string; text: string } | null>(null);
+  const needle = q.trim().toLowerCase();
+  const text = q.trim().replace(/\s+/g, " ");
+  const canAdd = !!text && !taken.some((t) => t.trim().toLowerCase() === text.toLowerCase());
+  const shown = groups
+    .map((g) => ({ ...g, options: g.options.filter((o) => !needle || o.label.toLowerCase().includes(needle)) }))
+    .filter((g) => g.options.length);
+
+  const saveRename = () => {
+    if (!renaming) return;
+    const next = renaming.text.trim().replace(/\s+/g, " ");
+    const opt = groups.flatMap((g) => g.options).find((o) => o.key === renaming.key);
+    setRenaming(null);
+    if (next && opt && next !== opt.label) onRename(renaming.key, next);
+  };
+
+  return (
+    <div
+      ref={menuRef}
+      className="hf-statuses-hr-menu hf-statuses-picker"
+      style={{ top: pos.top, left: Math.max(8, Math.min(pos.left, window.innerWidth - 288)) }}
     >
-      {value}
-    </button>
+      <input
+        autoFocus
+        className="hf-statuses-picker-search"
+        placeholder={placeholder}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          const first = shown[0]?.options[0];
+          if (first && first.label.toLowerCase() === needle) onPick(first.key);
+          else if (canAdd) onAdd(text);
+          else if (first) onPick(first.key);
+        }}
+      />
+      {onClear && !needle && (
+        <button type="button" className="hf-statuses-hr-option hf-statuses-picker-clear" onClick={onClear}>
+          — убрать
+        </button>
+      )}
+      {shown.map((g) => (
+        <div key={g.label}>
+          <div className="hf-statuses-hr-menu-hint">{g.label}</div>
+          {g.options.map((o) => (
+            <div key={o.key} className="hf-statuses-picker-row">
+              {renaming?.key === o.key ? (
+                <input
+                  autoFocus
+                  className="hf-statuses-picker-search"
+                  value={renaming.text}
+                  onChange={(e) => setRenaming({ key: o.key, text: e.target.value })}
+                  onBlur={saveRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveRename();
+                    if (e.key === "Escape") { e.stopPropagation(); setRenaming(null); }
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className={clsx("hf-statuses-hr-option", o.key === current && "is-current")}
+                  onClick={() => onPick(o.key)}
+                >
+                  <span
+                    className="hf-statuses-picker-pill"
+                    style={{
+                      background: `hsl(${pillHue(o.label)} 70% 94%)`,
+                      color: `hsl(${pillHue(o.label)} 55% 32%)`,
+                    }}
+                  >
+                    {o.label}
+                  </span>
+                  {o.hint && <span className="hf-statuses-picker-hint">{o.hint}</span>}
+                </button>
+              )}
+              {o.editable && renaming?.key !== o.key && (
+                <button
+                  type="button"
+                  className="hf-statuses-picker-more"
+                  title="Переименовать или удалить"
+                  onClick={() => setMenuFor(menuFor === o.key ? null : o.key)}
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+              )}
+              {menuFor === o.key && (
+                <div className="hf-statuses-picker-actions">
+                  <button
+                    type="button"
+                    onClick={() => { setMenuFor(null); setRenaming({ key: o.key, text: o.label }); }}
+                  >
+                    <Pencil size={12} /> Переименовать
+                  </button>
+                  <button
+                    type="button"
+                    className="is-danger"
+                    onClick={() => { setMenuFor(null); onDelete(o.key, o.label); }}
+                  >
+                    <Trash2 size={12} /> Удалить
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+      {canAdd && (
+        <button type="button" className="hf-statuses-hr-option hf-statuses-picker-add" onClick={() => onAdd(text)}>
+          <Plus size={13} /> Добавить «{text}»
+        </button>
+      )}
+      {!shown.length && !canAdd && (
+        <div className="hf-statuses-hr-menu-hint">Ничего не найдено</div>
+      )}
+    </div>
   );
 }
 

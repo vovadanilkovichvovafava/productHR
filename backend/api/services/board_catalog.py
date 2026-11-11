@@ -81,7 +81,12 @@ _NOISE = re.compile(r"\b(team|команда|отдел)\b", re.IGNORECASE)
 
 
 def _norm(name: str) -> str:
-    s = _NOISE.sub("", (name or "").lower().replace("ё", "е"))
+    # Пометка в скобках — не часть названия: на проде отдел назвали
+    # «Product Studio (Марк)» (по руководителю), и без этого он считался
+    # отделом вне списка — его не было в переводе, а должности к нему не
+    # подставлялись (11.11.2026).
+    s = re.sub(r"\([^)]*\)", "", (name or "").lower().replace("ё", "е"))
+    s = _NOISE.sub("", s)
     return re.sub(r"[^0-9a-zа-я]", "", s)
 
 
@@ -100,6 +105,64 @@ def positions_for(name: Optional[str]) -> List[str]:
     """Должности отдела из списка; у отдела вне списка — пусто."""
     i = canon_index(name)
     return list(CANON_TEAMS[i][2]) if i is not None else []
+
+
+# --- Свои отделы и должности HR (11.11.2026) -------------------------------
+# Клиент: «Мы сами сделаем отделы, которые нам нужны… окно как в ClickUp, где
+# можешь выбрать существующий или добавить новый — и для должностей». Решение
+# владельца: основа — список выше, а HR может дописать своё. Дописанное лежит
+# в настройках организации: отдел — id в OWN_DEPTS_KEY (сам отдел — обычная
+# строка staff_board_departments), должность — строка в OWN_POSITIONS_KEY.
+# Старые отделы вне списка по-прежнему не предлагаются, пока их не добавят
+# заново через то же окно.
+OWN_DEPTS_KEY = "board_own_departments"
+OWN_POSITIONS_KEY = "board_own_positions"
+
+
+def _settings(org) -> dict:
+    return org.settings if isinstance(org.settings, dict) else {}
+
+
+def own_department_ids(org) -> List[int]:
+    out: List[int] = []
+    for v in _settings(org).get(OWN_DEPTS_KEY) or []:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def set_own_department_ids(org, ids: List[int]) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
+
+    settings = dict(_settings(org))
+    settings[OWN_DEPTS_KEY] = list(dict.fromkeys(ids))
+    org.settings = settings
+    flag_modified(org, "settings")
+
+
+def canon_positions() -> List[str]:
+    """Должности из списка владельца — одним списком, без повторов."""
+    out: List[str] = []
+    for _name, _aliases, positions in CANON_TEAMS:
+        for p in positions:
+            if p not in out:
+                out.append(p)
+    return out
+
+
+def own_positions(org) -> List[str]:
+    return [str(p) for p in (_settings(org).get(OWN_POSITIONS_KEY) or []) if str(p).strip()]
+
+
+def set_own_positions(org, names: List[str]) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
+
+    settings = dict(_settings(org))
+    settings[OWN_POSITIONS_KEY] = names
+    org.settings = settings
+    flag_modified(org, "settings")
 
 
 async def canonize_board_departments_once(db) -> None:

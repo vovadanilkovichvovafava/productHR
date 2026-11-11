@@ -26,6 +26,8 @@ def _h(u):
     ("Продукт", "Product Studio"),
     ("BizDev", "BizDev team"),
     ("HR", "HR team"),
+    ("Product Studio (Марк)", "Product Studio"),
+    ("SEO team (старый)", "SEO team"),
 ])
 def test_similar_names_map_to_canon(name, canon):
     assert bc.CANON_TEAMS[bc.canon_index(name)][0] == canon
@@ -88,3 +90,80 @@ async def test_departments_carry_positions(client, admin_user, organization, org
     assert by["SEO team"]["positions"][0] == "SEO Buyer Team Lead"
     assert by["ASA"]["canonical"] is False and by["ASA"]["positions"] == []
     assert by["SANDBOX"]["canonical"] is False
+
+
+@pytest.mark.asyncio
+async def test_own_department_is_offered_editable_and_deletable_when_empty(
+    client, db_session, admin_user, organization, org_owner
+):
+    """Свой отдел из окна выбора (клиент, 11.11.2026): предлагается, правится,
+    удаляется только пустым. Отдел из списка не переименовывается и не удаляется."""
+    h = _h(admin_user)
+    own = (await client.post("/api/staff-board/departments", json={"name": "Фин отдел"}, headers=h)).json()
+    canon = (await client.post("/api/staff-board/departments", json={"name": "SEO team"}, headers=h)).json()
+    old = BoardDepartment(org_id=organization.id, name="Фарм отдел", kind="team")
+    db_session.add(old)
+    await db_session.commit()
+
+    by = {d["name"]: d for d in (await client.get("/api/staff-board/departments", headers=h)).json()}
+    assert by["Фин отдел"]["offered"] is True and by["Фин отдел"]["canonical"] is False
+    assert by["SEO team"]["offered"] is True
+    assert by["Фарм отдел"]["offered"] is False   # старый — не предлагается
+
+    # Старый отдел добавили заново через окно — теперь свой, предлагается
+    again = (await client.post("/api/staff-board/departments", json={"name": "фарм отдел"}, headers=h)).json()
+    assert again["id"] == old.id and again["offered"] is True
+
+    r = await client.patch(f"/api/staff-board/departments/{own['id']}", json={"name": "Финансы"}, headers=h)
+    assert r.status_code == 200 and r.json()["name"] == "Финансы" and r.json()["offered"] is True
+    r = await client.patch(f"/api/staff-board/departments/{canon['id']}", json={"name": "Сеошники"}, headers=h)
+    assert r.status_code == 409
+
+    e = Entity(org_id=organization.id, name="Финансист", type=EntityType.candidate,
+               status=EntityStatus.transferred, created_by=admin_user.id, extra_data={})
+    db_session.add(e)
+    await db_session.commit()
+    db_session.add(BoardPlacement(org_id=organization.id, entity_id=e.id, department_id=own["id"], extra={}))
+    await db_session.commit()
+    assert (await client.delete(f"/api/staff-board/departments/{own['id']}", headers=h)).status_code == 409
+    assert (await client.delete(f"/api/staff-board/departments/{canon['id']}", headers=h)).status_code == 409
+
+    empty = (await client.post("/api/staff-board/departments", json={"name": "Support отдел"}, headers=h)).json()
+    assert (await client.delete(f"/api/staff-board/departments/{empty['id']}", headers=h)).status_code == 200
+    names = {d["name"] for d in (await client.get("/api/staff-board/departments", headers=h)).json()}
+    assert "Support отдел" not in names
+
+
+@pytest.mark.asyncio
+async def test_position_catalog_add_rename_delete(client, db_session, admin_user, organization, org_owner):
+    """Один общий список должностей: из списка владельца + свои (11.11.2026)."""
+    h = _h(admin_user)
+    cat = (await client.get("/api/staff-board/position-catalog", headers=h)).json()
+    assert cat[0] == {"name": "SEO Buyer Team Lead", "locked": True, "count": 0}
+
+    cat = (await client.post("/api/staff-board/position-catalog", json={"name": "  Финансист "}, headers=h)).json()
+    assert {"name": "Финансист", "locked": False, "count": 0} in cat
+    # повтор без учёта регистра — не дублируется
+    cat = (await client.post("/api/staff-board/position-catalog", json={"name": "финансист"}, headers=h)).json()
+    assert [p["name"] for p in cat].count("Финансист") == 1
+
+    e = Entity(org_id=organization.id, name="Сотрудник Фин", type=EntityType.candidate,
+               status=EntityStatus.transferred, created_by=admin_user.id, extra_data={},
+               position="Финансист")
+    db_session.add(e)
+    await db_session.commit()
+
+    r = await client.request("DELETE", "/api/staff-board/position-catalog", params={"name": "Финансист"}, headers=h)
+    assert r.status_code == 409   # стоит у человека
+    r = await client.patch("/api/staff-board/position-catalog",
+                           json={"name": "Финансист", "new_name": "Финансовый аналитик"}, headers=h)
+    assert r.status_code == 200
+    await db_session.refresh(e)
+    assert e.position == "Финансовый аналитик"   # переименование доходит до людей
+    r = await client.patch("/api/staff-board/position-catalog",
+                           json={"name": "SEO Buyer", "new_name": "Сеошник"}, headers=h)
+    assert r.status_code == 409
+
+    await client.post("/api/staff-board/position-catalog", json={"name": "Курьер"}, headers=h)
+    r = await client.request("DELETE", "/api/staff-board/position-catalog", params={"name": "Курьер"}, headers=h)
+    assert r.status_code == 200 and "Курьер" not in [p["name"] for p in r.json()]

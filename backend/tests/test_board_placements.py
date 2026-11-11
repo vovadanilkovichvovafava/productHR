@@ -969,7 +969,7 @@ async def test_rotation_between_teams_is_remembered(
     """Ротация: был в Продукте, стал байером FB — прежний отдел не теряется
     (Мария, 05.11.2026). Назначение при переводе удаляется, след — в карточке."""
     sandbox = await _dept(client, admin_user, "SANDBOX", kind="sandbox")
-    product = await _dept(client, admin_user, "Продукт", kind="team", parent_id=sandbox["id"])
+    product = await _dept(client, admin_user, "Альфа", kind="team", parent_id=sandbox["id"])
     fb = await _dept(client, admin_user, "Байер FB", kind="team", parent_id=sandbox["id"])
     seo = await _dept(client, admin_user, "SEO", kind="team", parent_id=sandbox["id"])
     e = await _person(db_session, organization, admin_user, status=EntityStatus.transferred)
@@ -990,27 +990,27 @@ async def test_rotation_between_teams_is_remembered(
 
     # Отдел → отдел (без replace_placement_id: команда у человека одна).
     moved = await place(fb["id"])
-    assert [h["name"] for h in moved["team_history"]] == ["Продукт"]
+    assert [h["name"] for h in moved["team_history"]] == ["Альфа"]
     stint = moved["team_history"][0]
     assert stint["date_to"] == date.today().isoformat() and stint["date_from"]
 
     # И явным переносом — история копится, старые первыми.
     again = await place(seo["id"], replace_placement_id=moved["placement_id"])
-    assert [h["name"] for h in again["team_history"]] == ["Продукт", "Байер FB"]
+    assert [h["name"] for h in again["team_history"]] == ["Альфа", "Байер FB"]
 
     # История — у человека: её видно и в строке песочницы.
     rows = await _rows(client, admin_user, e.id)
     assert {r["department_name"] for r in rows} == {"SANDBOX", "SEO"}
-    assert all([h["name"] for h in r["team_history"]] == ["Продукт", "Байер FB"] for r in rows)
+    assert all([h["name"] for h in r["team_history"]] == ["Альфа", "Байер FB"] for r in rows)
 
     # Переименовали отдел — в истории новое имя.
     r = await client.patch(
-        f"/api/staff-board/departments/{product['id']}", json={"name": "iOS Product"},
+        f"/api/staff-board/departments/{product['id']}", json={"name": "Альфа-2"},
         headers=_h(admin_user),
     )
     assert r.status_code == 200, r.text
     rows = await _rows(client, admin_user, e.id)
-    assert rows[0]["team_history"][0]["name"] == "iOS Product"
+    assert rows[0]["team_history"][0]["name"] == "Альфа-2"
 
 
 @pytest.mark.asyncio

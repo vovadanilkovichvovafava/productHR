@@ -10404,8 +10404,8 @@ body.performance-mode .glass-card:hover {
   opacity: 0;
   cursor: pointer;
 }
-/* Крестик «убрать из отдела» лежит ПОВЕРХ прозрачного select: иначе клик по
-   нему открывал бы список отделов вместо снятия. */
+/* Крестик «убрать из отдела» лежит ПОВЕРХ прозрачной кнопки выбора: иначе
+   клик по нему открывал бы окно отделов вместо снятия. */
 .hf-statuses-dept-remove {
   position: relative;
   z-index: 1;
@@ -10579,6 +10579,63 @@ body.performance-mode .glass-card:hover {
   cursor: pointer;
 }
 .hf-statuses-hr-option:hover { background: var(--hf-main-50, #f1f5f9); }
+/* Окно выбора отдела/должности «как в ClickUp» (11.11.2026). */
+.hf-statuses-picker { width: 280px; max-height: 360px; }
+.hf-statuses-picker-search {
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--hf-cyan-500);
+  border-radius: 6px;
+  font-size: var(--hf-fs-5xs, 12px);
+  outline: none;
+}
+.hf-statuses-picker-row { position: relative; display: flex; align-items: center; }
+.hf-statuses-picker-row .hf-statuses-hr-option { flex: 1; min-width: 0; }
+.hf-statuses-hr-option.is-current { background: var(--hf-main-50, #f1f5f9); }
+.hf-statuses-picker-pill {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 8px;
+  border-radius: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-statuses-picker-hint { margin-left: auto; color: var(--hf-main-400); font-size: var(--hf-fs-6xs); }
+.hf-statuses-picker-more {
+  flex-shrink: 0;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--hf-main-400);
+}
+.hf-statuses-picker-more:hover { color: var(--hf-main-900); background: var(--hf-main-100); }
+.hf-statuses-picker-actions {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--hf-main-100);
+  border-radius: 8px;
+  background: var(--hf-white);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+.hf-statuses-picker-actions button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: var(--hf-fs-5xs, 12px);
+  text-align: left;
+}
+.hf-statuses-picker-actions button:hover { background: var(--hf-main-50, #f1f5f9); }
+.hf-statuses-picker-actions .is-danger { color: var(--hf-red-600); }
+.hf-statuses-picker-add { color: var(--hf-cyan-700); font-weight: var(--hf-fw-semibold); }
+.hf-statuses-picker-clear { color: var(--hf-main-500); }
 .hf-statuses-avatar {
   display: grid;
   place-items: center;

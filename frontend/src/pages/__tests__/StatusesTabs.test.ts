@@ -20,3 +20,15 @@ describe("sandboxTabs", () => {
     expect(tabs.map((d) => d.name)).toEqual(["SANDBOX", "SANDBOX mobile", "SANDBOX R&D"]);
   });
 });
+
+describe("departmentFilterNames", () => {
+  it("в фильтре «Отдел» — песочницы и отделы из списка, без старых", async () => {
+    const { departmentFilterNames } = await import("../StatusesPage");
+    expect(departmentFilterNames([
+      dept(1, "SANDBOX", { kind: "sandbox" }),
+      dept(2, "Product Studio (Марк)", { canonical: true }),
+      dept(3, "Мобильная разработка"),
+      dept(4, "Фарм отдел"),
+    ])).toEqual(["SANDBOX", "Product Studio (Марк)"]);
+  });
+});
