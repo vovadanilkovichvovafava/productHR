@@ -3017,7 +3017,7 @@ function CatalogPicker({
   menuRef, pos, placeholder, groups, taken, current, onPick, onAdd, onRename, onDelete, onClear,
 }: {
   menuRef: React.RefObject<HTMLDivElement>;
-  pos: { top: number; left: number };
+  pos: MenuPos;
   placeholder: string;
   groups: { label: string; options: PickerOption[] }[];
   /** Все существующие названия — «Добавить» не предлагаем, если такое уже есть. */
@@ -3051,7 +3051,7 @@ function CatalogPicker({
     <div
       ref={menuRef}
       className="hf-statuses-hr-menu hf-catalog-picker"
-      style={{ top: pos.top, left: Math.max(8, Math.min(pos.left, window.innerWidth - 288)) }}
+      style={menuBoxStyle(pos)}
     >
       <input
         autoFocus
@@ -3168,6 +3168,16 @@ function CatalogPicker({
  */
 /** Выпадашка у «+» в ячейке: меню fixed, закрытие по клику мимо, Escape и
  *  прокрутке. Одна на HR и сорсеров — колонки разные, повадки кнопки одни. */
+/** Где стоит меню у ячейки: под кнопкой или над ней (см. useCellMenu). */
+type MenuPos = { top: number; left: number; maxHeight?: number; overflowY?: "auto" };
+
+/** Стиль окна-меню у ячейки: место от useCellMenu, левый край не за экраном. */
+const menuBoxStyle = (pos: MenuPos, width = 288): React.CSSProperties => ({
+  top: pos.top,
+  left: Math.max(8, Math.min(pos.left, window.innerWidth - width)),
+  ...(pos.maxHeight !== undefined ? { maxHeight: pos.maxHeight, overflowY: "auto" as const } : {}),
+});
+
 function useCellMenu() {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -3206,8 +3216,14 @@ function useCellMenu() {
   };
 
   const menuStyle = pos ? { top: pos.top, left: pos.left, ...placementStyle(placement) } : undefined;
+  // Окна «как в ClickUp» (HR, сорсер, отдел, должность, свои поля) брали
+  // pos.top — место «под кнопкой» — и расчёт «внизу не влезает → вверх» до
+  // них не доходил: у нижних строк меню уходило за экран (Эльвира,
+  // 11.11.2026: «окно менюшки внизу, я его не вижу и скролить не могу»).
+  // Отдаём уже посчитанное место.
+  const placed: MenuPos | null = pos ? { ...pos, ...placementStyle(placement) } : null;
 
-  return { open, pos, menuStyle, plusRef, menuRef, toggle, close: () => setOpen(false) };
+  return { open, pos: placed, menuStyle, plusRef, menuRef, toggle, close: () => setOpen(false) };
 }
 
 /** Сорсеры человека — как HR и «Assignees» в ClickUp (клиент, 11.11.2026):
@@ -3284,7 +3300,7 @@ function SourcerCell({
         <div
           ref={menu.menuRef}
           className="hf-statuses-hr-menu hf-catalog-picker"
-          style={{ top: menu.pos.top, left: Math.max(8, Math.min(menu.pos.left, window.innerWidth - 288)) }}
+          style={menuBoxStyle(menu.pos)}
         >
           <input
             autoFocus
@@ -3392,7 +3408,7 @@ function AssigneeCell({
         <div
           ref={menuRef}
           className="hf-statuses-hr-menu hf-catalog-picker"
-          style={{ top: pos.top, left: Math.max(8, Math.min(pos.left, window.innerWidth - 288)) }}
+          style={menuBoxStyle(pos)}
         >
           <input
             autoFocus
