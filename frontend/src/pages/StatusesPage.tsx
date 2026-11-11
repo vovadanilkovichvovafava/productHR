@@ -3641,6 +3641,22 @@ function useCellMenu() {
  *  Раньше клик по чипу сразу снимал сорсера, а рядом стоял «+». */
 const SOURCER_COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"];
 
+/** Пункты окна сорсеров: справочник без убранных в архив + ВСЕ, кто стоит у
+ *  человека. Справочник (`GET /tags`) архивных не отдаёт, поэтому сорсер,
+ *  убранный старой кнопкой «Удалить» (архив, до 12.11.2026), стоял у
+ *  кандидата, но в окне его не было вовсе — ни «×», ни «…»: «как сейчас
+ *  убрать „тестовый“?» (владелец, 12.11.2026). Стоящие — сверху «Выбраны». */
+export function sourcerOptions(
+  catalog: Tag[],
+  sourcers: { id: number; name: string; color: string }[],
+): PickerOption[] {
+  const on = new Set(sourcers.map((t) => t.id));
+  const listed = catalog.filter((t) => !t.archived_at || on.has(t.id));
+  const missing = sourcers.filter((s) => !catalog.some((t) => t.id === s.id));
+  return orderByMeta("sourcers", [...listed, ...missing], (t) => String(t.id))
+    .map((t) => ({ key: String(t.id), label: t.name, editable: true, color: t.color }));
+}
+
 function SourcerCell({
   row, catalog, onCatalog, onReload,
 }: {
@@ -3667,10 +3683,7 @@ function SourcerCell({
   // снимку из замыкания затирали друг друга — новый сорсер пропадал из окна.
   const replaceTag = (tag: Tag) => onCatalog((list) => list.map((t) => (t.id === tag.id ? tag : t)));
 
-  // Список — справочник меток (без убранных в архив), стоящие у человека —
-  // сверху «Выбраны».
-  const options = orderByMeta("sourcers", catalog.filter((t) => !t.archived_at || ids.includes(String(t.id))), (t) => String(t.id))
-    .map((t) => ({ key: String(t.id), label: t.name, editable: true, color: t.color }));
+  const options = sourcerOptions(catalog, sourcers);
 
   return (
     <div className="hf-statuses-sourcers">

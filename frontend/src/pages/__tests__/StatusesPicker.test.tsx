@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
-import { CatalogPicker, PICKER_COLORS, canLeaveDepartment, colorPill, menuPosFor } from "../StatusesPage";
+import { CatalogPicker, PICKER_COLORS, canLeaveDepartment, colorPill, menuPosFor, sourcerOptions } from "../StatusesPage";
 
 // Окно-список доски «Штат» — одно на все выпадающие (11.11.2026). Сторожим
 // мелочи, найденные при проверке: окно с несколькими значениями не
@@ -206,6 +206,21 @@ describe("окошко «…»", () => {
   it("у песочницы «Удалить» нет", () => {
     open({ noDelete: true });
     expect(screen.queryByText("Удалить")).toBeNull();
+  });
+});
+
+describe("sourcerOptions", () => {
+  const tag = (id: number, name: string, archived = false) =>
+    ({ id, org_id: 1, name, color: "#d73f7b", created_by: null, created_at: null, archived_at: archived ? "2026-11-11" : null });
+
+  it("сорсер у человека, которого нет в справочнике (архивный), всё равно в окне — его можно снять и удалить", () => {
+    const opts = sourcerOptions([tag(1, "Валя")], [{ id: 7, name: "тестовый", color: "#d73f7b" }]);
+    expect(opts.map((o) => o.label)).toEqual(["Валя", "тестовый"]);
+    expect(opts.find((o) => o.key === "7")?.editable).toBe(true);
+  });
+
+  it("архивный, которого у человека нет, — не предлагается", () => {
+    expect(sourcerOptions([tag(1, "Валя"), tag(2, "Старый", true)], []).map((o) => o.label)).toEqual(["Валя"]);
   });
 });
 
