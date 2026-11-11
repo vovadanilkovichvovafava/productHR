@@ -2,9 +2,9 @@
 
 - «Взять в работу» = join: рекрутёр добавляется в assigned_to ТОЙ ЖЕ вакансии,
   заявка pending_review→open, клон НЕ создаётся.
-- «Закрыть вакансию» участником при других активных участниках = ВЫХОД (leave):
-  статус не меняется, участник снимается (assigned_to + dismissed_by).
-- Закрытие последним участником = реальное закрытие.
+- «Закрыть вакансию» участником закрывает её У ВСЕХ, даже при других
+  участниках (Эльвира, 11.11.2026). До этого закрытие молча становилось
+  выходом. Выйти — отдельная кнопка (/decline).
 - Легаси-клоны продолжают закрываться по-старому (dismissed_by на оригинале).
 """
 from datetime import datetime
@@ -64,12 +64,12 @@ async def test_take_joins_same_vacancy_no_clone(
 
 
 @pytest.mark.asyncio
-async def test_close_with_other_participants_is_leave(
+async def test_participant_closes_shared_vacancy_for_everyone(
     client, db_session, organization, admin_user, org_owner, second_user, org_member, regular_user, org_admin
 ):
-    """regular_user (второй участник) остаётся → закрытие second_user = выход."""
-    # ВАЖНО: regular_user имеет org-роль admin (фикстура org_admin) — поэтому
-    # закрываем именно second_user (member), у которого нет полного доступа.
+    """second_user (member, без полного доступа) — участник общей воронки, рядом
+    работает regular_user. «Закрыть» закрывает вакансию у всех, участники
+    остаются на местах (это не выход)."""
     v = await _mk_request(
         db_session, organization, admin_user,
         assigned=[second_user.id, regular_user.id], status=VacancyStatus.open,
@@ -77,10 +77,10 @@ async def test_close_with_other_participants_is_leave(
     r = await client.put(f"/api/vacancies/{v.id}", headers=_h(second_user), json={"status": "closed"})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["status"] == "open"  # воронка ЖИВА для остальных
-    assert second_user.id not in (body.get("assigned_to") or [])
+    assert body["status"] == "closed"
+    assert second_user.id in (body.get("assigned_to") or [])
     await db_session.refresh(v)
-    assert second_user.id in ((v.extra_data or {}).get("dismissed_by") or [])
+    assert second_user.id not in ((v.extra_data or {}).get("dismissed_by") or [])
 
 
 @pytest.mark.asyncio

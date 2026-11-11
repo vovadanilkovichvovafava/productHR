@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Vacancy } from '@/types';
-import { getVacancyExitOptions, isExplicitlyAssigned, isRequestVisibleTo, pinMovedCandidate } from './vacancy';
+import { findSameTitleVacancy, getVacancyExitOptions, isExplicitlyAssigned, isRequestVisibleTo, pinMovedCandidate } from './vacancy';
 
 const ME = 3;
 const vac = (over: Partial<Vacancy> & { accepted_by?: number[]; dismissed_by?: number[] }): Vacancy => {
@@ -54,8 +54,8 @@ describe('isRequestVisibleTo — recruiter', () => {
 describe('getVacancyExitOptions', () => {
   const shared = vac({ created_by: 4, assigned_to: [4, ME], accepted_by: [4, ME] });
   const alone = vac({ created_by: ME, assigned_to: [ME], accepted_by: [ME] });
-  it('recruiter in a shared vacancy can only leave', () => {
-    expect(getVacancyExitOptions(shared, ME, false)).toMatchObject({ canLeave: true, canClose: false, others: [4] });
+  it('recruiter in a shared vacancy can leave or close it for everyone', () => {
+    expect(getVacancyExitOptions(shared, ME, false)).toMatchObject({ canLeave: true, canClose: true, others: [4] });
   });
   it('admin in a shared vacancy can both leave and close', () => {
     expect(getVacancyExitOptions(shared, ME, true)).toMatchObject({ canLeave: true, canClose: true });
@@ -94,5 +94,22 @@ describe('pinMovedCandidate — перемещённый кандидат ост
 
   it('закреплённого уже нет в воронке (сняли) — список не ломается', () => {
     expect(pinMovedCandidate([a], [a], 999)).toEqual([a]);
+  });
+});
+
+describe('findSameTitleVacancy — одно название у двух живых вакансий', () => {
+  const list = [
+    vac({ id: 182, title: 'Video Editor' }),
+    vac({ id: 190, title: 'Сорсёр' }),
+    vac({ id: 7, title: 'Трафик', status: 'closed' }),
+  ];
+  it('finds a match ignoring case, spaces and ё', () => {
+    expect(findSameTitleVacancy(list, '  video   EDITOR ')?.id).toBe(182);
+    expect(findSameTitleVacancy(list, 'сорсер')?.id).toBe(190);
+  });
+  it('ignores closed vacancies and the vacancy being edited', () => {
+    expect(findSameTitleVacancy(list, 'Трафик')).toBeNull();
+    expect(findSameTitleVacancy(list, 'Video Editor', 182)).toBeNull();
+    expect(findSameTitleVacancy(list, '   ')).toBeNull();
   });
 });

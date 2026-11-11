@@ -641,6 +641,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Board stage sync failed (non-critical): {e}")
 
+    # Живые заявки у тех, кого уволили до 20.10.2026: увольнение тогда не
+    # закрывало воронки (11.11.2026, services/departed_apps_sync.py). Одноразово.
+    try:
+        from ..services.departed_apps_sync import close_departed_applications_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await close_departed_applications_once(session)
+    except Exception as e:
+        logger.warning(f"Departed apps sync failed (non-critical): {e}")
+
     # Даты отдела собрать в одном месте — у рабочего назначения (13.10.2026,
     # services/board_placements.py). Одноразово: до этого они лежали у каждого
     # назначения своими, и на вкладках у человека выходили разные даты.

@@ -111,9 +111,10 @@ export function getAcceptorIds(v: Vacancy): number[] {
  * две кнопки с однозначными названиями.
  *  • «Выйти из вакансии» — снимаешь себя, у остальных участников она остаётся в
  *    работе (POST /decline). Есть, пока в вакансии кроме тебя кто-то работает.
- *  • «Закрыть вакансию» — закрывается у всех. Админу — всегда; остальным — когда
- *    выйти нельзя (последний участник или не участник): закрытие рядовым
- *    участником при других участниках бэкенд всё равно превращает в выход.
+ *  • «Закрыть вакансию» — закрывается у всех. Админу и любому участнику, в том
+ *    числе в ОБЩЕЙ воронке (Эльвира, 11.11.2026: «лучше чтобы у меня и по общим
+ *    воронкам была возможность закрытия»; до этого участнику при других
+ *    участниках кнопку не показывали, а сервер превращал закрытие в выход).
  */
 export function getVacancyExitOptions(
   v: Vacancy,
@@ -126,7 +127,7 @@ export function getVacancyExitOptions(
   // Не участник и не админ — закрыть нельзя, пока в вакансии кто-то работает:
   // раньше такому рекрутёру предлагалось «Закрыть», и вакансия закрывалась у
   // всех (20.10.2026; сервер теперь отвечает 403).
-  const canClose = isAdmin || (participant ? !canLeave : otherActiveParticipants(v, userId).length === 0);
+  const canClose = isAdmin || participant || otherActiveParticipants(v, userId).length === 0;
   return { canLeave, canClose, others };
 }
 
@@ -157,4 +158,31 @@ export function pinMovedCandidate<T extends { id: number }>(
   if (inTab.some((c) => c.id === pinnedId)) return inTab;
   const pinned = all.find((c) => c.id === pinnedId);
   return pinned ? [pinned, ...inTab] : inTab;
+}
+
+/** Название вакансии для сравнения — как `norm_title` на сервере: без регистра,
+ * «ё» = «е», лишние пробелы схлопнуты. */
+export function normVacancyTitle(title: string | null | undefined): string {
+  return (title || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Живая вакансия с тем же названием (Мария, 11.11.2026: два «Video Editor» у
+ * Влады и Эльвиры — кандидаты разошлись по двум воронкам). Форма подсказывает
+ * сразу при наборе; запрещает сервер (409), подсказка — только чтобы человек
+ * не заполнял форму зря. Закрытые и сама редактируемая вакансия не считаются.
+ */
+export function findSameTitleVacancy(
+  vacancies: Vacancy[],
+  title: string | null | undefined,
+  excludeId?: number | null,
+): Vacancy | null {
+  const key = normVacancyTitle(title);
+  if (!key) return null;
+  return vacancies.find((v) =>
+    v.id !== excludeId
+    && v.status !== 'closed'
+    && v.status !== 'cancelled'
+    && normVacancyTitle(v.title) === key,
+  ) || null;
 }

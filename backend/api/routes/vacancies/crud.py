@@ -236,6 +236,49 @@ async def list_vacancies(
     return responses
 
 
+async def ensure_title_free(db: AsyncSession, org_id: Optional[int], title: Optional[str],
+                            exclude_id: Optional[int] = None) -> None:
+    """Две живые вакансии с одним названием — запрещены (Мария, 11.11.2026).
+
+    Так появились два «Video Editor» и два «Сорсер»: Влада и Эльвира завели
+    каждая свою, кандидаты разошлись по двум воронкам, у одного человека —
+    два этапа и две истории. Сравнение — как при передаче дел (`norm_title`:
+    без регистра, «ё»/«е», лишних пробелов). Закрытые и удалённые не мешают:
+    закрыли «Трафик» — можно открыть новый с тем же названием.
+    """
+    from ...services.recruiter_transfer import norm_title
+
+    key = norm_title(title)
+    if not key or not org_id:
+        return
+    rows = (await db.execute(
+        select(Vacancy).where(
+            Vacancy.org_id == org_id,
+            Vacancy.deleted_at.is_(None),
+            Vacancy.status.notin_([VacancyStatus.closed, VacancyStatus.cancelled]),
+            *([Vacancy.id != exclude_id] if exclude_id else []),
+        )
+    )).scalars().all()
+    same = next((v for v in rows if norm_title(v.title) == key), None)
+    if same is None:
+        return
+    lead_ids = list((same.extra_data or {}).get("accepted_by") or []) or (
+        [same.created_by] if same.created_by else []
+    )
+    names = [n for (n,) in (await db.execute(
+        select(User.name).where(User.id.in_(lead_ids)).order_by(User.name)
+    )).all() if n] if lead_ids else []
+    who = f", ведёт {', '.join(names)}" if names else ""
+    logger.info(f"VACANCY_TITLE_TAKEN «{title}» → existing {same.id}")
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"Вакансия «{same.title}» уже есть (№{same.id}{who}). "
+            "Работайте в ней или назовите новую по-другому."
+        ),
+    )
+
+
 @router.post("", response_model=VacancyResponse, status_code=201)
 async def create_vacancy(
     data: VacancyCreate,
@@ -248,6 +291,7 @@ async def create_vacancy(
     HR-админ» из 16c5141 снят по решению пользователя 2026-07-02).
     """
     org = await get_user_org(current_user, db)
+    await ensure_title_free(db, org.id if org else None, data.title)
 
     # Build vacancy kwargs — custom_stages/kanban_card_fields are optional (migration may not be applied yet)
     vacancy_kwargs = dict(
@@ -480,6 +524,13 @@ async def update_vacancy(
     if "extra_data" in update_data:
         update_data["extra_data"] = keep_server_extra(vacancy.extra_data, update_data["extra_data"])
 
+    # Переименование в название другой живой вакансии и переоткрытие закрытой,
+    # когда такая же уже работает, — тот же дубль, что и при создании.
+    _reopening = data.status is not None and data.status not in (VacancyStatus.closed, VacancyStatus.cancelled) \
+        and vacancy.status in (VacancyStatus.closed, VacancyStatus.cancelled)
+    if ("title" in update_data and update_data["title"] != vacancy.title) or _reopening:
+        await ensure_title_free(db, vacancy.org_id, update_data.get("title", vacancy.title), exclude_id=vacancy.id)
+
     # Посторонний рекрутёр (вакансия видна всем, но он в ней не работает)
     # закрывал её У ВСЕХ: ветка «выход» ниже срабатывает только для участника
     # (20.10.2026). Закрыть вакансию, в которой кто-то работает, может участник
@@ -503,10 +554,8 @@ async def update_vacancy(
 
     # Запоминаем статус ДО применения апдейта — нужен для детекта строго
     # перехода closed→open (переоткрытие вакансии для новой «серии» подбора)
-    # и для leave-семантики закрытия общей воронки (откат статуса).
     was_closed = vacancy.status == VacancyStatus.closed
     prev_status = vacancy.status
-    left_shared_funnel = False
 
     # Update fields
     for field, value in update_data.items():
@@ -545,52 +594,21 @@ async def update_vacancy(
                     dismissed.append(current_user.id)
                     orig_extra["dismissed_by"] = dismissed
                     original.extra_data = orig_extra
-        elif not await has_full_database_access(current_user, org, db):
-            # ОБЩАЯ воронка (сценарий А всегда): участник «закрывает у себя».
-            # Если в вакансии остаются ДРУГИЕ активные участники — это ВЫХОД
-            # из воронки, а не закрытие: статус откатываем, участника снимаем
-            # (assigned_to + метка dismissed_by, чтобы «Мои вакансии» его
-            # больше не показывали). Реальное закрытие происходит только когда
-            # закрывает ПОСЛЕДНИЙ участник (фронт спрашивает подтверждение)
-            # или HR-админ (ветку leave не проходит — полный доступ).
-            extra = dict(vacancy.extra_data or {})
-            dismissed_set = set(extra.get("dismissed_by") or [])
-            participants = set(vacancy.assigned_to or [])
-            if vacancy.created_by:
-                participants.add(vacancy.created_by)
-            active = participants - dismissed_set
-            others = active - {current_user.id}
-            is_participant = current_user.id in active or (
-                getattr(vacancy, "assigned_to_all", False) and current_user.id not in dismissed_set
-            )
-            if is_participant and others:
-                left_shared_funnel = True
-                vacancy.status = prev_status  # откат закрытия
-                vacancy.assigned_to = [
-                    u for u in (vacancy.assigned_to or []) if u != current_user.id
-                ]
-                dismissed_list = list(extra.get("dismissed_by") or [])
-                if current_user.id not in dismissed_list:
-                    dismissed_list.append(current_user.id)
-                extra["dismissed_by"] = dismissed_list
-                # Как у «Выйти из вакансии» (decline): вышел — больше не «взял в работу».
-                extra["accepted_by"] = [u for u in (extra.get("accepted_by") or []) if u != current_user.id]
-                vacancy.extra_data = extra
-                logger.info(
-                    f"Vacancy {vacancy.id}: user {current_user.id} left shared funnel "
-                    f"(others still active: {sorted(others)})"
-                )
+        # Участник ОБЩЕЙ воронки, нажавший «Закрыть вакансию», закрывает её
+        # У ВСЕХ (Эльвира, 11.11.2026: «лучше чтобы у меня и по общим воронкам
+        # была возможность закрытия»). До этого закрытие при других участниках
+        # молча превращалось в выход, а кнопку интерфейс прятал — закрыть общую
+        # вакансию рекрутёр не мог никак. «Выйти» — отдельная кнопка (/decline).
+        # Постороннему рекрутёру закрыть нельзя — проверка выше (403).
 
     await db.commit()
     await db.refresh(vacancy)
 
-    # Заявка из ТГ-чата: при РЕАЛЬНОМ закрытии (не leave-выходе участника и не
-    # повторном закрытии) бот отчитывается в исходный чат «Найм завершён».
+    # Заявка из ТГ-чата: при закрытии (не повторном) бот отчитывается в исходный чат «Найм завершён».
     # Ошибка Telegram не должна ломать закрытие — только лог.
     if (
         vacancy.status == VacancyStatus.closed
         and prev_status != VacancyStatus.closed
-        and not left_shared_funnel
     ):
         source_chat_id = (vacancy.extra_data or {}).get("source_chat_id")
         if source_chat_id:
@@ -616,11 +634,6 @@ async def update_vacancy(
 
     logger.info(f"Updated vacancy {vacancy.id}")
 
-    # Return full response. После leave юзер сам снял с себя доступ — обычный
-    # get_vacancy() дал бы 403 на сериализации собственного успешного действия,
-    # поэтому отдаём напрямую (право на действие уже проверено can_edit выше).
-    if left_shared_funnel:
-        return await _serialize_vacancy(vacancy, db)
     return await get_vacancy(vacancy_id, db, current_user)
 
 
@@ -765,8 +778,38 @@ async def get_assignable_users(
         )).all()
         users += [o for o in owners if o[0] not in seen]
         users.sort(key=lambda r: (r[1] or "").lower())
+    users = await _drop_outside_hr_base(db, org, users)
     logger.info(f"Assignable HR block ({len(users)}): {[(r[1], r[2]) for r in users]}")
     return [{"id": row[0], "name": row[1], "role": row[2]} for row in users]
+
+
+async def _drop_outside_hr_base(db: AsyncSession, org, users: list) -> list:
+    """Назначать и передавать можно только тем, кто работает с базой (Мария,
+    11.11.2026: «здесь должны быть только HR базы»).
+
+    Убираем:
+    * тех, кто не может войти из-за ограничения по почте организации (вход
+      только с корпоративным доменом — Валентина с gmail с 09.11.2026);
+    * адреса из «Исключений» домена — это служебные входы (тестовый «Рекрутер
+      тест»), а не сотрудники HR: войти им можно, раздавать им вакансии — нет.
+    Ограничения нет — список не меняется.
+    """
+    from ...services.email_domain import email_fits, org_domains, org_exceptions
+
+    domains = org_domains(org)
+    if not domains or not users:
+        return users
+    exceptions = set(org_exceptions(org))
+    emails = dict((await db.execute(
+        select(User.id, User.email).where(User.id.in_([u[0] for u in users]))
+    )).all())
+    keep = []
+    for u in users:
+        email = (emails.get(u[0]) or "").strip().lower()
+        if email in exceptions or not email_fits(email, domains):
+            continue
+        keep.append(u)
+    return keep
 
 
 async def take_vacancy(

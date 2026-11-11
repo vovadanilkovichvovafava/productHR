@@ -20,7 +20,7 @@ import {
 } from './vacancyFormParts';
 import { apiErrorDetail, buildVacancyPayload, validateVacancyForm } from './vacancyFormPayload';
 import VacancyConfirmModal, { type VacancyConfirmAction } from './VacancyConfirmModal';
-import { isVacancyParticipant, hasPersonallyAccepted, isExplicitlyAssigned, getVacancyExitOptions } from '@/utils/vacancy';
+import { isVacancyParticipant, hasPersonallyAccepted, isExplicitlyAssigned, getVacancyExitOptions, findSameTitleVacancy } from '@/utils/vacancy';
 import { backdropClose } from '@/utils/backdropClose';
 
 interface VacancyFormProps {
@@ -174,6 +174,19 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
   }, []);
   const customerRef = useRef<HTMLDivElement>(null);
 
+  // Такое же название у живой вакансии — подсказываем сразу (Мария, 11.11.2026).
+  // Сохранение всё равно не пройдёт (сервер — 409), подсказка экономит время.
+  // Список вакансий в сторе может быть ещё не загружен (форма из «+»).
+  useEffect(() => {
+    if (!isReadOnlyRequest && vacancies.length === 0) fetchVacancies(true).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const titleChanged = !vacancy || formData.title.trim() !== (vacancy.title || '').trim();
+  const sameTitleVacancy = useMemo(
+    () => (titleChanged ? findSameTitleVacancy(vacancies, formData.title, vacancy?.id) : null),
+    [vacancies, formData.title, vacancy?.id, titleChanged],
+  );
+
   // Ранее введённые заказчики — собираем по всем вакансиям орга
   // (extra_data.customer_name), включая созданных ботом.
   const pastCustomerNames = useMemo(() => {
@@ -205,11 +218,13 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
   useEffect(() => {
     getAssignableUsers()
       .then((list) => {
-        // Себя в списке «Добавить» не показываем — текущий юзер уже назначен ("Я").
-        const others = list.filter((u) => u.id !== user?.id);
-        setUsers(others);
+        // Себя тоже показываем — с пометкой «(вы)» (Мария, 11.11.2026: в списке
+        // должны быть все HR базы — «Мария/Эльвира/Влада»; раньше автор заявки
+        // не видел в нём себя и не мог себя назначить). Сам список — с сервера:
+        // только те, кто может войти и работает с базой.
+        setUsers(list);
         // Если заявка была назначена «всем» — визуально отмечаем всех рекрутёров.
-        if (vacancy?.assigned_to_all) setSelectedRecruiters(others.map((u) => u.id));
+        if (vacancy?.assigned_to_all) setSelectedRecruiters(list.map((u) => u.id));
       })
       .catch((err) => console.error('Failed to load assignable users:', err));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -357,6 +372,11 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
                   disabled={isReadOnlyRequest}
                   className={hfInputClass}
                 />
+                {sameTitleVacancy && !isReadOnlyRequest && (
+                  <p className="mt-1.5 text-[13px] leading-snug text-[var(--hf-status-red)]" role="alert">
+                    Вакансия «{sameTitleVacancy.title}» уже есть. Работайте в ней или назовите новую по-другому.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -506,7 +526,7 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
                             className="hf-vacancy-dropdown-item"
                           >
                             <span className={clsx("hf-vacancy-dropdown-check", isSelected && "hf-vacancy-dropdown-check-active")} />
-                            <span className="truncate">{u.name}</span>
+                            <span className="truncate">{u.id === user?.id ? `${u.name} (вы)` : u.name}</span>
                           </button>
                         );
                       })}
