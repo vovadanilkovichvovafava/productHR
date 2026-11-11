@@ -10540,7 +10540,7 @@ body.performance-mode .glass-card:hover {
 }
 .hf-statuses-hr-option:hover { background: var(--hf-main-50, #f1f5f9); }
 /* Окно выбора отдела/должности «как в ClickUp» (11.11.2026). */
-.hf-statuses-picker { width: 280px; max-height: 360px; }
+.hf-catalog-picker { width: 280px; max-height: 360px; }
 .hf-statuses-picker-search {
   width: 100%;
   margin-bottom: 4px;
@@ -11353,3 +11353,109 @@ a.hf-forms-name:hover { text-decoration: underline; }
   .hf-forms-folder { width: auto; white-space: nowrap; }
   .hf-forms-table-wrap { align-self: stretch; }
 }
+
+/* Окно фильтров «как в ClickUp» (11.11.2026): строки «поле → условие →
+   значение», слева «Где / И / ИЛИ», внизу «Добавить фильтр» и «Очистить всё». */
+.hf-statuses-picker.hf-fb {
+  width: min(640px, calc(100vw - 32px));
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 14px 16px 12px;
+  border-radius: 10px;
+}
+.hf-fb-head { margin-bottom: 10px; font-size: 14px; font-weight: 600; color: var(--hf-main-900); }
+.hf-fb-rules { display: flex; flex-direction: column; gap: 6px; }
+.hf-fb-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--hf-main-50, #f5f6f8);
+}
+.hf-fb-join { flex: 0 0 64px; padding-top: 6px; font-size: 13px; color: var(--hf-main-600); }
+.hf-fb-join-select { width: 64px; margin-top: -6px; }
+.hf-fb-join-text { padding-left: 4px; font-weight: 500; }
+.hf-fb-body { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.hf-fb-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--hf-ui-border);
+  border-radius: 6px;
+  background: var(--hf-white);
+  font-size: 13px;
+  color: var(--hf-main-900);
+}
+.hf-fb-select:disabled { opacity: 0.5; }
+.hf-fb-select.is-empty { color: var(--hf-main-500); }
+.hf-fb-input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--hf-ui-border);
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+}
+.hf-fb-input:focus, .hf-fb-select:focus { border-color: #7b68ee; }
+.hf-fb-dd { position: relative; }
+.hf-fb-dd-grow { flex: 1; min-width: 160px; }
+.hf-fb-dd-btn { width: 100%; justify-content: space-between; cursor: pointer; }
+.hf-fb-dd-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hf-fb-dd-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  width: 260px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--hf-main-100);
+  border-radius: 10px;
+  background: var(--hf-white);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+.hf-fb-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--hf-main-800);
+  cursor: pointer;
+}
+.hf-fb-dd-item:hover, .hf-fb-dd-item.is-on { background: var(--hf-main-50, #f1f5f9); }
+.hf-fb-dd-item input { accent-color: #7b68ee; }
+.hf-fb-dates { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hf-fb-trash { padding: 6px; border-radius: 6px; color: var(--hf-main-500); }
+.hf-fb-trash:hover { color: var(--hf-red-600); background: var(--hf-white); }
+.hf-fb-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.hf-fb-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: var(--hf-main-50, #f1f5f9);
+  font-size: 13px;
+  color: var(--hf-main-800);
+}
+.hf-fb-add:hover { background: var(--hf-main-100); }
+.hf-fb-clear {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--hf-red-300, #fca5a5);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--hf-red-600);
+}
+.hf-fb-clear:hover { background: var(--hf-red-50, #fef2f2); }

@@ -174,8 +174,12 @@ const fmt = (iso: string | null) => {
 /** Колонки, по которым можно фильтровать. */
 const FILTERABLE = COLUMNS.filter((c) => c.filter) as { key: FilterKey; label: string }[];
 
-// v2: вместо правил «поле/оператор/значение» — выбор значений галочками
-const FILTERS_STORAGE_KEY = "hf-statuses-filters-v2";
+// v3 (11.11.2026): снова правила «поле → условие → значение», как в ClickUp
+// (клиент: «открывается окно, в нём выбираешь поле, потом его значение…
+// кнопка AND/OR»). v2 (24.09–11.11) — галочки по колонкам; читаем его один
+// раз и переводим, чтобы сохранённый отбор у людей не слетел.
+const FILTERS_STORAGE_KEY = "hf-statuses-filters-v3";
+const FILTERS_STORAGE_KEY_V2 = "hf-statuses-filters-v2";
 
 /** Колонки, по которым можно сортировать кликом по заголовку: даты выходов.
  *  Мария смотрит, кто вышел последним, — без сортировки приходилось искать
@@ -195,133 +199,181 @@ const isDateKey = (k: FilterKey) => DATE_KEYS.includes(k);
 const DONE_KEYS: FilterKey[] = ["dept_done", "w2_done", "m1_done", "m3_done", "y1_done"];
 const isDoneKey = (k: FilterKey) => DONE_KEYS.includes(k);
 
-/** «Пусто» — такой же вариант выбора, как остальные значения колонки. */
-const BLANK = "\u0000blank";
+/** Подпись значения: у отметок вместо «✓» — «Отмечено». */
 const valueLabel = (key: FilterKey, v: string) =>
-  v === BLANK ? "Пусто" : isDoneKey(key) ? (v === "✓" ? "Отмечено" : "Не отмечено") : v;
+  isDoneKey(key) ? (v === "✓" ? "Отмечено" : v) : v;
 
-/** Фильтры доски. Никаких «равно/не равно»: у обычных колонок отмечают
- *  галочками нужные значения (как автофильтр в таблицах), у дат — «с» и «по»
- *  (Мария: «как-то всё очень сложно», встреча 24.09.2026). */
-interface BoardFilters {
-  /** колонка → выбранные значения; пусто = колонка не фильтрует */
-  values: Partial<Record<FilterKey, string[]>>;
-  /** колонка-дата → границы «с» и «по» */
-  dates: Partial<Record<FilterKey, { from: string; to: string }>>;
-  /** Условия, помеченные «и» — обязательные. Остальные — «или».
-   *  Правило: все «и» должны совпасть, а из «или» достаточно ОДНОГО.
-   *
-   *  ПО УМОЛЧАНИЮ — «ИЛИ» (Мария, 26.10.2026: «нужно, чтобы всегда было
-   *  ИЛИ»): доску фильтруют, чтобы массово отобрать людей под выгрузку —
-   *  «из SEO или из Push», «уволенные или перевёдшиеся». «И» ставят руками
-   *  там, где условие обязательное, например «И вышел в октябре».
-   *
-   *  История: до 21.10 был один режим на всю панель («любое / все сразу»),
-   *  с 21.10 по 26.10 — пометка у каждого условия, но по умолчанию «и». */
-  andKeys?: FilterKey[];
-  /** Старые поля — только для чтения сохранённого фильтра, см. readSavedFilters. */
-  orKeys?: FilterKey[];
-  mode?: "any" | "all";
+/** Текстовые поля: у них «содержит», а не выбор из списка. */
+const TEXT_KEYS: FilterKey[] = ["name", "telegram", "rejection_reason"];
+
+/** Условие фильтра — как в ClickUp: «является / не является / пусто / не
+ *  пусто», у дат — «в периоде», у текста — «содержит». */
+export type FilterOp = "is" | "is_not" | "contains" | "between" | "empty" | "not_empty";
+
+export const OP_LABELS: Record<FilterOp, string> = {
+  is: "является",
+  is_not: "не является",
+  contains: "содержит",
+  between: "в периоде",
+  empty: "пусто",
+  not_empty: "не пусто",
+};
+
+/** Какие условия есть у поля. */
+export function opsFor(key: FilterKey): FilterOp[] {
+  if (isDateKey(key)) return ["between", "empty", "not_empty"];
+  if (TEXT_KEYS.includes(key)) return ["contains", "is", "empty", "not_empty"];
+  return ["is", "is_not", "empty", "not_empty"];
 }
 
-const EMPTY_FILTERS: BoardFilters = { values: {}, dates: {}, andKeys: [] };
+/** Одна строка фильтра. Незаполненная (поле не выбрано, значения нет) ничего
+ *  не отбирает — как в ClickUp, где пустая строка просто висит в окне. */
+export interface FilterRule {
+  id: string;
+  key: FilterKey | "";
+  op: FilterOp;
+  values: string[];
+  from?: string;
+  to?: string;
+  text?: string;
+}
+
+/** Фильтры доски: строки-правила и одна связка между ними. По умолчанию —
+ *  «ИЛИ» (Мария, 26.10.2026: «нужно, чтобы всегда было ИЛИ»: доску
+ *  фильтруют, чтобы массово отобрать людей — «из SEO или из Push»). */
+export interface BoardFilters {
+  join: "and" | "or";
+  rules: FilterRule[];
+}
+
+export const EMPTY_FILTERS: BoardFilters = { join: "or", rules: [] };
+
+let ruleSeq = 0;
+export const newRule = (key: FilterKey | "" = ""): FilterRule => ({
+  id: `r${Date.now().toString(36)}${(ruleSeq++).toString(36)}`,
+  key,
+  op: key ? opsFor(key)[0] : "is",
+  values: [],
+});
+
+/** Строка заполнена настолько, что уже отбирает. */
+export function ruleComplete(r: FilterRule): boolean {
+  if (!r.key) return false;
+  if (r.op === "empty" || r.op === "not_empty") return true;
+  if (r.op === "between") return !!(r.from || r.to);
+  if (r.op === "contains") return !!r.text?.trim();
+  return r.values.length > 0;
+}
+
+/** Значения ячейки для сравнения: у HR и сорсеров — каждый человек отдельно,
+ *  у остальных — текст ячейки. Пустая ячейка — пустой список. */
+export function cellValues(row: BoardRow, key: FilterKey): string[] {
+  if (key === "assignee") return rowAssignees(row).map((a) => a.name || "").filter(Boolean);
+  if (key === "sourcer") return (row.sourcers ?? []).map((t) => t.name).filter(Boolean);
+  const v = cellText(row, key).trim();
+  return isBlank(v) ? [] : [v];
+}
+
+function ruleMatches(row: BoardRow, r: FilterRule): boolean {
+  const key = r.key as FilterKey;
+  if (isDateKey(key)) {
+    // Сравниваем «сырую» дату (ГГГГ-ММ-ДД), а не видимую «дд.мм.гггг».
+    const iso = ((row[key as keyof BoardRow] as string | null) || "").slice(0, 10);
+    if (r.op === "empty") return !iso;
+    if (r.op === "not_empty") return !!iso;
+    return !!iso && (!r.from || iso >= r.from) && (!r.to || iso <= r.to);
+  }
+  const vals = cellValues(row, key);
+  switch (r.op) {
+    case "empty": return vals.length === 0;
+    case "not_empty": return vals.length > 0;
+    case "contains": {
+      const needle = (r.text || "").trim().toLowerCase();
+      return vals.some((v) => v.toLowerCase().includes(needle));
+    }
+    case "is_not": return !vals.some((v) => r.values.includes(v));
+    default: return vals.some((v) => r.values.includes(v));
+  }
+}
+
+/** Проходит ли строка. Учитываются только заполненные правила; их нет —
+ *  проходит всё. «И» — все правила, «ИЛИ» — хотя бы одно. Значения внутри
+ *  одного правила всегда по «или»: «Отдел является SEO, Push». */
+export function rowMatchesFilters(row: BoardRow, filters: BoardFilters): boolean {
+  const rules = filters.rules.filter(ruleComplete);
+  if (!rules.length) return true;
+  return filters.join === "and"
+    ? rules.every((r) => ruleMatches(row, r))
+    : rules.some((r) => ruleMatches(row, r));
+}
+
+/** Правило словами — для чипа над таблицей. */
+export function ruleText(r: FilterRule): string {
+  const key = r.key as FilterKey;
+  const name = filterLabel(key);
+  if (r.op === "empty" || r.op === "not_empty") return `${name} ${OP_LABELS[r.op]}`;
+  if (r.op === "between") {
+    const when = [r.from ? `с ${fmt(r.from)}` : "", r.to ? `по ${fmt(r.to)}` : ""].filter(Boolean).join(" ");
+    return `${name}: ${when}`;
+  }
+  if (r.op === "contains") return `${name} содержит «${(r.text || "").trim()}»`;
+  const vals = r.values.map((v) => valueLabel(key, v)).join(", ");
+  return r.op === "is_not" ? `${name} — не ${vals}` : `${name}: ${vals}`;
+}
+
+/** Фильтр словами целиком. */
+export function describeFilters(filters: BoardFilters): string {
+  const parts = filters.rules.filter(ruleComplete).map(ruleText);
+  if (!parts.length) return "Ничего не выбрано — показываем всех.";
+  return `Показываем: ${parts.join(filters.join === "and" ? " и " : " или ")}.`;
+}
 
 /** Сохранённый в браузере фильтр → текущий формат.
  *
- *  Старые сохранения переводятся так, чтобы у человека не осталось «и»,
- *  которого он сам не ставил: с 21.10 по 26.10 «и» стояло само по умолчанию —
- *  такие условия становятся «или». Явный старый режим «все сразу» был выбором
- *  человека — он остаётся «и» у всех условий.
+ *  v3 читаем как есть. v2 (галочки по колонкам, 24.09–11.11.2026): выбранные
+ *  значения — правило «является», «Пусто» — «пусто», даты — «в периоде».
+ *  Связка: если все условия были обязательными («и») — «И», иначе «ИЛИ».
  */
 export function readSavedFilters(raw: unknown): BoardFilters {
   if (!raw || typeof raw !== "object") return EMPTY_FILTERS;
-  const parsed = raw as BoardFilters;
-  const base: BoardFilters = {
-    values: parsed.values || {},
-    dates: parsed.dates || {},
-    andKeys: [],
-  };
-  if (Array.isArray(parsed.andKeys)) base.andKeys = parsed.andKeys;
-  else if (parsed.mode === "all") base.andKeys = activeFilterKeys(base);
-  return base;
-}
-
-/** Условие обязательное («и»)? По умолчанию — нет, «или». */
-const isAndKey = (filters: BoardFilters, key: FilterKey) =>
-  (filters.andKeys || []).includes(key);
-
-/** Проходит ли строка под фильтры панели. Условий нет — проходит всё.
- *
- *  Обязательные условия должны совпасть ВСЕ, из помеченных «или» — хотя бы
- *  одно. Значения внутри одной колонки всегда по «или»: «Отдел: SEO, Push» —
- *  это «SEO или Push».
- */
-export function rowMatchesFilters(row: BoardRow, filters: BoardFilters): boolean {
-  const andKeys = new Set(filters.andKeys || []);
-  const must: boolean[] = [];
-  const some: boolean[] = [];
-  const put = (key: FilterKey, ok: boolean) => (andKeys.has(key) ? must : some).push(ok);
-
-  for (const [key, chosen] of Object.entries(filters.values) as [FilterKey, string[]][]) {
-    if (!chosen?.length) continue;
-    const cell = cellText(row, key).trim();
-    put(key, chosen.includes(isBlank(cell) ? BLANK : cell));
+  const o = raw as Record<string, any>;
+  const known = new Set(FILTERABLE.map((c) => c.key as string));
+  if (Array.isArray(o.rules)) {
+    const rules: FilterRule[] = o.rules
+      .filter((r: any) => r && typeof r === "object" && (!r.key || known.has(r.key)))
+      .map((r: any) => ({
+        id: String(r.id || newRule().id),
+        key: r.key || "",
+        op: (Object.keys(OP_LABELS) as FilterOp[]).includes(r.op) ? r.op : "is",
+        values: Array.isArray(r.values) ? r.values.map(String) : [],
+        from: r.from || undefined,
+        to: r.to || undefined,
+        text: r.text || undefined,
+      }));
+    return { join: o.join === "and" ? "and" : "or", rules };
   }
-
-  for (const [key, range] of Object.entries(filters.dates) as
-      [FilterKey, { from: string; to: string }][]) {
-    if (!range || (!range.from && !range.to)) continue;
-    // Сравниваем «сырую» дату (ГГГГ-ММ-ДД), а не видимую «дд.мм.гггг».
-    const iso = ((row[key as keyof BoardRow] as string | null) || "").slice(0, 10);
-    put(key, !!iso && (!range.from || iso >= range.from) && (!range.to || iso <= range.to));
+  // v2
+  const OLD_BLANK = "\u0000blank";
+  const rules: FilterRule[] = [];
+  for (const [key, chosen] of Object.entries(o.values || {}) as [FilterKey, string[]][]) {
+    if (!known.has(key) || !Array.isArray(chosen) || !chosen.length) continue;
+    const vals = chosen.filter((v) => v !== OLD_BLANK);
+    if (TEXT_KEYS.includes(key)) {
+      if (vals.length) rules.push({ ...newRule(key), op: "is", values: vals });
+      else rules.push({ ...newRule(key), op: "empty" });
+    } else if (vals.length) {
+      rules.push({ ...newRule(key), op: "is", values: vals });
+    } else {
+      rules.push({ ...newRule(key), op: "empty" });
+    }
   }
-
-  if (!must.length && !some.length) return true;
-  return must.every(Boolean) && (some.length === 0 || some.some(Boolean));
-}
-
-/** Ключи колонок, по которым сейчас что-то отобрано. */
-export function activeFilterKeys(filters: BoardFilters): FilterKey[] {
-  const keys: FilterKey[] = [];
-  for (const [key, chosen] of Object.entries(filters.values) as [FilterKey, string[]][]) {
-    if (chosen?.length) keys.push(key);
+  for (const [key, range] of Object.entries(o.dates || {}) as [FilterKey, { from: string; to: string }][]) {
+    if (!known.has(key) || !range || (!range.from && !range.to)) continue;
+    rules.push({ ...newRule(key), op: "between", from: range.from || undefined, to: range.to || undefined });
   }
-  for (const [key, range] of Object.entries(filters.dates) as
-      [FilterKey, { from: string; to: string }][]) {
-    if (range && (range.from || range.to)) keys.push(key);
-  }
-  return keys;
-}
-
-/** Фильтр словами — панель пишет вслух, кого покажет.
- *
- *  «Говорят, что не понимают смысла кнопок» (владелец, 21.10.2026): вместо
- *  режима «любое / все сразу» человек читает готовую фразу и видит, что
- *  получилось из его галочек. */
-export function describeFilters(filters: BoardFilters): string {
-  const andKeys = new Set(filters.andKeys || []);
-  const must: string[] = [];
-  const some: string[] = [];
-  const add = (key: FilterKey, text: string) => (andKeys.has(key) ? must : some).push(text);
-
-  for (const [key, chosen] of Object.entries(filters.values) as [FilterKey, string[]][]) {
-    if (!chosen?.length) continue;
-    add(key, `${filterLabel(key)} — ${chosen.map((v) => valueLabel(key, v)).join(" или ")}`);
-  }
-  for (const [key, range] of Object.entries(filters.dates) as
-      [FilterKey, { from: string; to: string }][]) {
-    if (!range || (!range.from && !range.to)) continue;
-    const when = [range.from ? `с ${fmt(range.from)}` : "", range.to ? `по ${fmt(range.to)}` : ""]
-      .filter(Boolean).join(" ");
-    add(key, `${filterLabel(key)} — ${when}`);
-  }
-
-  if (!must.length && !some.length) return "Ничего не отмечено — показываем всех.";
-  // Одни «или» — без скобок: «у кого Отдел — SEO или Выход в отдел — октябрь».
-  if (!must.length) return `Показываем тех, у кого ${some.join(" или ")}.`;
-  const parts = [...must];
-  if (some.length) parts.push(some.length > 1 ? `(${some.join(" или ")})` : some[0]);
-  return `Показываем тех, у кого ${parts.join(" и ")}.`;
+  const andKeys: string[] = Array.isArray(o.andKeys) ? o.andKeys : [];
+  const allAnd = o.mode === "all" || (rules.length > 0 && rules.every((r) => andKeys.includes(r.key)));
+  return { join: allAnd && rules.length > 1 ? "and" : "or", rules };
 }
 
 /** Границы месяца в формате ГГГГ-ММ-ДД. */
@@ -413,9 +465,7 @@ export function buildExportSheets(
   return sheets;
 }
 
-const countActive = (f: BoardFilters) =>
-  Object.values(f.values).filter((v) => v && v.length).length +
-  Object.values(f.dates).filter((d) => d && (d.from || d.to)).length;
+const countActive = (f: BoardFilters) => f.rules.filter(ruleComplete).length;
 
 /** Пустая ячейка рисуется как «—», поэтому прочерк тоже считаем пустотой. */
 const isBlank = (v: string) => !v.trim() || v.trim() === "—";
@@ -493,7 +543,7 @@ export default function StatusesPage() {
 
   const [filters, setFilters] = useState<BoardFilters>(() => {
     try {
-      const raw = localStorage.getItem(FILTERS_STORAGE_KEY);
+      const raw = localStorage.getItem(FILTERS_STORAGE_KEY) ?? localStorage.getItem(FILTERS_STORAGE_KEY_V2);
       if (raw) {
         return readSavedFilters(JSON.parse(raw));
       }
@@ -507,65 +557,20 @@ export default function StatusesPage() {
     } catch { /* приватный режим — переживём без сохранения */ }
   }, [filters]);
 
-  /** «или» ↔ «и» у условия. Кнопка стоит у самого условия: один общий режим
-   *  на панель человек не находил и не понимал (владелец, 21.10.2026). */
-  const toggleJoin = (key: FilterKey) =>
-    setFilters((f) => {
-      const cur = new Set(f.andKeys || []);
-      if (cur.has(key)) cur.delete(key);
-      else cur.add(key);
-      return { ...f, andKeys: [...cur] };
-    });
-
-  /** Отметить/снять значение колонки. */
-  const toggleValue = (key: FilterKey, value: string) =>
-    setFilters((f) => {
-      const cur = f.values[key] || [];
-      const next = cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
-      const values = { ...f.values };
-      if (next.length) values[key] = next;
-      else delete values[key];
-      return { ...f, values };
-    });
-
-  const setDateBound = (key: FilterKey, side: "from" | "to", value: string) =>
-    setFilters((f) => {
-      const cur = f.dates[key] || { from: "", to: "" };
-      const next = { ...cur, [side]: value };
-      const dates = { ...f.dates };
-      if (next.from || next.to) dates[key] = next;
-      else delete dates[key];
-      return { ...f, dates };
-    });
-
-  /** Поставить обе границы разом — кнопки «Этот месяц» и список месяцев. */
-  const setDateRange = (key: FilterKey, from: string, to: string) =>
-    setFilters((f) => ({ ...f, dates: { ...f.dates, [key]: { from, to } } }));
-
-  const clearKey = (key: FilterKey) =>
-    setFilters((f) => {
-      const values = { ...f.values };
-      const dates = { ...f.dates };
-      delete values[key];
-      delete dates[key];
-      // Пометка «или» без самого условия ничего не значит — снимаем вместе.
-      return { values, dates, andKeys: (f.andKeys || []).filter((k) => k !== key) };
-    });
+  /** Строки фильтра: добавить, поправить, убрать. */
+  const addRule = () => setFilters((f) => ({ ...f, rules: [...f.rules, newRule()] }));
+  const updateRule = (id: string, patch: Partial<FilterRule>) =>
+    setFilters((f) => ({ ...f, rules: f.rules.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
+  const removeRule = (id: string) =>
+    setFilters((f) => ({ ...f, rules: f.rules.filter((r) => r.id !== id) }));
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Условие, которое правят прямо на доске — окошко под его чипом.
-  const [chipEdit, setChipEdit] = useState<FilterKey | null>(null);
-  // Сняли в окошке последнее значение — условия больше нет, и окошко тоже
-  // закрываем: иначе оно само выскочило бы, когда условие заведут заново.
+  // Открыли панель фильтров — пустую строку ставим сразу, как ClickUp
+  // («Select filter»): человеку не нужно сначала искать «Добавить».
   useEffect(() => {
-    if (chipEdit && !activeFilterKeys(filters).includes(chipEdit)) setChipEdit(null);
-  }, [filters, chipEdit]);
-  useEffect(() => {
-    if (!chipEdit) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setChipEdit(null); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [chipEdit]);
+    if (pickerOpen && filters.rules.length === 0) addRule();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerOpen]);
   // Сортировка по дате: клик по заголовку — сначала новые, второй — старые,
   // третий возвращает обычный порядок.
   // По умолчанию сортируем по выходу в отдел: сверху те, кто вышел недавно,
@@ -842,13 +847,12 @@ export default function StatusesPage() {
     (key: FilterKey): { value: string; count: number }[] => {
       const needle = q.trim().toLowerCase();
       const map = new Map<string, number>();
-      let blank = 0;
       for (const r of rows) {
         if (needle && ![r.name, r.position, r.department_name, r.telegram, r.manager]
           .filter(Boolean).some((v) => String(v).toLowerCase().includes(needle))) continue;
-        const v = cellText(r, key).trim();
-        if (isBlank(v)) { blank += 1; continue; }
-        map.set(v, (map.get(v) || 0) + 1);
+        const vals = cellValues(r, key);
+        if (!vals.length) continue;
+        for (const v of vals) map.set(v, (map.get(v) || 0) + 1);
       }
       let entries = [...map.entries()];
       // «Отдел» — только песочницы и отделы из списка, как в переводе
@@ -856,17 +860,16 @@ export default function StatusesPage() {
       // уже отмеченное в фильтре, не прячем — иначе его нельзя было бы снять.
       if (key === "department") {
         const allowed = new Set(departmentFilterNames(departments));
-        const chosen = filters.values.department ?? [];
+        const chosen = filters.rules.filter((r) => r.key === "department").flatMap((r) => r.values);
         entries = entries.filter(([v]) => allowed.has(v) || chosen.includes(v));
       }
       const list = entries
         .map(([value, count]) => ({ value, count }))
         .sort((a, b) => a.value.localeCompare(b.value, "ru"));
-      // «Пусто» — внизу: по нему находят незаполненные ячейки
-      if (blank) list.push({ value: BLANK, count: blank });
+      // Незаполненные ищут условием «пусто», а не значением в списке.
       return list;
     },
-    [rows, q, departments, filters.values.department]
+    [rows, q, departments, filters.rules]
   );
 
   const activeCount = countActive(filters);
@@ -1019,7 +1022,7 @@ export default function StatusesPage() {
                 "hf-statuses-filters-btn",
                 activeCount > 0 && "hf-statuses-filters-btn-on"
               )}
-              onClick={() => { setPickerOpen((v) => !v); setChipEdit(null); }}
+              onClick={() => setPickerOpen((v) => !v)}
             >
               <SlidersHorizontal size={15} />
               Фильтры
@@ -1034,47 +1037,15 @@ export default function StatusesPage() {
                   className="hf-statuses-picker-backdrop"
                   onClick={() => setPickerOpen(false)}
                 />
-                <div className="hf-statuses-picker">
-                  <div className="hf-statuses-picker-head">
-                    <span>Фильтры</span>
-                    {activeCount > 0 && (
-                      <div className="hf-statuses-picker-actions">
-                        <button onClick={() => setFilters(EMPTY_FILTERS)}>очистить всё</button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Панель говорит вслух, кого покажет: «говорят, что не
-                      понимают смысла кнопок» (владелец, 21.10.2026). Раньше
-                      тут были два режима на всю панель — «любое из условий» /
-                      «все условия сразу», — и Мария, отметив четыре отдела и
-                      октябрь, получила всех подряд. */}
-                  <div className="hf-statuses-filter-formula">
-                    {describeFilters(filters)}
-                  </div>
-                  <div className="hf-statuses-filter-hint">
-                    Отметьте, что показывать. Условия складываются через «или» —
-                    достаточно совпасть с любым. Нажмите «или» у условия, чтобы
-                    оно стало «и» — обязательным.
-                  </div>
-
-                  {FILTERABLE.map((c) => (
-                    <FilterSection
-                      key={c.key}
-                      label={fieldLabel(c.key)}
-                      column={c.key}
-                      values={filters.values[c.key] || []}
-                      range={filters.dates[c.key]}
-                      options={isDateKey(c.key) ? [] : valuesFor(c.key)}
-                      isOr={!isAndKey(filters, c.key)}
-                      onToggleJoin={() => toggleJoin(c.key)}
-                      onToggle={(v) => toggleValue(c.key, v)}
-                      onDate={(side, v) => setDateBound(c.key, side, v)}
-                      onRange={(from, to) => setDateRange(c.key, from, to)}
-                      onClear={() => clearKey(c.key)}
-                    />
-                  ))}
-                </div>
+                <FilterBuilder
+                  filters={filters}
+                  valuesFor={valuesFor}
+                  onJoin={(join) => setFilters((f) => ({ ...f, join }))}
+                  onAdd={addRule}
+                  onUpdate={updateRule}
+                  onRemove={removeRule}
+                  onClearAll={() => setFilters({ ...EMPTY_FILTERS, rules: [newRule()] })}
+                />
               </>
             )}
           </div>
@@ -1082,96 +1053,36 @@ export default function StatusesPage() {
       </div>
 
       {activeCount > 0 && (
-        // Чипы читаются как фраза: между ними стоит «и» или «или» — то же
-        // самое, что панель пишет словами. Обязательные идут первыми, чтобы
-        // «или»-условия стояли рядом и читались группой.
+        // Чипы — заполненные строки фильтра, между ними «и»/«или» — та же
+        // связка, что в окне. Клик по чипу открывает окно фильтров, крестик
+        // убирает строку.
         <div className="hf-statuses-fchips">
-          {activeFilterKeys(filters)
-            .slice()
-            .sort((a, b) => Number(!isAndKey(filters, a)) - Number(!isAndKey(filters, b)))
-            .map((key, i, all) => {
-              // «или» имеет смысл, только когда таких условий ДВА и больше:
-              // одно-единственное «или» — то же самое, что обязательное, и
-              // слово «или» между чипами сбивало бы с толку.
-              const orCount = all.filter((k) => !isAndKey(filters, k)).length;
-              const isOr = orCount > 1 && !isAndKey(filters, key);
-              const vals = filters.values[key];
-              const r = filters.dates[key];
-              const text = vals?.length
-                ? vals.map((v) => valueLabel(key, v)).join(" или ")
-                : `${r?.from ? `с ${fmt(r.from)}` : ""}${r?.to ? ` по ${fmt(r.to)}` : ""}`.trim();
-              return (
-                <Fragment key={key}>
-                  {i > 0 && (
-                    <span className="hf-statuses-fchip-join">{isOr ? "или" : "и"}</span>
-                  )}
-                  {/* Клик по чипу открывает правку ПРЯМО НА ДОСКЕ — окошко
-                      под чипом с этим же условием: значения, даты, «и/или»
-                      (Мария, 26.10.2026: «когда фильтр уже выбран — была
-                      возможность его редактировать на борде»). До этого чип
-                      открывал боковую панель со всеми колонками, и нужное
-                      место там приходилось искать. Снимает только крестик. */}
-                  <span className="hf-statuses-fchip-wrap">
-                    <span
-                      className={clsx(
-                        "hf-statuses-fchip",
-                        isOr && "is-or",
-                        chipEdit === key && "is-editing",
-                      )}
-                    >
-                      <button
-                        type="button"
-                        className="hf-statuses-fchip-body"
-                        onClick={() => { setPickerOpen(false); setChipEdit(chipEdit === key ? null : key); }}
-                        title="Изменить условие"
-                        aria-expanded={chipEdit === key}
-                      >
-                        <b>{filterLabel(key)}:</b> {text}
-                        <ChevronDown size={12} className="hf-statuses-fchip-caret" />
-                      </button>
-                      <button
-                        type="button"
-                        className="hf-statuses-fchip-x"
-                        onClick={() => { clearKey(key); setChipEdit(null); }}
-                        title="Снять фильтр"
-                        aria-label={`Снять фильтр «${filterLabel(key)}»`}
-                      >
-                        <X size={12} />
-                      </button>
-                    </span>
-                    {chipEdit === key && (
-                      <>
-                        <div className="hf-statuses-picker-backdrop" onClick={() => setChipEdit(null)} />
-                        <div className="hf-statuses-fchip-pop" role="dialog" aria-label={`Условие «${filterLabel(key)}»`}>
-                          <FilterSection
-                            label={filterLabel(key)}
-                            column={key}
-                            values={filters.values[key] || []}
-                            range={filters.dates[key]}
-                            options={isDateKey(key) ? [] : valuesFor(key)}
-                            isOr={!isAndKey(filters, key)}
-                            openNow
-                            pinned
-                            onToggleJoin={() => toggleJoin(key)}
-                            onToggle={(v) => toggleValue(key, v)}
-                            onDate={(side, v) => setDateBound(key, side, v)}
-                            onRange={(from, to) => setDateRange(key, from, to)}
-                            onClear={() => { clearKey(key); setChipEdit(null); }}
-                          />
-                          {/* Без фразы «Показываем тех, у кого…»: в маленьком
-                              окошке она растягивалась на пол-экрана и мешала
-                              (владелец, 26.10.2026: «вот это убери»). Фраза
-                              осталась в большой панели «Фильтры». */}
-                          <div className="hf-statuses-fchip-pop-foot">
-                            <button type="button" onClick={() => setChipEdit(null)}>Готово</button>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </span>
-                </Fragment>
-              );
-            })}
+          {filters.rules.filter(ruleComplete).map((r, i) => (
+            <Fragment key={r.id}>
+              {i > 0 && (
+                <span className="hf-statuses-fchip-join">{filters.join === "and" ? "и" : "или"}</span>
+              )}
+              <span className="hf-statuses-fchip">
+                <button
+                  type="button"
+                  className="hf-statuses-fchip-body"
+                  onClick={() => setPickerOpen(true)}
+                  title="Изменить фильтры"
+                >
+                  {ruleText(r)}
+                </button>
+                <button
+                  type="button"
+                  className="hf-statuses-fchip-x"
+                  onClick={() => removeRule(r.id)}
+                  title="Убрать условие"
+                  aria-label={`Убрать условие «${ruleText(r)}»`}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            </Fragment>
+          ))}
         </div>
       )}
 
@@ -1310,150 +1221,223 @@ export default function StatusesPage() {
 // SIDEBAR
 // ============================================================
 
-/** Одна колонка в панели фильтров: раскрывается, внутри — галочки со
- *  значениями и их количеством, у дат — «с» и «по». Ни операторов, ни
- *  «равно/содержит»: отмечаешь то, что хочешь видеть. */
-function FilterSection({
-  label, column, values, range, options, isOr, openNow, pinned, onToggleJoin,
-  onToggle, onDate, onRange, onClear,
+/** Окно фильтров «как в ClickUp» (клиент, 11.11.2026: «открывается окно — в
+ *  нём выбираешь поле, потом его значение; если нужно „И“ или „ИЛИ“ и ещё
+ *  фильтры — кнопка „Добавить фильтр“ и „AND/OR“… всё на русском»).
+ *  Строка: поле ▾ → условие ▾ → значение. Слева первой строки «Где», у второй —
+ *  выбор связки «И / ИЛИ», дальше она же. Незаполненная строка не отбирает.
+ *  До 11.11 здесь были галочки по колонкам (с 24.09: Мария нашла правила
+ *  сложными); клиент попросил вернуть правила, как в ClickUp. */
+function FilterBuilder({
+  filters, valuesFor, onJoin, onAdd, onUpdate, onRemove, onClearAll,
 }: {
-  label: string;
-  column: FilterKey;
-  values: string[];
-  range?: { from: string; to: string };
-  options: { value: string; count: number }[];
-  /** Условие помечено «или» — достаточно совпасть с ним ИЛИ с другим таким. */
-  isOr: boolean;
-  /** Раскрыть сразу — пришли сюда кликом по чипу под шапкой. */
-  openNow?: boolean;
-  /** Всегда раскрыто (окошко под чипом): сворачивать там нечего. */
-  pinned?: boolean;
-  onToggleJoin: () => void;
-  onToggle: (v: string) => void;
-  onDate: (side: "from" | "to", v: string) => void;
-  onRange: (from: string, to: string) => void;
-  onClear: () => void;
+  filters: BoardFilters;
+  valuesFor: (key: FilterKey) => { value: string; count: number }[];
+  onJoin: (join: "and" | "or") => void;
+  onAdd: () => void;
+  onUpdate: (id: string, patch: Partial<FilterRule>) => void;
+  onRemove: (id: string) => void;
+  onClearAll: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const months = useMemo(() => recentMonths(), []);
-  const headRef = useRef<HTMLButtonElement>(null);
-  // Пришли по клику на чип — раскрываем это условие и подкручиваем к нему
-  // панель: иначе нужное место приходится искать в длинном списке колонок.
-  useEffect(() => {
-    if (!openNow) return;
-    setOpen(true);
-    headRef.current?.scrollIntoView({ block: "nearest" });
-  }, [openNow]);
-  const isDate = isDateKey(column);
-  const active = isDate ? !!(range && (range.from || range.to)) : values.length > 0;
-  const shown = q
-    ? options.filter((o) => valueLabel(column, o.value).toLowerCase().includes(q.toLowerCase()))
-    : options;
-
-  const summary = isDate
-    ? `${range?.from ? `с ${fmt(range.from)}` : ""}${range?.to ? ` по ${fmt(range.to)}` : ""}`.trim()
-    : values.map((v) => valueLabel(column, v)).join(", ");
-
+  const joinText = filters.join === "and" ? "И" : "ИЛИ";
   return (
-    <div className={clsx("hf-statuses-filter-section", active && "is-active")}>
-      <button
-        ref={headRef}
-        className="hf-statuses-filter-head"
-        onClick={() => { if (!pinned) setOpen((v) => !v); }}
-      >
-        {!pinned && (
-          <ChevronRight
-            size={13}
-            className={clsx("hf-statuses-filter-caret", open && "is-open")}
-          />
-        )}
-        <span className="hf-statuses-filter-name">{label}</span>
-        {active && <span className="hf-statuses-filter-summary">{summary}</span>}
-        {active && (
-          <span
-            className={clsx("hf-statuses-filter-join", isOr && "is-or")}
-            title={isOr
-              ? "Сейчас «или»: достаточно совпасть с этим условием ИЛИ с другим таким же. Нажмите, чтобы стало «и» — обязательным"
-              : "Сейчас «и»: условие обязательно. Нажмите, чтобы стало «или»"}
-            onClick={(e) => { e.stopPropagation(); onToggleJoin(); }}
-          >
-            {isOr ? "или" : "и"}
-          </span>
-        )}
-        {active && (
-          <span
-            className="hf-statuses-filter-clear"
-            title="Снять фильтр"
-            onClick={(e) => { e.stopPropagation(); onClear(); }}
-          >
-            <X size={12} />
-          </span>
-        )}
-      </button>
-
-      {open && (isDate ? (
-        <div className="hf-statuses-filter-daterange">
-          <div className="hf-statuses-filter-dates">
-            <label>с<input type="date" value={range?.from || ""} onChange={(e) => onDate("from", e.target.value)} /></label>
-            <label>по<input type="date" value={range?.to || ""} onChange={(e) => onDate("to", e.target.value)} /></label>
-          </div>
-          <div className="hf-statuses-filter-presets">
-            {months.slice(0, 2).map((m, i) => {
-              const on = range?.from === m.from && range?.to === m.to;
-              return (
-                <button
-                  key={m.label}
-                  type="button"
-                  className={clsx("hf-statuses-preset", on && "is-on")}
-                  // Повторный клик по выбранному месяцу снимает фильтр — как у
-                  // чипов наставников в «Все кандидаты»: нажал — отобрал,
-                  // нажал ещё раз — вернул всех.
-                  onClick={() => (on ? onClear() : onRange(m.from, m.to))}
+    <div className="hf-statuses-picker hf-fb">
+      <div className="hf-fb-head">Фильтры</div>
+      <div className="hf-fb-rules">
+        {filters.rules.map((r, i) => (
+          <div key={r.id} className="hf-fb-rule">
+            <div className="hf-fb-join">
+              {i === 0 ? "Где" : i === 1 ? (
+                <select
+                  className="hf-fb-select hf-fb-join-select"
+                  value={filters.join}
+                  onChange={(e) => onJoin(e.target.value as "and" | "or")}
+                  title="«И» — все условия сразу, «ИЛИ» — хотя бы одно"
                 >
-                  {i === 0 ? "Этот месяц" : "Прошлый месяц"}
-                </button>
-              );
-            })}
-            <select
-              className="hf-statuses-preset hf-statuses-preset-select"
-              value={months.find((m) => m.from === range?.from && m.to === range?.to)?.label || ""}
-              onChange={(e) => {
-                const m = months.find((x) => x.label === e.target.value);
-                if (m) onRange(m.from, m.to);
-              }}
-            >
-              <option value="">Месяц…</option>
-              {months.map((m) => (
-                <option key={m.label} value={m.label}>{m.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      ) : (
-        <div className="hf-statuses-filter-values">
-          {options.length > 8 && (
-            <input
-              className="hf-statuses-filter-search"
-              value={q}
-              placeholder="найти значение…"
-              onChange={(e) => setQ(e.target.value)}
-            />
-          )}
-          {shown.length === 0 && <div className="hf-statuses-filter-empty">Нет значений</div>}
-          {shown.map((o) => (
-            <label key={o.value} className="hf-statuses-filter-option">
-              <input
-                type="checkbox"
-                checked={values.includes(o.value)}
-                onChange={() => onToggle(o.value)}
+                  <option value="and">И</option>
+                  <option value="or">ИЛИ</option>
+                </select>
+              ) : <span className="hf-fb-join-text">{joinText}</span>}
+            </div>
+            <div className="hf-fb-body">
+              <FbFieldSelect
+                value={r.key}
+                onChange={(key) => onUpdate(r.id, { key, op: opsFor(key)[0], values: [], from: undefined, to: undefined, text: undefined })}
               />
-              <span className="hf-statuses-filter-option-name">{valueLabel(column, o.value)}</span>
-              <span className="hf-statuses-filter-option-count">{o.count}</span>
+              <select
+                className="hf-fb-select"
+                value={r.op}
+                disabled={!r.key}
+                onChange={(e) => onUpdate(r.id, { op: e.target.value as FilterOp })}
+              >
+                {(r.key ? opsFor(r.key) : (["is"] as FilterOp[])).map((op) => (
+                  <option key={op} value={op}>{OP_LABELS[op]}</option>
+                ))}
+              </select>
+              {r.key && (r.op === "is" || r.op === "is_not") && (
+                <FbValueSelect
+                  column={r.key}
+                  options={valuesFor(r.key)}
+                  values={r.values}
+                  onChange={(values) => onUpdate(r.id, { values })}
+                />
+              )}
+              {r.key && r.op === "between" && (
+                <FbDateRange
+                  from={r.from}
+                  to={r.to}
+                  onChange={(from, to) => onUpdate(r.id, { from, to })}
+                />
+              )}
+              {r.key && r.op === "contains" && (
+                <input
+                  className="hf-fb-input"
+                  placeholder="Текст…"
+                  value={r.text || ""}
+                  onChange={(e) => onUpdate(r.id, { text: e.target.value })}
+                />
+              )}
+            </div>
+            <button
+              type="button"
+              className="hf-fb-trash"
+              title="Убрать условие"
+              onClick={() => onRemove(r.id)}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="hf-fb-foot">
+        <button type="button" className="hf-fb-add" onClick={onAdd}>
+          <Plus size={14} /> Добавить фильтр
+        </button>
+        {filters.rules.some(ruleComplete) && (
+          <button type="button" className="hf-fb-clear" onClick={onClearAll}>Очистить всё</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Выпадашка внутри окна фильтров: кнопка + список под ней, закрывается
+ *  кликом мимо и Escape. */
+function useFbDropdown() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", down);
+    document.addEventListener("keydown", key, true);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      document.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
+  return { open, setOpen, ref };
+}
+
+/** «Выбрать поле ▾» — список полей с поиском и значком типа, как в ClickUp. */
+function FbFieldSelect({ value, onChange }: { value: FilterKey | ""; onChange: (key: FilterKey) => void }) {
+  const dd = useFbDropdown();
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const fields = FILTERABLE.filter((c) => !needle || fieldLabel(c.key).toLowerCase().includes(needle));
+  return (
+    <div className="hf-fb-dd" ref={dd.ref}>
+      <button type="button" className={clsx("hf-fb-select hf-fb-dd-btn", !value && "is-empty")}
+              onClick={() => { setQ(""); dd.setOpen(!dd.open); }}>
+        {value ? fieldLabel(value) : "Выбрать поле"}
+        <ChevronDown size={14} />
+      </button>
+      {dd.open && (
+        <div className="hf-fb-dd-list">
+          <input autoFocus className="hf-statuses-picker-search" placeholder="Поиск…" value={q}
+                 onChange={(e) => setQ(e.target.value)} />
+          {fields.map((c) => (
+            <button key={c.key} type="button" className={clsx("hf-fb-dd-item", c.key === value && "is-on")}
+                    onClick={() => { dd.setOpen(false); onChange(c.key); }}>
+              <span className="hf-fields-ico"><FieldTypeIcon k={c.key} /></span>
+              {fieldLabel(c.key)}
+            </button>
+          ))}
+          {!fields.length && <div className="hf-statuses-hr-menu-hint">Ничего не найдено</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Значения поля галочками с поиском и количеством людей. */
+function FbValueSelect({
+  column, options, values, onChange,
+}: {
+  column: FilterKey;
+  options: { value: string; count: number }[];
+  values: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const dd = useFbDropdown();
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  // Выбранное, которого уже нет на доске, не прячем — его нужно уметь снять.
+  const all = [...options, ...values.filter((v) => !options.some((o) => o.value === v)).map((v) => ({ value: v, count: 0 }))];
+  const shown = all.filter((o) => !needle || valueLabel(column, o.value).toLowerCase().includes(needle));
+  const toggle = (v: string) => onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
+  return (
+    <div className="hf-fb-dd hf-fb-dd-grow" ref={dd.ref}>
+      <button type="button" className={clsx("hf-fb-select hf-fb-dd-btn", !values.length && "is-empty")}
+              onClick={() => { setQ(""); dd.setOpen(!dd.open); }}>
+        <span className="hf-fb-dd-text">
+          {values.length ? values.map((v) => valueLabel(column, v)).join(", ") : "Выбрать значение"}
+        </span>
+        <ChevronDown size={14} />
+      </button>
+      {dd.open && (
+        <div className="hf-fb-dd-list">
+          <input autoFocus className="hf-statuses-picker-search" placeholder="Поиск…" value={q}
+                 onChange={(e) => setQ(e.target.value)} />
+          {shown.map((o) => (
+            <label key={o.value} className="hf-fb-dd-item">
+              <input type="checkbox" checked={values.includes(o.value)} onChange={() => toggle(o.value)} />
+              <span className="hf-fb-dd-text">{valueLabel(column, o.value)}</span>
+              <span className="hf-statuses-picker-hint">{o.count || ""}</span>
             </label>
           ))}
+          {!shown.length && <div className="hf-statuses-hr-menu-hint">Нет значений</div>}
         </div>
-      ))}
+      )}
+    </div>
+  );
+}
+
+/** Период для дат: «с» и «по» плюс месяц одним кликом — Мария набирала даты
+ *  руками и промахивалась в цифрах (встреча 29.09.2026). */
+function FbDateRange({
+  from, to, onChange,
+}: { from?: string; to?: string; onChange: (from?: string, to?: string) => void }) {
+  const months = useMemo(() => recentMonths(), []);
+  return (
+    <div className="hf-fb-dates">
+      <input type="date" className="hf-fb-input" value={from || ""} title="с"
+             onChange={(e) => onChange(e.target.value || undefined, to)} />
+      <span>—</span>
+      <input type="date" className="hf-fb-input" value={to || ""} title="по"
+             onChange={(e) => onChange(from, e.target.value || undefined)} />
+      <select
+        className="hf-fb-select"
+        value={months.find((m) => m.from === from && m.to === to)?.label || ""}
+        onChange={(e) => {
+          const m = months.find((x) => x.label === e.target.value);
+          if (m) onChange(m.from, m.to);
+        }}
+      >
+        <option value="">Месяц…</option>
+        {months.map((m) => <option key={m.label} value={m.label}>{m.label}</option>)}
+      </select>
     </div>
   );
 }
@@ -2800,7 +2784,7 @@ function CatalogPicker({
   return (
     <div
       ref={menuRef}
-      className="hf-statuses-hr-menu hf-statuses-picker"
+      className="hf-statuses-hr-menu hf-catalog-picker"
       style={{ top: pos.top, left: Math.max(8, Math.min(pos.left, window.innerWidth - 288)) }}
     >
       <input
@@ -3033,7 +3017,7 @@ function SourcerCell({
       {menu.open && menu.pos && (
         <div
           ref={menu.menuRef}
-          className="hf-statuses-hr-menu hf-statuses-picker"
+          className="hf-statuses-hr-menu hf-catalog-picker"
           style={{ top: menu.pos.top, left: Math.max(8, Math.min(menu.pos.left, window.innerWidth - 288)) }}
         >
           <input
@@ -3141,7 +3125,7 @@ function AssigneeCell({
       {open && pos && (
         <div
           ref={menuRef}
-          className="hf-statuses-hr-menu hf-statuses-picker"
+          className="hf-statuses-hr-menu hf-catalog-picker"
           style={{ top: pos.top, left: Math.max(8, Math.min(pos.left, window.innerWidth - 288)) }}
         >
           <input
