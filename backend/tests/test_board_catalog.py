@@ -269,3 +269,18 @@ async def test_sourcer_tag_can_be_renamed(client, db_session, admin_user, organi
     r = await client.patch(f"/api/tags/{a['id']}", json={"name": "Елизавета"}, headers=h)
     assert r.status_code == 200 and r.json()["name"] == "Елизавета"
     assert (await client.patch(f"/api/tags/{a['id']}", json={"name": "катя"}, headers=h)).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_my_colors_are_shared_hex_list(client, db_session, admin_user, organization, org_owner):
+    """«Мои цвета» в окошке «…» (как в ClickUp, 11.11.2026): общий на
+    организацию список #RRGGBB, без повторов, не больше 12 — старые уходят."""
+    h = _h(admin_user)
+    url = "/api/staff-board/dropdown-meta/my_colors"
+    assert (await client.put(url, json={"order": ["red"]}, headers=h)).status_code == 400
+    r = await client.put(url, json={"order": ["#AABBCC", "#aabbcc", "#112233"]}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["my_colors"]["order"] == ["#aabbcc", "#112233"]
+    many = [f"#0000{i:02x}" for i in range(15)]
+    r = await client.put(url, json={"order": many}, headers=h)
+    assert r.json()["my_colors"]["order"] == many[-12:]

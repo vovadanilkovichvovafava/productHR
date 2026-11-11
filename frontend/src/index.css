@@ -10802,31 +10802,6 @@ body.performance-mode .glass-card:hover {
   color: var(--hf-main-400);
 }
 .hf-statuses-picker-more:hover { color: var(--hf-main-900); background: var(--hf-main-100); }
-.hf-statuses-picker-actions {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  min-width: 150px;
-  padding: 4px;
-  border: 1px solid var(--hf-main-100);
-  border-radius: 8px;
-  background: var(--hf-white);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
-}
-.hf-statuses-picker-actions button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  font-size: var(--hf-fs-5xs, 12px);
-  text-align: left;
-}
-.hf-statuses-picker-actions button:hover { background: var(--hf-main-50, #f1f5f9); }
-.hf-statuses-picker-actions .is-danger { color: var(--hf-red-600); }
 .hf-statuses-picker-add { color: var(--hf-cyan-700); font-weight: var(--hf-fw-semibold); }
 /* Подсказка «Добавить — введите название» прилипает к низу окна: у длинного
    списка иначе её не видно без прокрутки. */
@@ -10845,11 +10820,89 @@ body.performance-mode .glass-card:hover {
 .hf-statuses-picker-row:hover .hf-statuses-picker-grip { visibility: visible; }
 .hf-statuses-picker-row.is-dragging { opacity: 0.4; }
 .hf-statuses-picker-row.is-over { box-shadow: inset 0 2px 0 #7b68ee; }
-.hf-statuses-picker-swatch { width: 12px; height: 12px; border-radius: 3px; }
-.hf-statuses-picker-palette { display: grid; grid-template-columns: repeat(7, 18px); gap: 6px; padding: 6px 8px; }
-.hf-statuses-picker-palette button { width: 18px; height: 18px; border-radius: 4px; border: 2px solid transparent; }
-.hf-statuses-picker-palette button.is-on { border-color: var(--hf-main-900); }
-.hf-statuses-picker-palette button.is-reset { display: grid; place-items: center; background: var(--hf-main-100); color: var(--hf-main-500); }
+.hf-statuses-picker-unset {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--hf-main-500);
+}
+.hf-statuses-hr-option:hover .hf-statuses-picker-unset { color: var(--hf-red-600); background: var(--hf-red-50, #fef2f2); }
+.hf-statuses-picker-row.is-menu .hf-statuses-picker-more { color: var(--hf-main-900); background: var(--hf-main-100); }
+/* Окошко «…» у пункта — как в ClickUp (скрин клиента, 11.11.2026): поле с
+   названием, палитра 4×6 кружками, «Мои цвета» с «+», «Удалить». */
+.hf-option-menu {
+  position: fixed;
+  z-index: 60;
+  width: 300px;
+  padding: 12px 0 6px;
+  border: 1px solid var(--hf-main-100);
+  border-radius: 12px;
+  background: var(--hf-white);
+  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.18);
+  font-size: 14px;
+  color: var(--hf-main-800);
+}
+.hf-option-menu-name {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px 12px;
+  padding: 7px 10px;
+  border: 1.5px solid #7b68ee;
+  border-radius: 8px;
+  outline: none;
+  font-size: 14px;
+  color: var(--hf-main-900);
+  background: var(--hf-white);
+}
+.hf-option-menu-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 24px);
+  justify-content: space-between;
+  row-gap: 12px;
+  padding: 0 18px 12px;
+}
+.hf-option-menu-swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+}
+.hf-option-menu-swatch:hover { transform: scale(1.12); }
+.hf-option-menu-swatch.is-on { box-shadow: 0 0 0 2px var(--hf-white), 0 0 0 4px #7b68ee; }
+/* «Без цвета» — белый кружок, перечёркнутый красной чертой. */
+.hf-option-menu-swatch.is-none {
+  background: linear-gradient(135deg, transparent calc(50% - 1px), #e5484d calc(50% - 1px), #e5484d calc(50% + 1px), transparent calc(50% + 1px)), var(--hf-white);
+}
+.hf-option-menu-swatch.is-add { box-shadow: none; color: var(--hf-main-600); }
+.hf-option-menu-swatch.is-add:hover { background: var(--hf-main-100); }
+.hf-option-menu-swatch.is-add input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.hf-option-menu-sep { height: 1px; margin: 0 0 8px; background: var(--hf-main-100); }
+.hf-option-menu-label { padding: 2px 18px 10px; font-size: 13px; color: var(--hf-main-500); }
+.hf-option-menu-delete {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% - 12px);
+  margin: 0 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 14px;
+  color: var(--hf-main-800);
+  cursor: pointer;
+}
+.hf-option-menu-delete:hover { background: var(--hf-main-50, #f1f5f9); color: var(--hf-red-600); }
 .hf-statuses-picker-clear { color: var(--hf-main-500); }
 /* HR: вся ячейка — одна кнопка, открывающая окно (как Assignees в ClickUp). */
 .hf-statuses-assignee-open {

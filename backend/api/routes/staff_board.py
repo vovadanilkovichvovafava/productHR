@@ -2090,7 +2090,11 @@ async def save_board_view(
 # «Рук-ля», отметок и своих списков (cf:<id>) — само значение (при
 # переименовании ключ переносится).
 _META_KEY = "board_dropdown_meta"
-_META_KINDS = ("departments", "sourcers", "positions", "managers", "marks")
+_META_KINDS = ("departments", "sourcers", "positions", "managers", "marks", "my_colors")
+# «Мои цвета» в окошке «…» (как в ClickUp, 11.11.2026): общий на организацию
+# набор своих цветов. Лежит в той же meta, порядок = сами цвета #RRGGBB.
+_MY_COLORS = "my_colors"
+_MY_COLORS_MAX = 12
 _HEX = __import__("re").compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -2172,7 +2176,12 @@ async def save_dropdown_meta(
     meta = _meta(org)
     m = meta.setdefault(kind, {"order": [], "colors": {}})
     if data.order is not None:
-        m["order"] = list(dict.fromkeys(str(k) for k in data.order))[:500]
+        if kind == _MY_COLORS:
+            if any(not _HEX.match(str(c)) for c in data.order):
+                raise HTTPException(400, "Цвет — в виде #RRGGBB")
+            m["order"] = list(dict.fromkeys(str(c).lower() for c in data.order))[-_MY_COLORS_MAX:]
+        else:
+            m["order"] = list(dict.fromkeys(str(k) for k in data.order))[:500]
     if data.colors:
         for k, v in data.colors.items():
             if v is None:

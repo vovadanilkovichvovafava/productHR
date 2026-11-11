@@ -3131,24 +3131,48 @@ type PickerOption = {
   noDelete?: boolean;
 };
 
-/** Палитра «Цвет» в «…» — как у выпадающих списков ClickUp. */
-const PICKER_COLORS = [
-  "#7c3aed", "#2563eb", "#0891b2", "#059669", "#65a30d", "#ca8a04",
-  "#ea580c", "#dc2626", "#db2777", "#9333ea", "#475569", "#a16207",
+/** Палитра в «…» — та же, что у выпадающих списков ClickUp (скрин клиента,
+ *  11.11.2026): 4 ряда по 6, первым — «без цвета». */
+export const PICKER_COLORS = [
+  "#c4c4c4", "#b5b4f6", "#b1bdf2", "#9fc6ef", "#95cfa9",
+  "#5f6062", "#8f8f91", "#6346ef", "#3f5ed8", "#1e90f2", "#3a9b62",
+  "#e2c063", "#eda67e", "#e8a9a9", "#e5a5c7", "#d6abde", "#cfb6ab",
+  "#f6c844", "#e66a2c", "#d84b4b", "#d73f7b", "#9a48b9", "#957565",
 ];
+/** «Мои цвета» — общие на организацию, хранятся в настройках списков
+ *  (`my_colors`, порядок = сами цвета). Больше 12 — старые уходят. */
+const MY_COLORS_KIND = "my_colors";
+const MY_COLORS_MAX = 12;
+const myColors = (): string[] => DROPDOWN_META[MY_COLORS_KIND]?.order ?? [];
 
-/** Стиль пилюли по цвету пункта: светлая заливка, цветной текст. */
-export const colorPill = (color: string): React.CSSProperties => ({
-  background: `color-mix(in srgb, ${color} 14%, white)`,
-  color,
-  borderColor: `color-mix(in srgb, ${color} 30%, white)`,
-});
+const HEX6 = /^#[0-9a-f]{6}$/i;
+/** Яркость цвета (0 — чёрный, 1 — белый), чтобы выбрать цвет текста. */
+const luminance = (hex: string): number => {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+/** Стиль пилюли по цвету пункта — заливка цветом, текст тёмный или белый, как
+ *  в ClickUp. До 11.11.2026 была бледная заливка с цветным текстом, но в
+ *  палитре ClickUp есть пастельные цвета — их текст на бледном фоне не читался. */
+export const colorPill = (color: string): React.CSSProperties => (HEX6.test(color)
+  ? { background: color, color: luminance(color) > 0.4 ? "#1f2328" : "#ffffff", borderColor: color }
+  : { background: `color-mix(in srgb, ${color} 14%, white)`, color, borderColor: `color-mix(in srgb, ${color} 30%, white)` });
+
+const OPTION_MENU_W = 300;
+const OPTION_MENU_H = 360;
 
 /** Одно окно-список «как в ClickUp» на ВСЕ выпадающие списки доски (клиент,
  *  11.11.2026: «у дропдауна должны быть определённые функции, как в ClickUp, и
  *  любой дропдаун будет таким»): поиск, «+ Добавить», «— убрать», у каждого
- *  пункта ручка (перетащить — порядок у всех) и «…» — «Переименовать»,
- *  «Цвет», «Удалить». С selected — несколько значений сразу (сорсеры): сверху
+ *  пункта ручка (перетащить — порядок у всех) и «…». «…» открывает окошко как
+ *  в ClickUp (скрин клиента): сверху поле с названием — правится сразу,
+ *  сохраняется по Enter или при закрытии; палитра; «Мои цвета» с «+»;
+ *  «Удалить». С selected — несколько значений сразу (сорсеры): сверху
  *  «Выбраны» (клик снимает), ниже остальные (клик ставит). Открывается под
  *  ячейкой поверх доски (useCellMenu: закрытие по клику мимо, Escape и
  *  прокрутке доски). */
@@ -3178,12 +3202,14 @@ export function CatalogPicker({
 }) {
   const [q, setQ] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  // Меню «…» висит поверх окна (fixed), а не внутри прокручиваемого списка:
-  // у нижних пунктов оно уходило под край списка и было не видно (11.11.2026).
-  const [menuAt, setMenuAt] = useState<React.CSSProperties>({});
-  const [colorFor, setColorFor] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<{ key: string; text: string } | null>(null);
+  // Окошко «…» висит поверх окна (fixed), а не внутри прокручиваемого списка:
+  // у нижних пунктов оно иначе уходило под край списка (11.11.2026).
+  const [menu, setMenu] = useState<{ key: string; text: string; style: React.CSSProperties } | null>(null);
+  const menuNow = useRef(menu);
+  menuNow.current = menu;
+  const popRef = useRef<HTMLDivElement>(null);
+  // Свои цвета, добавленные в этом окне, — видны сразу, до ответа сервера.
+  const [addedColors, setAddedColors] = useState<string[]>([]);
   const [drag, setDrag] = useState<{ group: string; key: string } | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const needle = q.trim().toLowerCase();
@@ -3203,21 +3229,62 @@ export function CatalogPicker({
   const pick = (key: string) => { setQ(""); onPick(key); };
   const add = (name: string) => { setQ(""); onAdd(name); };
 
-  const saveRename = () => {
-    if (!renaming) return;
-    const next = renaming.text.trim().replace(/\s+/g, " ");
-    const opt = all.find((o) => o.key === renaming.key);
-    setRenaming(null);
+  /** Сохранить название из поля окошка «…», если его поменяли. */
+  const commitRename = (m: { key: string; text: string } | null) => {
+    if (!m) return;
+    const next = m.text.trim().replace(/\s+/g, " ");
+    const opt = all.find((o) => o.key === m.key);
     if (!next || !opt || next === opt.label) return;
     // Порядок по умолчанию считается от названия (список владельца, алфавит),
     // поэтому переименованный пункт уезжал в конец. Перед переименованием
     // запоминаем порядок, который человек сейчас видит (11.11.2026).
-    const group = groups.find((g) => g.options.some((o) => o.key === renaming.key));
     // Переименование — только ПОСЛЕ сохранения порядка: оба пишут в одни
     // настройки, и параллельно второй затирал первого.
-    const key = renaming.key;
+    const group = groups.find((g) => g.options.some((o) => o.key === m.key));
     Promise.resolve(group && onReorder ? onReorder(group.label, group.options.map((o) => o.key)) : undefined)
-      .then(() => onRename(key, next));
+      .then(() => onRename(m.key, next));
+  };
+  /** Закрыть окошко «…»; save — сохранить набранное название. */
+  const closeMenu = (save: boolean) => {
+    if (save) commitRename(menuNow.current);
+    setMenu(null);
+  };
+  const closeRef = useRef(closeMenu);
+  closeRef.current = closeMenu;
+
+  // Клик мимо окошка «…» — закрыть его, сохранив название (как в ClickUp).
+  // Ловим на погружении: клик мимо ВСЕГО окна закрывает и само окно, и
+  // название должно успеть сохраниться до этого.
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (popRef.current?.contains(t) || t?.closest?.(".hf-statuses-picker-more")) return;
+      closeRef.current(true);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, [menu?.key]);
+
+  const openMenu = (o: PickerOption, btn: HTMLElement) => {
+    if (menu?.key === o.key) { closeMenu(true); return; }
+    closeMenu(true);
+    const r = btn.getBoundingClientRect();
+    const top = Math.max(8, Math.min(r.top - 16, window.innerHeight - OPTION_MENU_H - 8));
+    // Как в ClickUp — левее «…», поверх списка; слева места нет — правее.
+    const style: React.CSSProperties = r.left - 4 >= OPTION_MENU_W + 8
+      ? { top, right: window.innerWidth - r.left + 4 }
+      : { top, left: Math.min(r.right + 4, window.innerWidth - OPTION_MENU_W - 8) };
+    setMenu({ key: o.key, text: o.label, style });
+  };
+
+  const recolor = (key: string, color: string | null) => { onRecolor?.(key, color); };
+  const addMyColor = (key: string, color: string) => {
+    const c = color.toLowerCase();
+    const list = [...myColors().filter((x) => x.toLowerCase() !== c), c].slice(-MY_COLORS_MAX);
+    setAddedColors((cur) => [...cur.filter((x) => x !== c), c]);
+    saveMeta(MY_COLORS_KIND, { order: list });
+    recolor(key, c);
   };
 
   const dropOn = (group: string, target: string) => {
@@ -3242,6 +3309,85 @@ export function CatalogPicker({
     </span>
   );
 
+  const optionMenu = (o: PickerOption) => {
+    if (!menu || menu.key !== o.key) return null;
+    const cur = (o.color || "").toLowerCase();
+    const mine = [...myColors(), ...addedColors.filter((c) => !myColors().includes(c))];
+    const swatch = (c: string) => (
+      <button
+        key={c}
+        type="button"
+        className={clsx("hf-option-menu-swatch", cur === c.toLowerCase() && "is-on")}
+        style={{ background: c }}
+        title={c}
+        aria-label={`Цвет ${c}`}
+        onClick={() => recolor(o.key, c)}
+      />
+    );
+    return (
+      <div ref={popRef} className="hf-option-menu" style={menu.style} role="dialog" aria-label={`«${o.label}»`}>
+        <input
+          autoFocus
+          className="hf-option-menu-name"
+          aria-label="Название"
+          value={menu.text}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setMenu({ ...menu, text: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); closeMenu(true); }
+            if (e.key === "Escape") { e.stopPropagation(); closeMenu(false); }
+          }}
+        />
+        {onRecolor && (
+          <>
+            <div className="hf-option-menu-palette">
+              <button
+                type="button"
+                className={clsx("hf-option-menu-swatch is-none", !o.color && "is-on")}
+                title="Без цвета"
+                aria-label="Без цвета"
+                onClick={() => recolor(o.key, null)}
+              />
+              {PICKER_COLORS.map(swatch)}
+            </div>
+            <div className="hf-option-menu-sep" />
+            <div className="hf-option-menu-label">Мои цвета</div>
+            <div className="hf-option-menu-palette">
+              {mine.map(swatch)}
+              <label className="hf-option-menu-swatch is-add" title="Добавить свой цвет">
+                <Plus size={16} />
+                <input
+                  type="color"
+                  aria-label="Свой цвет"
+                  defaultValue={HEX6.test(cur) ? cur : "#7b68ee"}
+                  // React onChange у color срабатывает на каждое движение
+                  // ползунка — берём родное «change» (палитру закрыли).
+                  ref={(el) => {
+                    if (!el || el.dataset.bound) return;
+                    el.dataset.bound = "1";
+                    el.addEventListener("change", () => addMyColor(o.key, el.value));
+                  }}
+                />
+              </label>
+            </div>
+          </>
+        )}
+        {!o.noDelete && (
+          <>
+            <div className="hf-option-menu-sep" />
+            <button
+              type="button"
+              className="hf-option-menu-delete"
+              onClick={() => { setMenu(null); onDelete(o.key, o.label); }}
+            >
+              <Trash2 size={16} /> Удалить
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
   const row = (o: PickerOption, group: string | null, isOn: boolean) => (
     <div
       key={`${group ?? "on"}-${o.key}`}
@@ -3249,8 +3395,9 @@ export function CatalogPicker({
         "hf-statuses-picker-row",
         drag?.key === o.key && "is-dragging",
         over === o.key && drag && drag.key !== o.key && "is-over",
+        menu?.key === o.key && "is-menu",
       )}
-      draggable={!!group && !!onReorder && !needle && !renaming}
+      draggable={!!group && !!onReorder && !needle && !menu}
       onDragStart={() => group && setDrag({ group, key: o.key })}
       onDragEnd={() => { setDrag(null); setOver(null); }}
       onDragOver={(e) => { if (drag && group && drag.group === group) { e.preventDefault(); setOver(o.key); } }}
@@ -3261,96 +3408,34 @@ export function CatalogPicker({
           <GripVertical size={13} />
         </span>
       )}
-      {renaming?.key === o.key ? (
-        <input
-          autoFocus
-          className="hf-statuses-picker-search"
-          value={renaming.text}
-          onChange={(e) => setRenaming({ key: o.key, text: e.target.value })}
-          onBlur={saveRename}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") saveRename();
-            if (e.key === "Escape") { e.stopPropagation(); setRenaming(null); }
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          className={clsx("hf-statuses-hr-option", (o.key === current || isOn) && "is-current")}
-          title={isOn ? "Нажмите, чтобы снять" : undefined}
-          onClick={() => pick(o.key)}
-        >
-          {pill(o)}
-          {o.hint && <span className="hf-statuses-picker-hint">{o.hint}</span>}
-          {(isOn || (o.key === current && !multi)) && <Check size={13} className="hf-statuses-picker-hint" />}
-        </button>
-      )}
-      {o.editable && renaming?.key !== o.key && (
+      <button
+        type="button"
+        className={clsx("hf-statuses-hr-option", (o.key === current || isOn) && "is-current")}
+        title={isOn ? "Убрать с этого человека (из списка не удаляется)" : undefined}
+        onClick={() => pick(o.key)}
+      >
+        {pill(o)}
+        {o.hint && <span className="hf-statuses-picker-hint">{o.hint}</span>}
+        {o.key === current && !multi && <Check size={13} className="hf-statuses-picker-hint" />}
+        {/* Выбранное в окне с несколькими значениями (сорсеры) снимается
+            кликом, но галочка этого не говорила: «как убрать Валю с
+            кандидата — непонятно, я не хочу её удалять» (владелец,
+            11.11.2026). Теперь видно «× убрать»; «Удалить» в «…» — это
+            удаление из СПИСКА, другое действие. */}
+        {isOn && <span className="hf-statuses-picker-unset"><X size={12} /> убрать</span>}
+      </button>
+      {o.editable && (
         <button
           type="button"
           className="hf-statuses-picker-more"
-          title="Переименовать, цвет, удалить"
-          onClick={(e) => {
-            setColorFor(null);
-            if (menuFor === o.key) { setMenuFor(null); return; }
-            const r = e.currentTarget.getBoundingClientRect();
-            const right = Math.max(8, window.innerWidth - r.right);
-            // Снизу места мало (с палитрой меню ~240px) — открываем вверх.
-            setMenuAt(r.bottom + 248 > window.innerHeight
-              ? { position: "fixed", bottom: window.innerHeight - r.top + 2, right, top: "auto" }
-              : { position: "fixed", top: r.bottom + 2, right });
-            setMenuFor(o.key);
-          }}
+          title="Название, цвет, удалить"
+          aria-label={`Настроить «${o.label}»`}
+          onClick={(e) => openMenu(o, e.currentTarget)}
         >
           <MoreHorizontal size={14} />
         </button>
       )}
-      {menuFor === o.key && (
-        <div className="hf-statuses-picker-actions" style={menuAt}>
-          <button
-            type="button"
-            onClick={() => { setMenuFor(null); setRenaming({ key: o.key, text: o.label }); }}
-          >
-            <Pencil size={12} /> Переименовать
-          </button>
-          {onRecolor && (
-            <button type="button" onClick={() => setColorFor(colorFor === o.key ? null : o.key)}>
-              <span className="hf-statuses-picker-swatch" style={{ background: o.color || "#cbd5e1" }} /> Цвет
-            </button>
-          )}
-          {colorFor === o.key && onRecolor && (
-            <div className="hf-statuses-picker-palette">
-              {PICKER_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={clsx(o.color === c && "is-on")}
-                  style={{ background: c }}
-                  title={c}
-                  onClick={() => { setMenuFor(null); setColorFor(null); onRecolor(o.key, c); }}
-                />
-              ))}
-              <button
-                type="button"
-                className="is-reset"
-                title="Цвет по умолчанию"
-                onClick={() => { setMenuFor(null); setColorFor(null); onRecolor(o.key, null); }}
-              >
-                <X size={11} />
-              </button>
-            </div>
-          )}
-          {!o.noDelete && (
-            <button
-              type="button"
-              className="is-danger"
-              onClick={() => { setMenuFor(null); onDelete(o.key, o.label); }}
-            >
-              <Trash2 size={12} /> Удалить
-            </button>
-          )}
-        </div>
-      )}
+      {optionMenu(o)}
     </div>
   );
 
@@ -3359,7 +3444,7 @@ export function CatalogPicker({
       ref={menuRef}
       className="hf-statuses-hr-menu hf-catalog-picker"
       style={menuBox(pos)}
-      onScroll={() => { if (menuFor) { setMenuFor(null); setColorFor(null); } }}
+      onScroll={() => { if (menuNow.current) closeMenu(true); }}
     >
       <input
         ref={searchRef}

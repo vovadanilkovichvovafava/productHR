@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
-import { CatalogPicker, canLeaveDepartment, menuPosFor } from "../StatusesPage";
+import { CatalogPicker, PICKER_COLORS, canLeaveDepartment, colorPill, menuPosFor } from "../StatusesPage";
 
 // Окно-список доски «Штат» — одно на все выпадающие (11.11.2026). Сторожим
 // мелочи, найденные при проверке: окно с несколькими значениями не
@@ -35,6 +35,12 @@ describe("CatalogPicker", () => {
     const { onPick, input } = setup();
     fireEvent.change(input, { target: { value: "аня" } });
     fireEvent.keyDown(input, { key: "Enter" });
+    expect(onPick).toHaveBeenCalledWith("1");
+  });
+
+  it("у выбранного видно «убрать» — клик снимает его с человека", () => {
+    const { onPick } = setup(["1"]);
+    fireEvent.click(screen.getByText("убрать"));
     expect(onPick).toHaveBeenCalledWith("1");
   });
 
@@ -82,6 +88,85 @@ describe("CatalogPicker", () => {
       />,
     );
     expect(screen.getByText(/Список пуст/)).toBeTruthy();
+  });
+});
+
+// Окошко «…» у пункта — как в ClickUp (скрин клиента, 11.11.2026): сразу
+// поле с названием, палитра, «Мои цвета», «Удалить».
+describe("окошко «…»", () => {
+  const open = (extra: { noDelete?: boolean } = {}) => {
+    const fns = { onRename: vi.fn(), onDelete: vi.fn(), onRecolor: vi.fn(), onReorder: vi.fn() };
+    render(
+      <CatalogPicker
+        menuRef={createRef<HTMLDivElement>()}
+        pos={{ top: 0, left: 0, maxHeight: 360 }}
+        placeholder="Найти или добавить отдел…"
+        groups={[{ label: "Отделы", options: [
+          { key: "1", label: "SANDBOX", editable: true, ...extra },
+          { key: "2", label: "SEO отдел", editable: true },
+        ] }]}
+        taken={["SANDBOX", "SEO отдел"]}
+        onPick={vi.fn()}
+        onAdd={vi.fn()}
+        {...fns}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Настроить «SANDBOX»"));
+    return { ...fns, name: screen.getByLabelText("Название") as HTMLInputElement };
+  };
+
+  it("сразу поле с названием; Enter — переименовать", async () => {
+    const { onRename, name } = open();
+    expect(name.value).toBe("SANDBOX");
+    fireEvent.change(name, { target: { value: "SANDBOX 2" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    await vi.waitFor(() => expect(onRename).toHaveBeenCalledWith("1", "SANDBOX 2"));
+    expect(screen.queryByLabelText("Название")).toBeNull();
+  });
+
+  it("Escape — закрыть без переименования", async () => {
+    const { onRename, name } = open();
+    fireEvent.change(name, { target: { value: "Другое" } });
+    fireEvent.keyDown(name, { key: "Escape" });
+    await Promise.resolve();
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Название")).toBeNull();
+  });
+
+  it("клик мимо окошка — название сохраняется", async () => {
+    const { onRename, name } = open();
+    fireEvent.change(name, { target: { value: "Песочница" } });
+    fireEvent.mouseDown(document.body);
+    await vi.waitFor(() => expect(onRename).toHaveBeenCalledWith("1", "Песочница"));
+  });
+
+  it("палитра 4×6: «без цвета» + 23 цвета; клик красит, окошко остаётся", () => {
+    const { onRecolor } = open();
+    expect(PICKER_COLORS).toHaveLength(23);
+    fireEvent.click(screen.getByLabelText(`Цвет ${PICKER_COLORS[0]}`));
+    expect(onRecolor).toHaveBeenCalledWith("1", PICKER_COLORS[0]);
+    fireEvent.click(screen.getByLabelText("Без цвета"));
+    expect(onRecolor).toHaveBeenLastCalledWith("1", null);
+    expect(screen.getByLabelText("Название")).toBeTruthy();
+    expect(screen.getByText("Мои цвета")).toBeTruthy();
+  });
+
+  it("«Удалить» внизу; у песочницы (noDelete) его нет", () => {
+    const { onDelete } = open();
+    fireEvent.click(screen.getByText("Удалить"));
+    expect(onDelete).toHaveBeenCalledWith("1", "SANDBOX");
+  });
+
+  it("у песочницы «Удалить» нет", () => {
+    open({ noDelete: true });
+    expect(screen.queryByText("Удалить")).toBeNull();
+  });
+});
+
+describe("colorPill", () => {
+  it("заливка цветом, текст тёмный на светлом и белый на тёмном", () => {
+    expect(colorPill("#f6c844")).toMatchObject({ background: "#f6c844", color: "#1f2328" });
+    expect(colorPill("#3f5ed8")).toMatchObject({ background: "#3f5ed8", color: "#ffffff" });
   });
 });
 
