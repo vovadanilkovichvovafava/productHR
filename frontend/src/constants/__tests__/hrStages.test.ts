@@ -127,3 +127,23 @@ describe("boardColumnOf — вкладка «Все кандидаты» по с
     expect(DEPARTED_LABELS).toEqual({ dismissed: "Мы уволили", quit: "Сам уволился" });
   });
 });
+
+describe("причина отказа (Мария, 11.11.2026)", () => {
+  it("без причины и комментария перевести в «Отказ» нельзя", async () => {
+    const { rejectionReady } = await import("../hrStages");
+    expect(rejectionReady(null, "")).toBe(false);
+    expect(rejectionReady(null, "<p><br></p>")).toBe(false);
+    expect(rejectionReady(null, "<p>не вышел</p>")).toBe(true);
+    expect(rejectionReady("Перестал отвечать", "")).toBe(true);
+  });
+
+  it("причина — первой строкой комментария, жирным", async () => {
+    const { buildRejectionComment, REJECTION_REASONS } = await import("../hrStages");
+    expect(REJECTION_REASONS).toHaveLength(10);
+    expect(buildRejectionComment("Перестал отвечать", "")).toBe("<p><b>Перестал отвечать</b></p>");
+    expect(buildRejectionComment("Перестал отвечать", "<p>три дня</p>")).toBe(
+      "<p><b>Перестал отвечать</b></p><p>три дня</p>",
+    );
+    expect(buildRejectionComment(null, " <p>текст</p> ")).toBe("<p>текст</p>");
+  });
+});

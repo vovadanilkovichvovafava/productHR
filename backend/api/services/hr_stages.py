@@ -109,3 +109,32 @@ def stage_label(stage) -> str:
     """Подпись этапа заявки: enum или строка; неизвестное — как есть."""
     value = stage.value if hasattr(stage, "value") else str(stage)
     return STAGE_LABELS.get(value, value)
+
+
+# Причины отказа — список Марии (11.11.2026: «добавь под статус „Отказ“ эти
+# причины, без них перевести на статус нельзя»). Окно смены этапа кладёт
+# выбранную причину ПЕРВОЙ строкой комментария; по ней же заполняется
+# `VacancyApplication.rejection_reason` (отчёт «Причины отказов» группирует
+# по этому полю — список даёт ровные категории вместо свободного текста).
+# Тот же список — `REJECTION_REASONS` в frontend/src/constants/hrStages.ts.
+REJECTION_REASONS: tuple[str, ...] = (
+    "Высокие запросы по зарплате",
+    "Закрыли вакансию другим",
+    "Кандидат отказался сам",
+    "Неприемлемые личностные качества",
+    "Перестал отвечать",
+    "Плохо выполненное ТЗ",
+    "Принял другой оффер",
+    "Принял контроффер",
+    "Связь с серыми нишами",
+    "Слабые тех. скиллы",
+)
+
+_REASON_BY_KEY = {r.lower().replace("ё", "е"): r for r in REJECTION_REASONS}
+
+
+def match_rejection_reason(line: str | None) -> str | None:
+    """Строка — одна из причин списка? Возвращает её каноническое написание."""
+    key = (line or "").strip().rstrip(".").lower().replace("ё", "е")
+    return _REASON_BY_KEY.get(key)
+

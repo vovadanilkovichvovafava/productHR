@@ -7745,6 +7745,122 @@ body.performance-mode .glass-card:hover {
   margin-top: 12px;
 }
 
+/* «Причина отказа» в окне смены этапа (Мария, 11.11.2026). */
+.hf-reject-reason {
+  position: relative;
+  flex-shrink: 0;
+  margin-bottom: 10px;
+}
+
+.hf-reject-reason-field {
+  display: flex;
+  width: 100%;
+  height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: var(--hf-border-xs) solid var(--hf-alpha-200);
+  border-radius: 6px;
+  background: var(--hf-white);
+  padding-inline: 12px;
+  color: var(--hf-main-900);
+  font-size: var(--hf-fs-xs);
+  text-align: left;
+}
+
+.hf-reject-reason-field:hover {
+  border-color: var(--hf-cyan-500);
+}
+
+.hf-reject-reason-empty {
+  color: var(--hf-main-500);
+}
+
+.hf-reject-reason-caret {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--hf-main-500);
+  transition: transform var(--hf-transition-fast);
+}
+
+.hf-reject-reason-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  max-height: 290px;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--hf-white);
+  box-shadow: 0 4px 20px var(--hf-alpha-300);
+}
+
+.hf-reject-reason-search {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  margin: 8px;
+  border: var(--hf-border-xs) solid var(--hf-cyan-500);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.hf-reject-reason-search input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  background: transparent;
+  font-size: var(--hf-fs-xs);
+  color: var(--hf-main-900);
+  outline: none;
+}
+
+.hf-reject-reason-list {
+  overflow-y: auto;
+  border-top: var(--hf-border-xs) solid var(--hf-ui-divider);
+  padding: 4px;
+}
+
+.hf-reject-reason-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: var(--hf-fs-xs);
+  color: var(--hf-main-900);
+}
+
+.hf-reject-reason-option:hover {
+  background: var(--hf-bg-panel);
+}
+
+.hf-reject-reason-check {
+  display: inline-flex;
+  width: 18px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+
+.hf-reject-reason-none {
+  padding: 10px;
+  font-size: var(--hf-fs-xxs);
+  color: var(--hf-main-500);
+}
+
+.hf-reject-reason-hint {
+  font-size: var(--hf-fs-xxs);
+  line-height: 1.25;
+  color: var(--hf-status-red);
+}
+
 .hf-stage-dropdown-menu {
   border-radius: var(--hf-radius-l);
   box-shadow: var(--hf-shadow-2xl);

@@ -18,6 +18,8 @@ import clsx from "clsx";
 import toast from "react-hot-toast";
 import { HuntflowComposer } from "@/components/hr/HuntflowComposer";
 import { HuntflowRichInput } from "@/components/hr/HuntflowRichInput";
+import { RejectionReasonSelect } from "@/components/entities/RejectionReasonSelect";
+import { buildRejectionComment, rejectionReady } from "@/constants/hrStages";
 import { HuntflowActionChip as ActionChip } from "@/components/hr/HuntflowControls";
 
 import { downloadEntityFile } from "@/services/api/entities";
@@ -215,6 +217,9 @@ function CandidateVacancyCard({
   const [showStageDD, setShowStageDD] = useState(false);
   const [pendingStage, setPendingStage] = useState(currentStage);
   const [stageChangeComment, setStageChangeComment] = useState("");
+  // Причина отказа из списка Марии (11.11.2026): при переводе в «Отказ»
+  // обязательна причина ИЛИ комментарий — иначе «Сохранить» недоступно.
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [showActionMenu, setShowActionMenu] = useState(false);
   // Видео из «Файлов» открываем в модальном плеере (закрывается X/фоном/Esc).
   const [videoModal, setVideoModal] = useState<{ url: string; name: string } | null>(null);
@@ -399,6 +404,15 @@ function CandidateVacancyCard({
   // Помечен этап, на котором кандидат уже стоит (или сам пикер не нашёл
   // следующего) — переводить некуда.
   const stageAlreadyCurrent = pendingStage === resolvedCurrentStageStatus;
+  const rejectPick = pendingStage === "rejected" && !stageAlreadyCurrent;
+  const rejectBlocked = rejectPick && !rejectionReady(rejectionReason, stageChangeComment);
+  // Сменили этап в окне или закрыли окно — выбранная причина не переносится.
+  useEffect(() => {
+    if (!rejectPick) setRejectionReason(null);
+  }, [rejectPick]);
+  useEffect(() => {
+    if (!showStageDD) setRejectionReason(null);
+  }, [showStageDD]);
   const stageDDWasOpenRef = useRef(false);
   useEffect(() => {
     if (showStageDD && !stageDDWasOpenRef.current) {
@@ -585,23 +599,32 @@ function CandidateVacancyCard({
                       Кандидат сейчас находится на этом этапе подбора
                     </div>
                   ) : (
+                  <>
+                  {rejectPick && (
+                    <RejectionReasonSelect
+                      value={rejectionReason}
+                      onChange={setRejectionReason}
+                    />
+                  )}
                   <div className="hf-stage-picker-editor">
                     <HuntflowRichInput
                       value={stageChangeComment}
                       onChange={setStageChangeComment}
-                      placeholder="Записать комментарий"
+                      placeholder={rejectPick ? "Комментарий (если причины нет в списке)" : "Записать комментарий"}
                       showMention
                       toolbarClassName="hf-stage-picker-toolbar"
                       editableClassName="hf-stage-picker-textarea overflow-y-auto"
                     />
                   </div>
+                  </>
                   )}
                   <div className="hf-stage-picker-footer">
                     <button
                       type="button"
-                      disabled={savingStageChange || stageAlreadyCurrent}
+                      disabled={savingStageChange || stageAlreadyCurrent || rejectBlocked}
+                      title={rejectBlocked ? "Выберите причину отказа или напишите комментарий" : undefined}
                       onClick={async () => {
-                        if (savingStageChange || stageAlreadyCurrent) return;
+                        if (savingStageChange || stageAlreadyCurrent || rejectBlocked) return;
                         setSavingStageChange(true);
                         try {
                           const selectedOption = stagePickerOptions.find(
@@ -617,7 +640,9 @@ function CandidateVacancyCard({
                           // висящий в старом этапе карточки комментарий вида
                           // «Этап: Отказ», который выглядел как принятое решение,
                           // хотя кандидат никуда не переехал.
-                          const text = stageChangeComment.trim();
+                          const text = rejectPick
+                            ? buildRejectionComment(rejectionReason, stageChangeComment)
+                            : stageChangeComment.trim();
                           if (needsStageChange) {
                             // Комментарий уходит ВМЕСТЕ с переводом и живёт в
                             // самой записи истории. Раньше он сохранялся
@@ -641,6 +666,7 @@ function CandidateVacancyCard({
                             if (!saved) return; // текст остаётся в окне
                           }
                           setStageChangeComment("");
+                          setRejectionReason(null);
                           setShowStageDD(false);
                         } finally {
                           setSavingStageChange(false);
@@ -657,6 +683,11 @@ function CandidateVacancyCard({
                     >
                       Отмена
                     </button>
+                    {rejectBlocked && (
+                      <span className="hf-reject-reason-hint">
+                        Выберите причину или напишите комментарий
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

@@ -117,3 +117,30 @@ async def test_rejection_column_added_to_custom_views(db_session, organization, 
     rows = {r.user_id: r.column_keys for r in (await db_session.execute(select(BoardStatusView))).scalars()}
     assert rows[admin_user.id] == ["position", "department", "rejection_reason"]
     assert rows[second_user.id] == []
+
+
+async def test_reason_from_list_goes_to_application_as_category(client, db_session, admin_user, one_funnel):  # noqa: F811
+    """Причина из списка Марии (11.11.2026) — первой строкой комментария: в
+    заявку только она (ровная категория для отчёта), в карточку — вся запись."""
+    entity, app = one_funnel
+    r = await client.put(
+        f"/api/vacancies/applications/{app.id}",
+        json={
+            "stage": "rejected",
+            "comment": "<p><b>Перестал отвечать</b></p><p>три дня без ответа</p>",
+            "expected_entity_id": entity.id,
+        },
+        headers=_headers(admin_user),
+    )
+    assert r.status_code == 200, r.text
+    await db_session.refresh(entity)
+    await db_session.refresh(app)
+    assert app.rejection_reason == "Перестал отвечать"
+    assert entity.extra_data["rejection_reason"] == "Перестал отвечать\nтри дня без ответа"
+
+
+def test_match_rejection_reason():
+    from api.services.hr_stages import REJECTION_REASONS, match_rejection_reason
+    assert len(REJECTION_REASONS) == 10
+    assert match_rejection_reason("  слабые тех. скиллы. ") == "Слабые тех. скиллы"
+    assert match_rejection_reason("Не вышел на связь") is None

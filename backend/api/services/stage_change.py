@@ -96,10 +96,16 @@ def remember_rejection_reason(
     text = comment_plain_text(comment)
     if not text:
         return
+    # С 11.11.2026 причина выбирается из списка Марии и стоит первой строкой
+    # комментария: в заявку (отчёт «Причины отказов») — только она, ровной
+    # категорией; в карточку — вся запись (причина + пояснение).
+    from .hr_stages import match_rejection_reason
+
+    reason = match_rejection_reason(text.split("\n", 1)[0])
     if entity is not None:
         entity.extra_data = {**(entity.extra_data or {}), REJECTION_REASON_KEY: text}
     if application is not None:
-        application.rejection_reason = text[:255]
+        application.rejection_reason = (reason or text)[:255]
 
 
 async def move_application(

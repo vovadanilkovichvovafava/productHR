@@ -181,3 +181,37 @@ export const stageTabColors = (stage: string): StageTabColors | undefined => {
   const color = STAGE_COLOR_BY_STAGE[stage as ApplicationStage];
   return color ? STAGE_TAB_COLORS[color] : undefined;
 };
+
+/**
+ * Причины отказа — список Марии (11.11.2026: «добавь под статус „Отказ“ эти
+ * причины, без них перевести на статус нельзя… либо выбрать один из пунктов,
+ * либо прописать комментарий»). Тот же список — `REJECTION_REASONS` в
+ * backend/api/services/hr_stages.py: по нему сервер кладёт причину в заявку.
+ */
+export const REJECTION_REASONS: readonly string[] = [
+  "Высокие запросы по зарплате",
+  "Закрыли вакансию другим",
+  "Кандидат отказался сам",
+  "Неприемлемые личностные качества",
+  "Перестал отвечать",
+  "Плохо выполненное ТЗ",
+  "Принял другой оффер",
+  "Принял контроффер",
+  "Связь с серыми нишами",
+  "Слабые тех. скиллы",
+];
+
+/** Комментарий к переводу в «Отказ»: причина — первой строкой, дальше текст. */
+export function buildRejectionComment(reason: string | null, commentHtml: string): string {
+  const text = commentHtml.trim();
+  if (!reason) return text;
+  const head = `<p><b>${reason.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</b></p>`;
+  return text ? `${head}${text}` : head;
+}
+
+/** Перевод в «Отказ» разрешён, только если есть причина или комментарий. */
+export function rejectionReady(reason: string | null, commentHtml: string): boolean {
+  if (reason) return true;
+  const plain = commentHtml.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").trim();
+  return plain.length > 0;
+}
