@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import * as XLSX from "xlsx";
-import { placementStyle, useMenuPlacement } from "@/utils/menuPlacement";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
@@ -21,10 +20,13 @@ import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/servic
 import {
   getBoardView, saveBoardView, EMPTY_BOARD_VIEW, type BoardView,
   getCustomFields, createCustomField, updateCustomField, deleteCustomField,
+  getDropdownMeta, saveDropdownMeta, type DropdownMeta,
   type CustomField, type CustomFieldType,
 } from "@/services/api/staffBoard";
 import { getOrgMembers } from "@/services/api/accessHub";
-import { addTagToEntity, createTag, getTags, removeTagFromEntity, type Tag } from "@/services/api/tags";
+import {
+  addTagToEntity, archiveTag, createTag, getTags, removeTagFromEntity, updateTag, type Tag,
+} from "@/services/api/tags";
 import { useUrlTab } from "@/hooks/useUrlTab";
 import { useAuthStore } from "@/stores/authStore";
 import { STATUS_LABELS } from "@/types";
@@ -122,6 +124,61 @@ export const setCustomFields = (list: CustomField[]) => { CUSTOM_FIELDS = list; 
 export const customFieldOf = (key: string) =>
   key.startsWith("cf:") ? CUSTOM_FIELDS.find((f) => `cf:${f.id}` === key) : undefined;
 const CUSTOM_WIDTH: Record<CustomFieldType, number> = { text: 180, number: 110, date: 120, select: 150, checkbox: 90 };
+
+/** Цвета и порядок пунктов выпадающих списков — общие (11.11.2026). Реестр
+ *  на уровне модуля: ячейки читают его напрямую, страница держит копию в
+ *  стейте (для перерисовки) и регистрирует функцию сохранения. */
+let DROPDOWN_META: DropdownMeta = {};
+type MetaPatch = { order?: string[]; colors?: Record<string, string | null> };
+let metaSaver: (kind: string, patch: MetaPatch) => Promise<void> = async () => {};
+// Сохранения идут строго по очереди: и порядок, и цвета, и переименование
+// пишут в одни настройки организации, и два запроса разом затирали друг друга
+// (перетащил и сразу перекрасил — порядок пропадал; 11.11.2026).
+let metaQueue: Promise<void> = Promise.resolve();
+const saveMeta = (kind: string, patch: MetaPatch): Promise<void> => {
+  metaQueue = metaQueue.then(() => metaSaver(kind, patch)).catch(() => {});
+  return metaQueue;
+};
+export const setDropdownMetaRegistry = (m: DropdownMeta) => { DROPDOWN_META = m; };
+const setMetaSaver = (fn: typeof metaSaver) => { metaSaver = fn; };
+let metaReloader: () => Promise<void> = async () => {};
+/** У должностей, «Рук-ль», отметок и пунктов своих полей ключ — само
+ *  название. После переименования сервер переносит цвет и место в порядке на
+ *  новое имя; перечитываем, иначе на экране пункт терял цвет и уезжал в конец
+ *  до F5 (11.11.2026). */
+const reloadMetaAfterRename = () => {
+  metaQueue = metaQueue.then(() => metaReloader()).catch(() => {});
+  return metaQueue;
+};
+export const metaColor = (kind: string, key: string): string | undefined => DROPDOWN_META[kind]?.colors?.[key];
+
+/** Пункты в порядке, который выставили перетаскиванием; новые — в конце, в
+ *  своём исходном порядке. */
+export function orderByMeta<T>(kind: string, items: T[], keyOf: (t: T) => string): T[] {
+  const idx = new Map((DROPDOWN_META[kind]?.order ?? []).map((k, i) => [k, i]));
+  return items
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => (idx.get(keyOf(a.t)) ?? 1e6 + a.i) - (idx.get(keyOf(b.t)) ?? 1e6 + b.i))
+    .map((x) => x.t);
+}
+
+/** Обработчики «Цвет» и перетаскивания для окна-списка. Перетаскивание
+ *  меняет порядок внутри группы; остальное в сохранённом порядке остаётся. */
+const metaHandlers = (kind: string) => ({
+  onRecolor: (key: string, color: string | null) => saveMeta(kind, { colors: { [key]: color } }),
+  onReorder: (_group: string, keys: string[]) => {
+    const rest = (DROPDOWN_META[kind]?.order ?? []).filter((k) => !keys.includes(k));
+    return saveMeta(kind, { order: [...keys, ...rest] });
+  },
+});
+
+/** Пилюля значения: свой цвет пункта, иначе цвет по названию. */
+const valuePill = (kind: string, key: string, label: string): React.CSSProperties => {
+  const c = metaColor(kind, key);
+  if (c) return colorPill(c);
+  const hue = pillHue(label);
+  return { background: `hsl(${hue} 70% 94%)`, color: `hsl(${hue} 55% 32%)`, borderColor: `hsl(${hue} 60% 84%)` };
+};
 
 /** Все колонки: встроенные и свои. */
 export function allColumns(): Column[] {
@@ -647,6 +704,31 @@ export default function StatusesPage() {
   // Свои поля организации (11.11.2026). Реестр модуля обновляем вместе со
   // стейтом — по стейту перерисовываемся.
   const [customFields, setCustomFieldsState] = useState<CustomField[]>([]);
+  // Цвета и порядок пунктов списков — общие; реестр модуля + стейт.
+  const [, setMetaState] = useState<DropdownMeta>({});
+  const applyMeta = useCallback((m: DropdownMeta) => {
+    setDropdownMetaRegistry(m);
+    setMetaState(m);
+  }, []);
+  useEffect(() => {
+    metaReloader = () => getDropdownMeta().then(applyMeta);
+    setMetaSaver(async (kind, patch) => {
+      // Сразу на экране, потом на сервере; не вышло — перечитать.
+      const before = DROPDOWN_META;
+      const cur = before[kind] ?? { order: [], colors: {} };
+      const colors = { ...cur.colors };
+      for (const [k, v] of Object.entries(patch.colors ?? {})) {
+        if (v) colors[k] = v; else delete colors[k];
+      }
+      applyMeta({ ...before, [kind]: { order: patch.order ?? cur.order, colors } });
+      try {
+        applyMeta(await saveDropdownMeta(kind, patch));
+      } catch (e: any) {
+        applyMeta(before);
+        toast.error(e?.response?.data?.detail || "Не удалось сохранить");
+      }
+    });
+  }, [applyMeta]);
   const applyCustomFields = useCallback((list: CustomField[]) => {
     setCustomFields(list);
     setCustomFieldsState(list);
@@ -679,13 +761,19 @@ export default function StatusesPage() {
     }
   };
 
+  // Крутилка — только при первой загрузке. Раньше её показывал каждый
+  // onReload (поставили сорсера, сменили отдел): таблица пропадала и
+  // рисовалась заново — открытое окно выбора закрывалось посреди работы,
+  // прокрутка прыгала наверх (11.11.2026).
+  const loadedOnce = useRef(false);
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       setRows(await getBoardRows());
     } catch {
       toast.error("Не удалось загрузить доску");
     } finally {
+      loadedOnce.current = true;
       setLoading(false);
     }
   }, []);
@@ -700,6 +788,7 @@ export default function StatusesPage() {
       .then((v) => { setFieldLabels(v.labels); setView(v); })
       .catch(() => setView(EMPTY_BOARD_VIEW));
     getCustomFields().then(applyCustomFields).catch(() => applyCustomFields([]));
+    getDropdownMeta().then(applyMeta).catch(() => applyMeta({}));
     getTags().then(setSourcerTags).catch(() => setSourcerTags([]));
     // Вести сотрудника может только HR. В организации числятся все
     // работники, и без фильтра в список попадали бы полсотни человек,
@@ -1579,7 +1668,7 @@ function DeptTabs({
  *  предлагаются (решение владельца 09.11.2026). */
 export function departmentFilterNames(departments: BoardDepartment[]): string[] {
   return departments
-    .filter((d) => d.kind === "sandbox" || d.canonical || d.offered)
+    .filter((d) => d.kind === "sandbox" || d.offered)
     .map((d) => d.name);
 }
 
@@ -2238,7 +2327,7 @@ function Row({
   onCatalog: (kind: CatalogKind, list: CatalogItem[]) => void;
   people: { user_id: number; user_name: string | null }[];
   sourcerTags: Tag[];
-  onSourcerTags: (list: Tag[]) => void;
+  onSourcerTags: (update: (list: Tag[]) => Tag[]) => void;
   saving: boolean;
   onPatch: (row: BoardRow, body: BoardRowUpdate) => Promise<void>;
   onStatus: (row: BoardRow, status: string) => Promise<void>;
@@ -2420,14 +2509,13 @@ function CustomCell({
     return <TextCell value={value ? String(value) : null} onSave={(v) => onSave(v)} />;
   }
   const v = value ? String(value) : null;
-  const hue = pillHue(v || "");
   return (
     <>
       <button
         ref={menu.plusRef}
         className={v ? "hf-statuses-pill" : "hf-statuses-empty-cell"}
         onClick={menu.toggle}
-        style={v ? { background: `hsl(${hue} 70% 94%)`, color: `hsl(${hue} 55% 32%)`, borderColor: `hsl(${hue} 60% 84%)` } : undefined}
+        style={v ? valuePill(`cf:${field.id}`, v, v) : undefined}
         title={v || `Выбрать: ${field.name}`}
       >
         {v || "—"}
@@ -2437,7 +2525,12 @@ function CustomCell({
           menuRef={menu.menuRef}
           pos={menu.pos}
           placeholder={`Найти или добавить вариант…`}
-          groups={[{ label: field.name, options: field.options.map((o) => ({ key: o, label: o, editable: true })) }]}
+          groups={[{
+            label: field.name,
+            options: orderByMeta(`cf:${field.id}`, field.options, (o) => o)
+              .map((o) => ({ key: o, label: o, editable: true, color: metaColor(`cf:${field.id}`, o) })),
+          }]}
+          {...metaHandlers(`cf:${field.id}`)}
           taken={field.options}
           current={v}
           onClear={v ? () => { menu.close(); onSave(null); } : undefined}
@@ -2452,6 +2545,7 @@ function CustomCell({
           onRename={async (key, name) => {
             try {
               onFields(await updateCustomField(field.id, { rename_option: { from: key, to: name } }));
+              await reloadMetaAfterRename();
               if (key === v) onSave(name);
             } catch (e) { fail(e, "Не удалось переименовать"); }
           }}
@@ -2701,7 +2795,7 @@ export function rotationNote(
  *  добавленные HR — по алфавиту. Старые отделы вне списка не предлагаются. */
 export function offeredTeams(departments: BoardDepartment[]): BoardDepartment[] {
   return departments
-    .filter((d) => d.kind === "team" && (d.offered || d.canonical))
+    .filter((d) => d.kind === "team" && d.offered)
     .sort((a, b) =>
       (a.canon_order ?? 99) - (b.canon_order ?? 99) || a.name.localeCompare(b.name, "ru"));
 }
@@ -2747,10 +2841,10 @@ function DepartmentCell({
     ? (row.team_name ? own : null)   // в строке песочницы подпись — она сама
     : row.sandbox_name;
   const rotation = rotationNote(row.team_history, name);
-  const hue = pillHue(name);
-  const options = departments.filter(
-    (d) => (!d.hidden || d.id === row.department_id) && d.id !== row.department_id
-  );   // сравниваем с отделом САМОЙ строки, а не с тем, что показано главным
+  // Текущий отдел строки в окне ЕСТЬ — с галочкой, как в ClickUp: иначе его
+  // нельзя было переименовать или перекрасить из этой строки (11.11.2026).
+  // Сравниваем с отделом САМОЙ строки, а не с тем, что показано главным.
+  const options = departments.filter((d) => !d.hidden || d.id === row.department_id);
   // Песочница у человека одна: выбрал другую — переехал. Команда из песочницы —
   // наоборот, добавление: практика остаётся.
   const sandboxes = options.filter((d) => d.kind === "sandbox");
@@ -2769,11 +2863,7 @@ function DepartmentCell({
           <span
             className="hf-statuses-pill"
             title={from ? `${name} · пришёл из ${from}` : name}
-            style={{
-              background: `hsl(${hue} 70% 94%)`,
-              color: `hsl(${hue} 55% 32%)`,
-              borderColor: `hsl(${hue} 60% 84%)`,
-            }}
+            style={valuePill("departments", String(departments.find((d) => d.name === name)?.id ?? ""), name)}
           >
             {name}
           </span>
@@ -2808,15 +2898,23 @@ function DepartmentCell({
           groups={[
             {
               label: row.department_is_sandbox ? "Песочницы — перевести" : "Песочницы — вернуть на практику",
-              options: sandboxes.map((d) => ({ key: String(d.id), label: d.name })),
+              options: orderByMeta("departments", sandboxes, (d) => String(d.id)).map((d) => ({
+                key: String(d.id), label: d.name, editable: true, noDelete: true,
+                color: metaColor("departments", String(d.id)),
+              })),
             },
             {
               label: teamsAdd ? "Отделы — добавить (практика останется)" : "Отделы — перевести",
-              options: teams.map((d) => ({ key: String(d.id), label: d.name, editable: !d.canonical })),
+              options: orderByMeta("departments", teams, (d) => String(d.id)).map((d) => ({
+                key: String(d.id), label: d.name, editable: true,
+                color: metaColor("departments", String(d.id)),
+              })),
             },
           ]}
+          {...metaHandlers("departments")}
           taken={departments.map((d) => d.name)}
-          onPick={(key) => { menu.close(); onPlace(Number(key)); }}
+          current={row.department_id != null ? String(row.department_id) : null}
+          onPick={(key) => { menu.close(); if (key !== String(row.department_id)) onPlace(Number(key)); }}
           onAdd={async (text) => {
             menu.close();
             try {
@@ -2940,12 +3038,14 @@ function ChoiceCell({
       placeholder={text.placeholder}
       groups={[{
         label: text.group,
-        options: catalog.map((p) => ({
+        options: orderByMeta(kind, catalog, (p) => p.name).map((p) => ({
           key: p.name, label: p.name, editable: !p.locked,
-          hint: p.count ? `${p.count}` : undefined,
+          hint: p.count ? `${p.count} чел.` : undefined,
+          color: metaColor(kind, p.name),
           style: look === "mark" ? markStyle(p.name) : undefined,
         })),
       }]}
+      {...metaHandlers(kind)}
       taken={catalog.map((p) => p.name)}
       current={value}
       onClear={value ? () => { menu.close(); onSave(null); } : undefined}
@@ -2960,6 +3060,7 @@ function ChoiceCell({
       onRename={async (key, name) => {
         try {
           onCatalog(await renameCatalogItem(kind, key, name));
+          await reloadMetaAfterRename();
           onReload();
         } catch (e) { fail(e, "Не удалось переименовать"); }
       }}
@@ -2981,18 +3082,14 @@ function ChoiceCell({
     );
   }
 
-  const hue = pillHue(value);
   return (
     <>
       <button
         ref={menu.plusRef}
         className={look === "mark" ? "hf-statuses-mark-pill hf-statuses-mark-btn" : "hf-statuses-pill"}
         onClick={menu.toggle}
-        style={look === "mark" ? markStyle(value) : {
-          background: `hsl(${hue} 70% 94%)`,
-          color: `hsl(${hue} 55% 32%)`,
-          borderColor: `hsl(${hue} 60% 84%)`,
-        }}
+        style={metaColor(kind, value) ? colorPill(metaColor(kind, value)!)
+          : look === "mark" ? markStyle(value) : valuePill(kind, value, value)}
         title={known ? value : `${value} — не из списка`}
       >
         {value}
@@ -3004,17 +3101,38 @@ function ChoiceCell({
 
 type PickerOption = {
   key: string; label: string; editable?: boolean; hint?: string;
-  /** Свой цвет пункта (отметки: зелёная галочка, красный крестик…). */
+  /** Цвет пункта (свой из «…» → «Цвет» или по умолчанию). */
+  color?: string;
+  /** Готовый стиль пилюли (отметки: зелёная галочка, красный крестик…). */
   style?: React.CSSProperties;
+  /** Можно переименовать и перекрасить, но не удалить (песочница). */
+  noDelete?: boolean;
 };
 
-/** Окно выбора «как в ClickUp» для отделов и должностей (клиент, 11.11.2026):
- *  поиск сверху, ниже группы вариантов; набрал то, чего нет, — «+ Добавить».
- *  У своих вариантов (не из списка владельца) «…» — переименовать и удалить.
- *  Открывается под ячейкой поверх доски (useCellMenu: закрытие по клику мимо,
- *  Escape и прокрутке доски). */
-function CatalogPicker({
-  menuRef, pos, placeholder, groups, taken, current, onPick, onAdd, onRename, onDelete, onClear,
+/** Палитра «Цвет» в «…» — как у выпадающих списков ClickUp. */
+const PICKER_COLORS = [
+  "#7c3aed", "#2563eb", "#0891b2", "#059669", "#65a30d", "#ca8a04",
+  "#ea580c", "#dc2626", "#db2777", "#9333ea", "#475569", "#a16207",
+];
+
+/** Стиль пилюли по цвету пункта: светлая заливка, цветной текст. */
+export const colorPill = (color: string): React.CSSProperties => ({
+  background: `color-mix(in srgb, ${color} 14%, white)`,
+  color,
+  borderColor: `color-mix(in srgb, ${color} 30%, white)`,
+});
+
+/** Одно окно-список «как в ClickUp» на ВСЕ выпадающие списки доски (клиент,
+ *  11.11.2026: «у дропдауна должны быть определённые функции, как в ClickUp, и
+ *  любой дропдаун будет таким»): поиск, «+ Добавить», «— убрать», у каждого
+ *  пункта ручка (перетащить — порядок у всех) и «…» — «Переименовать»,
+ *  «Цвет», «Удалить». С selected — несколько значений сразу (сорсеры): сверху
+ *  «Выбраны» (клик снимает), ниже остальные (клик ставит). Открывается под
+ *  ячейкой поверх доски (useCellMenu: закрытие по клику мимо, Escape и
+ *  прокрутке доски). */
+export function CatalogPicker({
+  menuRef, pos, placeholder, groups, taken, current, selected,
+  onPick, onAdd, onRename, onDelete, onClear, onRecolor, onReorder,
 }: {
   menuRef: React.RefObject<HTMLDivElement>;
   pos: MenuPos;
@@ -3023,35 +3141,200 @@ function CatalogPicker({
   /** Все существующие названия — «Добавить» не предлагаем, если такое уже есть. */
   taken: string[];
   current?: string | null;
+  /** Несколько значений: ключи выбранных. Клик по выбранному — снять. */
+  selected?: string[];
   onPick: (key: string) => void;
   onAdd: (text: string) => void;
   onRename: (key: string, text: string) => void;
   onDelete: (key: string, label: string) => void;
   onClear?: () => void;
+  onRecolor?: (key: string, color: string | null) => void;
+  /** Новый порядок ключей группы — после перетаскивания. */
+  onReorder?: (groupLabel: string, keys: string[]) => void | Promise<void>;
 }) {
   const [q, setQ] = useState("");
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Меню «…» висит поверх окна (fixed), а не внутри прокручиваемого списка:
+  // у нижних пунктов оно уходило под край списка и было не видно (11.11.2026).
+  const [menuAt, setMenuAt] = useState<React.CSSProperties>({});
+  const [colorFor, setColorFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ key: string; text: string } | null>(null);
+  const [drag, setDrag] = useState<{ group: string; key: string } | null>(null);
+  const [over, setOver] = useState<string | null>(null);
   const needle = q.trim().toLowerCase();
   const text = q.trim().replace(/\s+/g, " ");
   const canAdd = !!text && !taken.some((t) => t.trim().toLowerCase() === text.toLowerCase());
+  const multi = !!selected;
+  const chosen = new Set(selected ?? []);
+  const all = groups.flatMap((g) => g.options);
+  const match = (o: PickerOption) => !needle || o.label.toLowerCase().includes(needle);
   const shown = groups
-    .map((g) => ({ ...g, options: g.options.filter((o) => !needle || o.label.toLowerCase().includes(needle)) }))
+    .map((g) => ({ ...g, options: g.options.filter((o) => match(o) && !chosen.has(o.key)) }))
     .filter((g) => g.options.length);
+  const picked = all.filter((o) => chosen.has(o.key) && match(o));
+  // Окно с несколькими значениями после выбора не закрывается, поэтому поиск
+  // чистим сами: иначе набранное «Вера» оставалось в поле и прятало весь
+  // остальной список — казалось, что прежние сорсеры пропали (11.11.2026).
+  const pick = (key: string) => { setQ(""); onPick(key); };
+  const add = (name: string) => { setQ(""); onAdd(name); };
 
   const saveRename = () => {
     if (!renaming) return;
     const next = renaming.text.trim().replace(/\s+/g, " ");
-    const opt = groups.flatMap((g) => g.options).find((o) => o.key === renaming.key);
+    const opt = all.find((o) => o.key === renaming.key);
     setRenaming(null);
-    if (next && opt && next !== opt.label) onRename(renaming.key, next);
+    if (!next || !opt || next === opt.label) return;
+    // Порядок по умолчанию считается от названия (список владельца, алфавит),
+    // поэтому переименованный пункт уезжал в конец. Перед переименованием
+    // запоминаем порядок, который человек сейчас видит (11.11.2026).
+    const group = groups.find((g) => g.options.some((o) => o.key === renaming.key));
+    // Переименование — только ПОСЛЕ сохранения порядка: оба пишут в одни
+    // настройки, и параллельно второй затирал первого.
+    const key = renaming.key;
+    Promise.resolve(group && onReorder ? onReorder(group.label, group.options.map((o) => o.key)) : undefined)
+      .then(() => onRename(key, next));
   };
+
+  const dropOn = (group: string, target: string) => {
+    const from = drag;
+    setDrag(null);
+    setOver(null);
+    if (!from || from.group !== group || from.key === target || !onReorder) return;
+    const keys = (groups.find((g) => g.label === group)?.options ?? []).map((o) => o.key).filter((k) => k !== from.key);
+    keys.splice(keys.indexOf(target), 0, from.key);
+    onReorder(group, keys);
+  };
+
+  const pill = (o: PickerOption) => (
+    <span
+      className="hf-statuses-picker-pill"
+      style={o.color ? colorPill(o.color) : o.style ?? {
+        background: `hsl(${pillHue(o.label)} 70% 94%)`,
+        color: `hsl(${pillHue(o.label)} 55% 32%)`,
+      }}
+    >
+      {o.label}
+    </span>
+  );
+
+  const row = (o: PickerOption, group: string | null, isOn: boolean) => (
+    <div
+      key={`${group ?? "on"}-${o.key}`}
+      className={clsx(
+        "hf-statuses-picker-row",
+        drag?.key === o.key && "is-dragging",
+        over === o.key && drag && drag.key !== o.key && "is-over",
+      )}
+      draggable={!!group && !!onReorder && !needle && !renaming}
+      onDragStart={() => group && setDrag({ group, key: o.key })}
+      onDragEnd={() => { setDrag(null); setOver(null); }}
+      onDragOver={(e) => { if (drag && group && drag.group === group) { e.preventDefault(); setOver(o.key); } }}
+      onDrop={(e) => { e.preventDefault(); if (group) dropOn(group, o.key); }}
+    >
+      {group && onReorder && !needle && (
+        <span className="hf-statuses-picker-grip" title="Потяните, чтобы поменять порядок (у всех)">
+          <GripVertical size={13} />
+        </span>
+      )}
+      {renaming?.key === o.key ? (
+        <input
+          autoFocus
+          className="hf-statuses-picker-search"
+          value={renaming.text}
+          onChange={(e) => setRenaming({ key: o.key, text: e.target.value })}
+          onBlur={saveRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") saveRename();
+            if (e.key === "Escape") { e.stopPropagation(); setRenaming(null); }
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          className={clsx("hf-statuses-hr-option", (o.key === current || isOn) && "is-current")}
+          title={isOn ? "Нажмите, чтобы снять" : undefined}
+          onClick={() => pick(o.key)}
+        >
+          {pill(o)}
+          {o.hint && <span className="hf-statuses-picker-hint">{o.hint}</span>}
+          {(isOn || (o.key === current && !multi)) && <Check size={13} className="hf-statuses-picker-hint" />}
+        </button>
+      )}
+      {o.editable && renaming?.key !== o.key && (
+        <button
+          type="button"
+          className="hf-statuses-picker-more"
+          title="Переименовать, цвет, удалить"
+          onClick={(e) => {
+            setColorFor(null);
+            if (menuFor === o.key) { setMenuFor(null); return; }
+            const r = e.currentTarget.getBoundingClientRect();
+            const right = Math.max(8, window.innerWidth - r.right);
+            // Снизу места мало (с палитрой меню ~240px) — открываем вверх.
+            setMenuAt(r.bottom + 248 > window.innerHeight
+              ? { position: "fixed", bottom: window.innerHeight - r.top + 2, right, top: "auto" }
+              : { position: "fixed", top: r.bottom + 2, right });
+            setMenuFor(o.key);
+          }}
+        >
+          <MoreHorizontal size={14} />
+        </button>
+      )}
+      {menuFor === o.key && (
+        <div className="hf-statuses-picker-actions" style={menuAt}>
+          <button
+            type="button"
+            onClick={() => { setMenuFor(null); setRenaming({ key: o.key, text: o.label }); }}
+          >
+            <Pencil size={12} /> Переименовать
+          </button>
+          {onRecolor && (
+            <button type="button" onClick={() => setColorFor(colorFor === o.key ? null : o.key)}>
+              <span className="hf-statuses-picker-swatch" style={{ background: o.color || "#cbd5e1" }} /> Цвет
+            </button>
+          )}
+          {colorFor === o.key && onRecolor && (
+            <div className="hf-statuses-picker-palette">
+              {PICKER_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={clsx(o.color === c && "is-on")}
+                  style={{ background: c }}
+                  title={c}
+                  onClick={() => { setMenuFor(null); setColorFor(null); onRecolor(o.key, c); }}
+                />
+              ))}
+              <button
+                type="button"
+                className="is-reset"
+                title="Цвет по умолчанию"
+                onClick={() => { setMenuFor(null); setColorFor(null); onRecolor(o.key, null); }}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          )}
+          {!o.noDelete && (
+            <button
+              type="button"
+              className="is-danger"
+              onClick={() => { setMenuFor(null); onDelete(o.key, o.label); }}
+            >
+              <Trash2 size={12} /> Удалить
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div
       ref={menuRef}
       className="hf-statuses-hr-menu hf-catalog-picker"
-      style={menuBoxStyle(pos)}
+      style={menuBox(pos)}
+      onScroll={() => { if (menuFor) { setMenuFor(null); setColorFor(null); } }}
     >
       <input
         autoFocus
@@ -3061,10 +3344,13 @@ function CatalogPicker({
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => {
           if (e.key !== "Enter") return;
-          const first = shown[0]?.options[0];
-          if (first && first.label.toLowerCase() === needle) onPick(first.key);
-          else if (canAdd) onAdd(text);
-          else if (first) onPick(first.key);
+          // Точное имя ищем среди ВСЕХ, включая уже выбранные: раньше Enter на
+          // имени выбранного сорсера ставил ПЕРВОГО из остальных.
+          const exact = all.find((o) => o.label.trim().toLowerCase() === needle);
+          const first = shown[0]?.options[0] ?? picked[0];
+          if (exact) pick(exact.key);
+          else if (canAdd) add(text);
+          else if (first) pick(first.key);
         }}
       />
       {onClear && !needle && (
@@ -3072,79 +3358,27 @@ function CatalogPicker({
           — убрать
         </button>
       )}
+      {multi && picked.length > 0 && (
+        <div>
+          <div className="hf-statuses-hr-menu-hint">Выбраны</div>
+          {picked.map((o) => row(o, null, true))}
+        </div>
+      )}
       {shown.map((g) => (
         <div key={g.label}>
           <div className="hf-statuses-hr-menu-hint">{g.label}</div>
-          {g.options.map((o) => (
-            <div key={o.key} className="hf-statuses-picker-row">
-              {renaming?.key === o.key ? (
-                <input
-                  autoFocus
-                  className="hf-statuses-picker-search"
-                  value={renaming.text}
-                  onChange={(e) => setRenaming({ key: o.key, text: e.target.value })}
-                  onBlur={saveRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveRename();
-                    if (e.key === "Escape") { e.stopPropagation(); setRenaming(null); }
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className={clsx("hf-statuses-hr-option", o.key === current && "is-current")}
-                  onClick={() => onPick(o.key)}
-                >
-                  <span
-                    className="hf-statuses-picker-pill"
-                    style={o.style ?? {
-                      background: `hsl(${pillHue(o.label)} 70% 94%)`,
-                      color: `hsl(${pillHue(o.label)} 55% 32%)`,
-                    }}
-                  >
-                    {o.label}
-                  </span>
-                  {o.hint && <span className="hf-statuses-picker-hint">{o.hint}</span>}
-                </button>
-              )}
-              {o.editable && renaming?.key !== o.key && (
-                <button
-                  type="button"
-                  className="hf-statuses-picker-more"
-                  title="Переименовать или удалить"
-                  onClick={() => setMenuFor(menuFor === o.key ? null : o.key)}
-                >
-                  <MoreHorizontal size={14} />
-                </button>
-              )}
-              {menuFor === o.key && (
-                <div className="hf-statuses-picker-actions">
-                  <button
-                    type="button"
-                    onClick={() => { setMenuFor(null); setRenaming({ key: o.key, text: o.label }); }}
-                  >
-                    <Pencil size={12} /> Переименовать
-                  </button>
-                  <button
-                    type="button"
-                    className="is-danger"
-                    onClick={() => { setMenuFor(null); onDelete(o.key, o.label); }}
-                  >
-                    <Trash2 size={12} /> Удалить
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+          {g.options.map((o) => row(o, g.label, false))}
         </div>
       ))}
       {canAdd && (
-        <button type="button" className="hf-statuses-hr-option hf-statuses-picker-add" onClick={() => onAdd(text)}>
+        <button type="button" className="hf-statuses-hr-option hf-statuses-picker-add" onClick={() => add(text)}>
           <Plus size={13} /> Добавить «{text}»
         </button>
       )}
-      {!shown.length && !canAdd && (
-        <div className="hf-statuses-hr-menu-hint">Ничего не найдено</div>
+      {!shown.length && !picked.length && !canAdd && (
+        <div className="hf-statuses-hr-menu-hint">
+          {needle ? "Ничего не найдено" : "Список пуст — начните вводить, чтобы добавить"}
+        </div>
       )}
     </div>
   );
@@ -3168,19 +3402,30 @@ function CatalogPicker({
  */
 /** Выпадашка у «+» в ячейке: меню fixed, закрытие по клику мимо, Escape и
  *  прокрутке. Одна на HR и сорсеров — колонки разные, повадки кнопки одни. */
-/** Где стоит меню у ячейки: под кнопкой или над ней (см. useCellMenu). */
-type MenuPos = { top: number; left: number; maxHeight?: number; overflowY?: "auto" };
-
-/** Стиль окна-меню у ячейки: место от useCellMenu, левый край не за экраном. */
-const menuBoxStyle = (pos: MenuPos, width = 288): React.CSSProperties => ({
+/** Где открыть окно-список у ячейки. Снизу места мало (нижние строки доски)
+ *  — открываем ВВЕРХ, как ClickUp; раньше окно уходило за нижний край экрана
+ *  и нижние пункты было не достать (11.11.2026). Высота — по свободному месту. */
+type MenuPos = { top?: number; bottom?: number; left: number; maxHeight: number };
+const MENU_MAX_H = 360;
+export function menuPosFor(r: { top: number; bottom: number; left: number }, vh = window.innerHeight): MenuPos {
+  const left = r.left;
+  const below = vh - r.bottom - 12;
+  const above = r.top - 12;
+  if (below >= MENU_MAX_H || below >= above) {
+    return { top: r.bottom + 4, left, maxHeight: Math.max(160, Math.min(MENU_MAX_H, below)) };
+  }
+  return { bottom: vh - r.top + 4, left, maxHeight: Math.max(160, Math.min(MENU_MAX_H, above)) };
+}
+const menuBox = (pos: MenuPos): React.CSSProperties => ({
   top: pos.top,
-  left: Math.max(8, Math.min(pos.left, window.innerWidth - width)),
-  ...(pos.maxHeight !== undefined ? { maxHeight: pos.maxHeight, overflowY: "auto" as const } : {}),
+  bottom: pos.bottom,
+  left: Math.max(8, Math.min(pos.left, window.innerWidth - 288)),
+  maxHeight: pos.maxHeight,
 });
 
 function useCellMenu() {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<MenuPos | null>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -3203,27 +3448,15 @@ function useCellMenu() {
     };
   }, [open]);
 
-  // В нижних строках доски меню под кнопкой уходило за край окна — там оно
-  // открывается вверх (Мария, 05.11.2026).
-  const placement = useMenuPlacement(open, () => plusRef.current?.getBoundingClientRect(), menuRef);
-
   /** Открыть/закрыть, посчитав место под кнопкой. */
   const toggle = () => {
     if (open) { setOpen(false); return; }
     const r = plusRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 232)) });
+    if (r) setPos(menuPosFor(r));
     setOpen(true);
   };
 
-  const menuStyle = pos ? { top: pos.top, left: pos.left, ...placementStyle(placement) } : undefined;
-  // Окна «как в ClickUp» (HR, сорсер, отдел, должность, свои поля) брали
-  // pos.top — место «под кнопкой» — и расчёт «внизу не влезает → вверх» до
-  // них не доходил: у нижних строк меню уходило за экран (Эльвира,
-  // 11.11.2026: «окно менюшки внизу, я его не вижу и скролить не могу»).
-  // Отдаём уже посчитанное место.
-  const placed: MenuPos | null = pos ? { ...pos, ...placementStyle(placement) } : null;
-
-  return { open, pos: placed, menuStyle, plusRef, menuRef, toggle, close: () => setOpen(false) };
+  return { open, pos, plusRef, menuRef, toggle, close: () => setOpen(false) };
 }
 
 /** Сорсеры человека — как HR и «Assignees» в ClickUp (клиент, 11.11.2026):
@@ -3238,50 +3471,31 @@ function SourcerCell({
 }: {
   row: BoardRow;
   catalog: Tag[];
-  onCatalog: (list: Tag[]) => void;
+  onCatalog: (update: (list: Tag[]) => Tag[]) => void;
   onReload: () => void;
 }) {
   const sourcers = row.sourcers ?? [];
   const menu = useCellMenu();
-  const [q, setQ] = useState("");
-  const needle = q.trim().toLowerCase();
-  const text = q.trim().replace(/\s+/g, " ");
   const fail = (e: any, msg: string) => toast.error(e?.response?.data?.detail || msg);
+  const ids = sourcers.map((t) => String(t.id));
 
-  const remove = async (tagId: number, name: string) => {
-    try { await removeTagFromEntity(row.entity_id, tagId); onReload(); }
-    catch (e) { fail(e, `Не удалось снять «${name}»`); }
-  };
-  const add = async (tag: Tag) => {
-    try { await addTagToEntity(row.entity_id, tag.id); onReload(); }
-    catch (e) { fail(e, `Не удалось поставить «${tag.name}»`); }
-  };
-  const create = async () => {
+  const toggle = async (key: string) => {
+    const tag = catalog.find((t) => String(t.id) === key) || sourcers.find((t) => String(t.id) === key);
+    if (!tag) return;
     try {
-      const tag = await createTag({ name: text, color: SOURCER_COLORS[catalog.length % SOURCER_COLORS.length] });
-      onCatalog([...catalog, tag]);
-      setQ("");
-      await add(tag);
-    } catch (e) { fail(e, `Не удалось добавить «${text}»`); }
+      if (ids.includes(key)) await removeTagFromEntity(row.entity_id, tag.id);
+      else await addTagToEntity(row.entity_id, tag.id);
+      onReload();
+    } catch (e) { fail(e, `Не удалось изменить «${tag.name}»`); }
   };
+  // Справочник меняем от СВЕЖЕГО списка: два быстрых действия подряд по
+  // снимку из замыкания затирали друг друга — новый сорсер пропадал из окна.
+  const replaceTag = (tag: Tag) => onCatalog((list) => list.map((t) => (t.id === tag.id ? tag : t)));
 
-  const match = (name: string) => !needle || name.toLowerCase().includes(needle);
-  const mine = sourcers.filter((t) => match(t.name));
-  const others = catalog.filter((t) => !t.archived_at && !sourcers.some((s) => s.id === t.id) && match(t.name));
-  const canAdd = !!text && !catalog.some((t) => t.name.trim().toLowerCase() === text.toLowerCase());
-
-  const chip = (t: { name: string; color: string }) => (
-    <span
-      className="hf-statuses-pill hf-statuses-sourcer-pill"
-      style={{
-        backgroundColor: `color-mix(in srgb, ${t.color} 14%, transparent)`,
-        color: t.color,
-        borderColor: `color-mix(in srgb, ${t.color} 30%, transparent)`,
-      }}
-    >
-      {t.name}
-    </span>
-  );
+  // Список — справочник меток (без убранных в архив), стоящие у человека —
+  // сверху «Выбраны».
+  const options = orderByMeta("sourcers", catalog.filter((t) => !t.archived_at || ids.includes(String(t.id))), (t) => String(t.id))
+    .map((t) => ({ key: String(t.id), label: t.name, editable: true, color: t.color }));
 
   return (
     <div className="hf-statuses-sourcers">
@@ -3291,56 +3505,46 @@ function SourcerCell({
         className="hf-statuses-assignee-open"
         title={sourcers.length ? `Сорсер: ${sourcers.map((t) => t.name).join(", ")}` : "Поставить сорсера"}
         aria-label="Выбрать сорсера"
-        onClick={() => { setQ(""); menu.toggle(); }}
+        onClick={menu.toggle}
       >
-        {sourcers.map((t) => <span key={t.id}>{chip(t)}</span>)}
+        {sourcers.map((t) => (
+          <span key={t.id} className="hf-statuses-pill hf-statuses-sourcer-pill" style={colorPill(t.color)}>{t.name}</span>
+        ))}
         {!sourcers.length && <UserIcon size={16} className="hf-statuses-person-empty" />}
       </button>
       {menu.open && menu.pos && (
-        <div
-          ref={menu.menuRef}
-          className="hf-statuses-hr-menu hf-catalog-picker"
-          style={menuBoxStyle(menu.pos)}
-        >
-          <input
-            autoFocus
-            className="hf-statuses-picker-search"
-            placeholder="Найти или добавить сорсера…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              const exact = others.find((t) => t.name.toLowerCase() === needle);
-              if (exact) add(exact);
-              else if (canAdd) create();
-              else if (others[0]) add(others[0]);
-            }}
-          />
-          {mine.length > 0 && (
-            <>
-              <div className="hf-statuses-hr-menu-hint">Стоят</div>
-              {mine.map((t) => (
-                <button key={`on-${t.id}`} type="button" className="hf-statuses-hr-option is-current"
-                        title="Нажмите, чтобы снять" onClick={() => remove(t.id, t.name)}>
-                  {chip(t)}
-                  <X size={13} className="hf-statuses-picker-hint" />
-                </button>
-              ))}
-            </>
-          )}
-          <div className="hf-statuses-hr-menu-hint">Сорсеры</div>
-          {others.map((t) => (
-            <button key={t.id} type="button" className="hf-statuses-hr-option" onClick={() => add(t)}>
-              {chip(t)}
-            </button>
-          ))}
-          {canAdd && (
-            <button type="button" className="hf-statuses-hr-option hf-statuses-picker-add" onClick={create}>
-              <Plus size={13} /> Добавить «{text}»
-            </button>
-          )}
-          {!others.length && !canAdd && <div className="hf-statuses-hr-menu-hint">Никого не нашли</div>}
-        </div>
+        <CatalogPicker
+          menuRef={menu.menuRef}
+          pos={menu.pos}
+          placeholder="Найти или добавить сорсера…"
+          groups={[{ label: "Сорсеры", options }]}
+          taken={catalog.map((t) => t.name)}
+          selected={ids}
+          onPick={toggle}
+          onAdd={async (name) => {
+            try {
+              const tag = await createTag({ name, color: SOURCER_COLORS[catalog.length % SOURCER_COLORS.length] });
+              onCatalog((list) => [...list.filter((t) => t.id !== tag.id), tag]);
+              await addTagToEntity(row.entity_id, tag.id);
+              onReload();
+            } catch (e) { fail(e, `Не удалось добавить «${name}»`); }
+          }}
+          onRename={async (key, name) => {
+            try { replaceTag(await updateTag(Number(key), { name })); onReload(); }
+            catch (e) { fail(e, "Не удалось переименовать"); }
+          }}
+          onRecolor={async (key, color) => {
+            try { replaceTag(await updateTag(Number(key), { color: color || SOURCER_COLORS[0] })); onReload(); }
+            catch (e) { fail(e, "Не удалось поменять цвет"); }
+          }}
+          onReorder={metaHandlers("sourcers").onReorder}
+          onDelete={async (key, label) => {
+            // «Удалить» = убрать из списка выбора: у кого уже стоит — остаётся
+            // (настоящее удаление сорвало бы метку со всех карточек).
+            try { replaceTag(await archiveTag(Number(key))); toast.success(`«${label}» убран из списка`); }
+            catch (e) { fail(e, `Не удалось удалить «${label}»`); }
+          }}
+        />
       )}
     </div>
   );
@@ -3408,7 +3612,7 @@ function AssigneeCell({
         <div
           ref={menuRef}
           className="hf-statuses-hr-menu hf-catalog-picker"
-          style={menuBoxStyle(pos)}
+          style={menuBox(pos)}
         >
           <input
             autoFocus

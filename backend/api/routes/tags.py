@@ -171,6 +171,10 @@ class TagUpdate(BaseModel):
     # Только 'sourcer': «обычных» меток больше нет (21.09.2026).
     kind: str | None = None
     color: str | None = None
+    # Переименовать сорсера (клиент, 11.11.2026: «нельзя отредактировать пункт
+    # из дропдауна»). Карточки связаны с меткой по id, так что новое имя сразу
+    # видно у всех, у кого она стоит.
+    name: str | None = None
 
     @field_validator("kind")
     @classmethod
@@ -187,8 +191,8 @@ async def update_tag(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Поменять цвет метки (тип — только 'sourcer'). Имя не меняем — по нему
-    метку узнают на карточках."""
+    """Поменять цвет или имя метки (тип — только 'sourcer'). Имя — без повтора
+    в организации."""
     org_id = await _get_org_id(db, current_user)
     tag = (await db.execute(
         select(EntityTag).where(EntityTag.id == tag_id, EntityTag.org_id == org_id)
@@ -199,6 +203,17 @@ async def update_tag(
         tag.kind = data.kind
     if data.color is not None:
         tag.color = data.color
+    if data.name is not None:
+        name = " ".join(data.name.split())[:100]
+        if not name:
+            raise HTTPException(400, "Имя пустое")
+        # Сравниваем в Python: lower() в SQLite не знает кириллицы.
+        others = (await db.execute(
+            select(EntityTag.name).where(EntityTag.org_id == org_id, EntityTag.id != tag.id)
+        )).scalars().all()
+        if any((o or "").strip().lower() == name.lower() for o in others):
+            raise HTTPException(409, f"«{name}» уже есть")
+        tag.name = name
     await db.commit()
     await db.refresh(tag)
     return tag

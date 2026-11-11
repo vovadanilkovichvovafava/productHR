@@ -46,6 +46,13 @@ export const deleteTag = async (tagId: number): Promise<void> => {
  * «Удалить за ненадобностью»: метка пропадает из списка выбора, но у кандидатов,
  * которым уже проставлена, остаётся — снять её оттуда можно крестиком на карточке.
  */
+/** Переименовать или перекрасить метку-сорсера. Карточки связаны по id —
+ *  новое имя сразу видно у всех, у кого она стоит. */
+export const updateTag = async (tagId: number, patch: { name?: string; color?: string }): Promise<Tag> => {
+  const { data } = await api.patch<Tag>(`/tags/${tagId}`, patch);
+  return data;
+};
+
 export const archiveTag = async (tagId: number): Promise<Tag> => {
   const { data } = await api.post<Tag>(`/tags/${tagId}/archive`);
   return data;

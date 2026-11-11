@@ -26,7 +26,7 @@ describe("departmentFilterNames", () => {
     const { departmentFilterNames } = await import("../StatusesPage");
     expect(departmentFilterNames([
       dept(1, "SANDBOX", { kind: "sandbox" }),
-      dept(2, "Product Studio (Марк)", { canonical: true }),
+      dept(2, "Product Studio (Марк)", { canonical: true, offered: true }),
       dept(3, "Мобильная разработка"),
       dept(4, "Фарм отдел"),
     ])).toEqual(["SANDBOX", "Product Studio (Марк)"]);

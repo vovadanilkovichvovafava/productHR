@@ -97,7 +97,8 @@ async def test_own_department_is_offered_editable_and_deletable_when_empty(
     client, db_session, admin_user, organization, org_owner
 ):
     """Свой отдел из окна выбора (клиент, 11.11.2026): предлагается, правится,
-    удаляется только пустым. Отдел из списка не переименовывается и не удаляется."""
+    удаляется только пустым. С единой логикой списков то же и у отделов из
+    основного списка; песочница не удаляется."""
     h = _h(admin_user)
     own = (await client.post("/api/staff-board/departments", json={"name": "Фин отдел"}, headers=h)).json()
     canon = (await client.post("/api/staff-board/departments", json={"name": "SEO team"}, headers=h)).json()
@@ -117,7 +118,7 @@ async def test_own_department_is_offered_editable_and_deletable_when_empty(
     r = await client.patch(f"/api/staff-board/departments/{own['id']}", json={"name": "Финансы"}, headers=h)
     assert r.status_code == 200 and r.json()["name"] == "Финансы" and r.json()["offered"] is True
     r = await client.patch(f"/api/staff-board/departments/{canon['id']}", json={"name": "Сеошники"}, headers=h)
-    assert r.status_code == 409
+    assert r.status_code == 200 and r.json()["offered"] is True   # по id, не по названию
 
     e = Entity(org_id=organization.id, name="Финансист", type=EntityType.candidate,
                status=EntityStatus.transferred, created_by=admin_user.id, extra_data={})
@@ -126,7 +127,9 @@ async def test_own_department_is_offered_editable_and_deletable_when_empty(
     db_session.add(BoardPlacement(org_id=organization.id, entity_id=e.id, department_id=own["id"], extra={}))
     await db_session.commit()
     assert (await client.delete(f"/api/staff-board/departments/{own['id']}", headers=h)).status_code == 409
-    assert (await client.delete(f"/api/staff-board/departments/{canon['id']}", headers=h)).status_code == 409
+    sandbox = (await client.post("/api/staff-board/departments", json={"name": "SANDBOX", "kind": "sandbox"}, headers=h)).json()
+    assert (await client.delete(f"/api/staff-board/departments/{sandbox['id']}", headers=h)).status_code == 409
+    assert (await client.delete(f"/api/staff-board/departments/{canon['id']}", headers=h)).status_code == 200
 
     empty = (await client.post("/api/staff-board/departments", json={"name": "Support отдел"}, headers=h)).json()
     assert (await client.delete(f"/api/staff-board/departments/{empty['id']}", headers=h)).status_code == 200
@@ -139,7 +142,8 @@ async def test_position_catalog_add_rename_delete(client, db_session, admin_user
     """Один общий список должностей: из списка владельца + свои (11.11.2026)."""
     h = _h(admin_user)
     cat = (await client.get("/api/staff-board/catalog/positions", headers=h)).json()
-    assert cat[0] == {"name": "SEO Buyer Team Lead", "locked": True, "count": 0}
+    # основа засеяна в список организации и правится как своё (11.11.2026)
+    assert cat[0] == {"name": "SEO Buyer Team Lead", "locked": False, "count": 0}
 
     cat = (await client.post("/api/staff-board/catalog/positions", json={"name": "  Финансист "}, headers=h)).json()
     assert {"name": "Финансист", "locked": False, "count": 0} in cat
@@ -162,7 +166,7 @@ async def test_position_catalog_add_rename_delete(client, db_session, admin_user
     assert e.position == "Финансовый аналитик"   # переименование доходит до людей
     r = await client.patch("/api/staff-board/catalog/positions",
                            json={"name": "SEO Buyer", "new_name": "Сеошник"}, headers=h)
-    assert r.status_code == 409
+    assert r.status_code == 200 and "Сеошник" in [p["name"] for p in r.json()]
 
     await client.post("/api/staff-board/catalog/positions", json={"name": "Курьер"}, headers=h)
     r = await client.request("DELETE", "/api/staff-board/catalog/positions", params={"name": "Курьер"}, headers=h)
@@ -201,7 +205,7 @@ async def test_manager_and_marks_catalogs(client, db_session, admin_user, organi
 
     marks = (await client.get("/api/staff-board/catalog/marks", headers=h)).json()
     assert marks[0] == {"name": "✓", "locked": True, "count": 0}
-    assert {"name": "Сентябрь", "locked": True, "count": 1} in marks
+    assert {"name": "Сентябрь", "locked": False, "count": 1} in marks
     marks = (await client.post("/api/staff-board/catalog/marks", json={"name": "Премия"}, headers=h)).json()
     r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"m3_done": "Премия"}, headers=h)
     assert r.status_code == 200, r.text
@@ -209,3 +213,59 @@ async def test_manager_and_marks_catalogs(client, db_session, admin_user, organi
     r = await client.request("DELETE", "/api/staff-board/catalog/marks", params={"name": "Премия"}, headers=h)
     assert r.status_code == 409
     assert (await client.get("/api/staff-board/catalog/nope", headers=h)).status_code == 404
+
+
+
+@pytest.mark.asyncio
+async def test_dropdown_meta_colors_order_and_rename(client, db_session, admin_user, organization, org_owner):
+    """Цвет и порядок пунктов — одно хранилище на все списки; переименование
+    переносит цвет."""
+    h = _h(admin_user)
+    r = await client.put("/api/staff-board/dropdown-meta/positions",
+                         json={"order": ["SEO Buyer", "UA Manager"], "colors": {"SEO Buyer": "#22c55e"}}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["positions"] == {"order": ["SEO Buyer", "UA Manager"], "colors": {"SEO Buyer": "#22c55e"}}
+    assert (await client.put("/api/staff-board/dropdown-meta/positions", json={"colors": {"x": "red"}}, headers=h)).status_code == 400
+    assert (await client.put("/api/staff-board/dropdown-meta/nope", json={"order": []}, headers=h)).status_code == 404
+    await client.patch("/api/staff-board/catalog/positions", json={"name": "SEO Buyer", "new_name": "SEO Баер"}, headers=h)
+    meta = (await client.get("/api/staff-board/dropdown-meta", headers=h)).json()
+    assert meta["positions"]["colors"] == {"SEO Баер": "#22c55e"}
+    assert meta["positions"]["order"][0] == "SEO Баер"
+    r = await client.put("/api/staff-board/dropdown-meta/positions", json={"colors": {"SEO Баер": None}}, headers=h)
+    assert r.json()["positions"]["colors"] == {}
+
+
+@pytest.mark.asyncio
+async def test_deleted_item_forgets_color_and_place(client, db_session, admin_user, organization, org_owner):
+    """Удалили пункт — его цвет и место тоже уходят: добавленный заново с тем
+    же названием начинает с чистого листа."""
+    h = _h(admin_user)
+    assert (await client.post("/api/staff-board/catalog/managers", json={"name": "Олег"}, headers=h)).status_code in (200, 201)
+    await client.put("/api/staff-board/dropdown-meta/managers",
+                     json={"order": ["Олег"], "colors": {"Олег": "#22c55e"}}, headers=h)
+    r = await client.delete("/api/staff-board/catalog/managers", params={"name": "Олег"}, headers=h)
+    assert r.status_code == 200
+    meta = (await client.get("/api/staff-board/dropdown-meta", headers=h)).json()
+    assert meta["managers"] == {"order": [], "colors": {}}
+
+    fields = (await client.post("/api/staff-board/custom-fields", json={"name": "Грейд", "type": "select"}, headers=h)).json()
+    fid = next(f["id"] for f in fields if f["name"] == "Грейд")
+    await client.patch(f"/api/staff-board/custom-fields/{fid}", json={"options": ["Junior", "Senior"]}, headers=h)
+    await client.put(f"/api/staff-board/dropdown-meta/cf:{fid}",
+                     json={"order": ["Senior", "Junior"], "colors": {"Junior": "#2563eb"}}, headers=h)
+    await client.patch(f"/api/staff-board/custom-fields/{fid}", json={"options": ["Senior"]}, headers=h)
+    meta = (await client.get("/api/staff-board/dropdown-meta", headers=h)).json()
+    assert meta[f"cf:{fid}"] == {"order": ["Senior"], "colors": {}}
+    await client.delete(f"/api/staff-board/custom-fields/{fid}", headers=h)
+    meta = (await client.get("/api/staff-board/dropdown-meta", headers=h)).json()
+    assert f"cf:{fid}" not in meta
+
+
+@pytest.mark.asyncio
+async def test_sourcer_tag_can_be_renamed(client, db_session, admin_user, organization, org_owner):
+    h = _h(admin_user)
+    a = (await client.post("/api/tags", json={"name": "Лиза", "color": "#ef4444"}, headers=h)).json()
+    await client.post("/api/tags", json={"name": "Катя", "color": "#f59e0b"}, headers=h)
+    r = await client.patch(f"/api/tags/{a['id']}", json={"name": "Елизавета"}, headers=h)
+    assert r.status_code == 200 and r.json()["name"] == "Елизавета"
+    assert (await client.patch(f"/api/tags/{a['id']}", json={"name": "катя"}, headers=h)).status_code == 409

@@ -745,7 +745,7 @@ def _dept_out(
         visibility=(d.visibility or "all"),
         visible_to=[v for v in ([_as_int(x) for x in (d.visible_to or [])]) if v is not None],
         is_default=(default_id is not None and d.id == default_id),
-        offered=bool(canon) or d.id in (own_ids or []),
+        offered=(d.kind or "team") != "sandbox" and d.id in (own_ids or []),
         **canon,
     )
 
@@ -1282,6 +1282,8 @@ async def list_board_departments(
     # Скрытые отдаём тоже: доска показывает их по кнопке «Показать скрытые», а
     # строка человека из скрытого отдела должна называть отдел, а не пустоту.
     default_id = _default_sandbox_id(org)
+    if await _ensure_dropdowns_seeded(db, org):
+        await db.commit()
     own = own_department_ids(org)
     return [_dept_out(d, default_id, own) for d in rows]
 
@@ -1346,7 +1348,7 @@ async def create_board_department(
             same.hidden_at = None
         # Старый отдел вне списка, который снова добавили через окно выбора, —
         # теперь «свой»: его будут предлагать.
-        if (same.kind or "team") != "sandbox" and canon_index(same.name) is None:
+        if (same.kind or "team") != "sandbox":
             set_own_department_ids(org, [*own_department_ids(org), same.id])
         await db.commit()
         return _dept_out(same, _default_sandbox_id(org), own_department_ids(org))
@@ -1363,7 +1365,7 @@ async def create_board_department(
     await db.flush()
     if data.is_default and kind == "sandbox":
         _set_default_sandbox(org, dept.id)
-    if kind != "sandbox" and canon_index(name) is None:
+    if kind != "sandbox":
         set_own_department_ids(org, [*own_department_ids(org), dept.id])
     await db.commit()
     await db.refresh(dept)
@@ -1397,11 +1399,9 @@ async def update_board_department(
         name = " ".join(data.name.split())
         if not name:
             raise HTTPException(400, "Название отдела пустое")
-        # Отдел из списка владельца узнаётся по названию — переименуешь, и он
-        # выпадет из списка вместе с должностями.
-        if (dept.kind or "team") != "sandbox" and canon_index(dept.name) is not None \
-                and canon_index(name) != canon_index(dept.name):
-            raise HTTPException(409, "Отдел из основного списка не переименовывается")
+        # С 11.11.2026 переименовать можно любой отдел (клиент: «у дропдауна
+        # должны быть одни функции для всех пунктов»): список «предлагаемых»
+        # хранится по id, а не по названию.
         dept.name = name
         logger.info(f"BOARD_DEPT rename: id={dept_id} → «{name}» by user {current_user.id}")
 
@@ -1472,14 +1472,15 @@ async def delete_board_department(
     )).scalar_one_or_none()
     if not dept:
         raise HTTPException(404, "Отдел не найден")
-    if (dept.kind or "team") == "sandbox" or canon_index(dept.name) is not None:
-        raise HTTPException(409, "Этот отдел из основного списка — его не удаляют")
+    if (dept.kind or "team") == "sandbox":
+        raise HTTPException(409, "Песочницу не удаляют — её можно скрыть")
     people = (await db.execute(
         select(func.count(BoardPlacement.id)).where(BoardPlacement.department_id == dept.id)
     )).scalar() or 0
     if people:
         raise HTTPException(409, f"В отделе «{dept.name}» сейчас {people} чел. — сначала переведите их")
     set_own_department_ids(org, [i for i in own_department_ids(org) if i != dept.id])
+    _meta_drop(org, "departments", [str(dept.id)])
     await db.delete(dept)
     await db.commit()
     logger.info(f"BOARD_DEPT delete: «{dept.name}» (id={dept_id}) by user {current_user.id}")
@@ -1528,11 +1529,40 @@ def _check_kind(kind: str) -> str:
 
 
 def _locked_items(kind: str) -> List[str]:
-    if kind == "positions":
-        return canon_positions()
+    """Не правится только смысл отметок: «✓» (пройдено) и «✗». Остальное —
+    основа, засеянная в список организации, её можно переименовать и удалить
+    (клиент, 11.11.2026: одна логика у всех выпадающих списков)."""
     if kind == "marks":
-        return list(MARK_OPTIONS)
+        return ["✓", "✗"]
     return []
+
+
+_SEEDED_KEY = "board_dropdowns_seeded"
+
+
+async def _ensure_dropdowns_seeded(db: AsyncSession, org: Organization) -> bool:
+    """Разово: основа выпадающих списков становится обычными пунктами
+    организации — должности владельца, месяцы и «Бонус» у отметок, отделы из
+    списка (по id). До 11.11.2026 они были «запертыми» и не правились.
+    True — что-то засеяли (вызывающий делает commit)."""
+    settings = org.settings if isinstance(org.settings, dict) else {}
+    if settings.get(_SEEDED_KEY):
+        return False
+    pos = canon_positions()
+    set_own_items(org, "positions", [*pos, *[p for p in own_items(org, "positions") if p not in pos]])
+    base_marks = [m for m in MARK_OPTIONS if m not in ("✓", "✗")]
+    set_own_items(org, "marks", [*base_marks, *[m for m in own_items(org, "marks") if m not in base_marks]])
+    teams = (await db.execute(
+        select(BoardDepartment).where(BoardDepartment.org_id == org.id)
+    )).scalars().all()
+    canon_ids = [d.id for d in teams if (d.kind or "team") != "sandbox" and canon_index(d.name) is not None]
+    set_own_department_ids(org, [*canon_ids, *own_department_ids(org)])
+    settings = dict(org.settings) if isinstance(org.settings, dict) else {}
+    settings[_SEEDED_KEY] = True
+    org.settings = settings
+    flag_modified(org, "settings")
+    logger.info(f"BOARD_DROPDOWNS seeded: org {org.id}, отделов {len(canon_ids)}")
+    return True
 
 
 async def _org_entities_extra(db: AsyncSession, org_id: int) -> List[Entity]:
@@ -1589,6 +1619,8 @@ async def _rename_usage(db: AsyncSession, org_id: int, kind: str, old: str, new:
 
 
 async def _catalog(db: AsyncSession, org: Organization, kind: str) -> List[CatalogItem]:
+    if await _ensure_dropdowns_seeded(db, org):
+        await db.commit()
     usage = await _item_usage(db, org.id, kind)
     out: List[CatalogItem] = []
     seen: set = set()
@@ -1663,6 +1695,7 @@ async def rename_catalog_item(
     own = own_items(org, kind)
     set_own_items(org, kind, [new if p == old else p for p in own] if old in own else [*own, new])
     changed = await _rename_usage(db, org.id, kind, old, new)
+    _meta_rename(org, kind, old, new)
     await db.commit()
     logger.info(f"BOARD_CATALOG rename: {kind} «{old}» → «{new}», у {changed} чел. by user {current_user.id}")
     return await _catalog(db, org, kind)
@@ -1686,6 +1719,7 @@ async def delete_catalog_item(
     if item.count:
         raise HTTPException(409, f"«{name}» стоит у {item.count} чел. — сначала поменяйте у них")
     set_own_items(org, kind, [p for p in own_items(org, kind) if p != name])
+    _meta_drop(org, kind, [name])
     await db.commit()
     logger.info(f"BOARD_CATALOG delete: {kind} «{name}» by user {current_user.id}")
     return await _catalog(db, org, kind)
@@ -2041,6 +2075,112 @@ async def save_board_view(
     return view
 
 
+# --- Цвета и порядок пунктов выпадающих списков (11.11.2026) ---------------
+# Клиент: «у дропдауна должны быть определённые функции (как в ClickUp), и
+# любой дропдаун будет таким»: у каждого пункта — переименовать, цвет,
+# удалить, перетащить. Цвет и порядок — одно хранилище на все списки:
+# settings.board_dropdown_meta[список] = {order: [ключи], colors: {ключ: #цвет}}.
+# Ключ пункта: у отделов и сорсеров — id (имя может меняться), у должностей,
+# «Рук-ля», отметок и своих списков (cf:<id>) — само значение (при
+# переименовании ключ переносится).
+_META_KEY = "board_dropdown_meta"
+_META_KINDS = ("departments", "sourcers", "positions", "managers", "marks")
+_HEX = __import__("re").compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class DropdownMetaUpdate(BaseModel):
+    order: Optional[List[str]] = None
+    # null у ключа — убрать свой цвет (вернуть цвет по умолчанию)
+    colors: Optional[Dict[str, Optional[str]]] = None
+
+
+def _meta(org: Organization) -> Dict[str, Dict[str, Any]]:
+    raw = (org.settings if isinstance(org.settings, dict) else {}).get(_META_KEY) or {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for kind, m in (raw.items() if isinstance(raw, dict) else []):
+        if not isinstance(m, dict):
+            continue
+        out[kind] = {
+            "order": [str(k) for k in (m.get("order") or [])],
+            "colors": {str(k): v for k, v in (m.get("colors") or {}).items() if isinstance(v, str) and _HEX.match(v)},
+        }
+    return out
+
+
+def _save_meta(org: Organization, meta: Dict[str, Dict[str, Any]]) -> None:
+    settings = dict(org.settings) if isinstance(org.settings, dict) else {}
+    settings[_META_KEY] = meta
+    org.settings = settings
+    flag_modified(org, "settings")
+
+
+def _meta_rename(org: Organization, kind: str, old: str, new: str) -> None:
+    meta = _meta(org)
+    m = meta.get(kind)
+    if not m:
+        return
+    m["order"] = [new if k == old else k for k in m["order"]]
+    if old in m["colors"]:
+        m["colors"][new] = m["colors"].pop(old)
+    _save_meta(org, meta)
+
+
+def _meta_drop(org: Organization, kind: str, keys: List[str]) -> None:
+    """Удалённый пункт — и из цветов, и из порядка: иначе пункт с тем же
+    названием, добавленный заново, «вспоминал» старый цвет и место."""
+    meta = _meta(org)
+    m = meta.get(kind)
+    if not m:
+        return
+    m["order"] = [k for k in m["order"] if k not in keys]
+    for k in keys:
+        m["colors"].pop(k, None)
+    _save_meta(org, meta)
+
+
+@router.get("/dropdown-meta")
+async def get_dropdown_meta(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    return _meta(org)
+
+
+@router.put("/dropdown-meta/{kind}")
+async def save_dropdown_meta(
+    kind: str,
+    data: DropdownMetaUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    if kind not in _META_KINDS and not (kind.startswith("cf:") and kind[3:] in {f["id"] for f in _custom_fields(org)}):
+        raise HTTPException(404, "Нет такого списка")
+    meta = _meta(org)
+    m = meta.setdefault(kind, {"order": [], "colors": {}})
+    if data.order is not None:
+        m["order"] = list(dict.fromkeys(str(k) for k in data.order))[:500]
+    if data.colors:
+        for k, v in data.colors.items():
+            if v is None:
+                m["colors"].pop(str(k), None)
+            elif _HEX.match(v):
+                m["colors"][str(k)] = v
+            else:
+                raise HTTPException(400, "Цвет — в виде #RRGGBB")
+    _save_meta(org, meta)
+    await db.commit()
+    logger.info(f"BOARD_DROPDOWN meta: {kind} by user {current_user.id}")
+    return _meta(org)
+
+
 # --- Свои поля (11.11.2026) ------------------------------------------------
 # Клиент: «добавьте возможность создавать сущности самим» (вкладка «Создать
 # новое» в панели полей ClickUp). Поле — у организации (settings): название,
@@ -2200,6 +2340,7 @@ async def update_custom_field(
         if new != old and new in field["options"]:
             raise HTTPException(409, f"Вариант «{new}» уже есть")
         field["options"] = [new if o == old else o for o in field["options"]]
+        _meta_rename(org, f"cf:{field_id}", old, new)
         people = (await db.execute(
             select(Entity).where(Entity.org_id == org.id, Entity.extra_data.is_not(None))
         )).scalars().all()
@@ -2215,6 +2356,7 @@ async def update_custom_field(
             busy = [o for o in removed if usage.get(o)]
             if busy:
                 raise HTTPException(409, f"«{busy[0]}» стоит у {usage[busy[0]]} чел. — сначала поменяйте у них")
+            _meta_drop(org, f"cf:{field_id}", removed)
         field["options"] = opts
     _save_custom_fields(org, fields)
     await db.commit()
@@ -2239,6 +2381,9 @@ async def delete_custom_field(
     used = sum((await _custom_usage(db, org.id, field_id)).values())
     if used and not await _is_board_admin(db, current_user, org.id):
         raise HTTPException(403, f"Поле «{field['name']}» заполнено у {used} чел. — удалить его может только админ")
+    meta = _meta(org)
+    if meta.pop(f"cf:{field_id}", None) is not None:
+        _save_meta(org, meta)
     _save_custom_fields(org, [f for f in fields if f["id"] != field_id])
     await db.commit()
     logger.info(f"BOARD_FIELD delete: «{field['name']}» ({field_id}), заполнено у {used} by user {current_user.id}")
@@ -2766,7 +2911,8 @@ async def update_row(
         if value:
             mark = _normalize_mark(value)
             # Кроме основных — свои отметки из окна выбора (11.11.2026).
-            if mark not in MARK_OPTIONS and mark not in own_items(org, "marks"):
+            if mark not in ("✓", "✗") and mark not in own_items(org, "marks") \
+                    and mark not in MARK_OPTIONS:
                 raise HTTPException(400, f"Недопустимая отметка «{value}»")
             store[key] = mark
         else:

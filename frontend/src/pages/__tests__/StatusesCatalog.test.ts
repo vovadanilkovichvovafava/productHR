@@ -21,3 +21,14 @@ describe("offeredTeams", () => {
     expect(list.map((d) => d.name)).toEqual(["SEO team", "Push team", "Фин отдел", "Support отдел"]);
   });
 });
+
+describe("порядок пунктов из общего хранилища (11.11.2026)", () => {
+  it("перетащенные — в своём порядке, новые — в конце в исходном", async () => {
+    const { orderByMeta, setDropdownMetaRegistry, metaColor } = await import("../StatusesPage");
+    setDropdownMetaRegistry({ positions: { order: ["C", "A"], colors: { A: "#dc2626" } } });
+    expect(orderByMeta("positions", ["A", "B", "C", "D"], (x) => x)).toEqual(["C", "A", "B", "D"]);
+    expect(metaColor("positions", "A")).toBe("#dc2626");
+    expect(orderByMeta("nope", ["B", "A"], (x) => x)).toEqual(["B", "A"]);
+    setDropdownMetaRegistry({});
+  });
+});

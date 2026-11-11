@@ -377,3 +377,21 @@ export async function deleteCustomField(id: string): Promise<CustomField[]> {
   const { data } = await api.delete(`/staff-board/custom-fields/${id}`);
   return data || [];
 }
+
+/** Цвета и порядок пунктов всех выпадающих списков доски (11.11.2026): список
+ *  → {order: ключи, colors: ключ → #цвет}. Ключ — id у отделов и сорсеров,
+ *  значение — у должностей, «Рук-ля», отметок и своих списков («cf:<id>»). */
+export type DropdownMeta = Record<string, { order: string[]; colors: Record<string, string> }>;
+
+export async function getDropdownMeta(): Promise<DropdownMeta> {
+  const { data } = await api.get('/staff-board/dropdown-meta');
+  return data || {};
+}
+
+export async function saveDropdownMeta(
+  kind: string,
+  patch: { order?: string[]; colors?: Record<string, string | null> },
+): Promise<DropdownMeta> {
+  const { data } = await api.put(`/staff-board/dropdown-meta/${encodeURIComponent(kind)}`, patch);
+  return data || {};
+}
