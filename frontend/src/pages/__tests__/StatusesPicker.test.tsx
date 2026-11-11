@@ -38,10 +38,39 @@ describe("CatalogPicker", () => {
     expect(onPick).toHaveBeenCalledWith("1");
   });
 
-  it("у выбранного видно «убрать» — клик снимает его с человека", () => {
+  it("у выбранного справа «×» — клик снимает его с человека", () => {
     const { onPick } = setup(["1"]);
-    fireEvent.click(screen.getByText("убрать"));
+    fireEvent.click(screen.getByLabelText("Снять"));
     expect(onPick).toHaveBeenCalledWith("1");
+  });
+
+  it("закрытый список (HR): без «Добавить» и без «…», свой заголовок выбранных", () => {
+    const onPick = vi.fn();
+    render(
+      <CatalogPicker
+        menuRef={createRef<HTMLDivElement>()}
+        pos={{ top: 0, left: 0, maxHeight: 360 }}
+        placeholder="Поиск…"
+        groups={[{ label: "Люди", options: [
+          { key: "1", label: "Эльвира", avatar: <span>Э</span> },
+          { key: "2", label: "Мария", avatar: <span>М</span> },
+        ] }]}
+        taken={[]}
+        selected={["1"]}
+        selectedLabel="Назначены"
+        onPick={onPick}
+      />,
+    );
+    expect(screen.getByText("Назначены")).toBeTruthy();
+    expect(screen.queryByText(/Добавить/)).toBeNull();
+    expect(screen.queryByLabelText(/Настроить/)).toBeNull();
+    const input = screen.getByPlaceholderText("Поиск…");
+    fireEvent.change(input, { target: { value: "Новый человек" } });
+    expect(screen.queryByText(/Добавить/)).toBeNull();
+    expect(screen.getByText("Ничего не найдено")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "мар" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onPick).toHaveBeenCalledWith("2");
   });
 
   it("после «Добавить» поиск пустеет и остальные пункты снова видны", () => {
