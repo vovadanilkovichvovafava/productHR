@@ -23,6 +23,7 @@ import {
 import { getOrgMembers } from "@/services/api/accessHub";
 import { addTagToEntity, getTags, removeTagFromEntity, type Tag } from "@/services/api/tags";
 import { useUrlTab } from "@/hooks/useUrlTab";
+import { useAuthStore } from "@/stores/authStore";
 import { STATUS_LABELS } from "@/types";
 
 /**
@@ -416,6 +417,13 @@ export default function StatusesPage() {
   const [rows, setRows] = useState<BoardRow[]>([]);
   const [departments, setDepartments] = useState<BoardDepartment[]>([]);
   // Справочники окон выбора: должности, «Рук-ль», отметки (11.11.2026).
+  // Выгрузка — только владельцу организации (Анастасия) и суперадмину.
+  // Анастасия, 11.11.2026: «нужно убрать кнопку „выгрузить“ у всех кроме
+  // меня… это же слив базы. Если кому-то нужно будет — ко мне будут
+  // обращаться». Привязано к роли owner, а не к имени (как раньше «Сумма»).
+  const canExport = useAuthStore(
+    (st) => st.user?.role === "superadmin" || st.user?.org_role === "owner",
+  );
   const [catalogs, setCatalogs] = useState<Record<CatalogKind, CatalogItem[]>>(
     { positions: [], managers: [], marks: [] },
   );
@@ -935,7 +943,7 @@ export default function StatusesPage() {
               открывала окно периодов, где главная чёрная кнопка была
               неактивна, пока не отмечен месяц, — Мария жала её и думала, что
               выгрузка сломана. Книга по месяцам и вехам — за стрелкой рядом. */}
-          <div className="hf-statuses-export-split">
+          {canExport && <div className="hf-statuses-export-split">
             <button
               className="hf-statuses-export-btn hf-statuses-export-main"
               onClick={() => exportToExcel()}
@@ -952,7 +960,7 @@ export default function StatusesPage() {
             >
               <ChevronDown size={14} />
             </button>
-          </div>
+          </div>}
 
           <div className="hf-statuses-filters-picker">
             <button
@@ -1149,7 +1157,7 @@ export default function StatusesPage() {
             />
           )}
 
-          {showExport && (
+          {showExport && canExport && (
             <ExportModal
               months={months}
               hideable={HIDEABLE_COLUMNS}
