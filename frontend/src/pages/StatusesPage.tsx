@@ -192,6 +192,14 @@ const headerLabel = (c: { key: string; label: string }) =>
 /** Имя колонки для фразы в панели и для чипов. */
 const filterLabel = (key: FilterKey) => fieldLabel(key);
 
+/** Дата в ячейке таблицы — коротко, как в ClickUp: «9/11/26» (день/месяц/год).
+ *  В фильтрах, чипах и выгрузке остаётся полная «09.11.2026». */
+const fmtShort = (iso: string | null) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
+};
+
 const fmt = (iso: string | null) => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -2267,31 +2275,39 @@ function Row({
       <div className="hf-statuses-name-controls">
         {/* Имя — ссылка на карточку в «Все кандидаты»: кандидат и сотрудник —
             одна запись, вся история (резюме, воронки, комментарии) там. */}
+        {/* Статус — цветной кружок перед именем, как в ClickUp (этап 6,
+            11.11.2026): строка в одну линию. Клик — прежний выбор статуса
+            (прозрачный select поверх кружка). Смена статуса прямо в строке:
+            раньше перевести человека из «Практики» в «Уволен» через
+            интерфейс было нельзя вообще. */}
+        <span
+          className={clsx("hf-statuses-dot", `hf-statuses-dot-${groupOf(row.status)}`)}
+          // В «Уволен» лежат ещё «Отказ» и «Отозван» — точный статус
+          // показываем подсказкой.
+          title={`Статус: ${(STATUS_LABELS as Record<string, string>)[row.status] || row.status} — нажмите, чтобы сменить`}
+        >
+          <select
+            className="hf-statuses-dot-select"
+            value={groupOf(row.status)}
+            aria-label="Статус"
+            onChange={(e) => {
+              // Уже в этой группе — повторный выбор ничего не меняет, иначе
+              // «отказ» молча переписался бы в «уволен».
+              if (e.target.value !== groupOf(row.status)) onStatus(row, e.target.value);
+            }}
+          >
+            {STATUSES.map((st) => (
+              <option key={st.key} value={st.key}>{st.label}</option>
+            ))}
+          </select>
+        </span>
         <Link
           to={`/all-candidates?entity=${row.entity_id}`}
           className="hf-statuses-name hf-statuses-name-link"
-          title="Открыть карточку в «Все кандидаты»"
+          title={`${row.name} — открыть карточку в «Все кандидаты»`}
         >
           {row.name}
         </Link>
-        {/* Смена статуса прямо в строке: раньше перевести человека из
-            «Практики» в «Уволен» через интерфейс было нельзя вообще. */}
-        <select
-          className={clsx("hf-statuses-status", `hf-statuses-status-${groupOf(row.status)}`)}
-          value={groupOf(row.status)}
-          // В «Уволен» лежат ещё «Отказ» и «Отозван» — точный статус
-          // показываем подсказкой.
-          title={(STATUS_LABELS as Record<string, string>)[row.status] || ""}
-          onChange={(e) => {
-            // Уже в этой группе — повторный выбор ничего не меняет, иначе
-            // «отказ» молча переписался бы в «уволен».
-            if (e.target.value !== groupOf(row.status)) onStatus(row, e.target.value);
-          }}
-        >
-          {STATUSES.map((st) => (
-            <option key={st.key} value={st.key}>{st.label}</option>
-          ))}
-        </select>
       </div>
     ),
     assignee: (
@@ -2558,7 +2574,7 @@ function DateCell({
       onClick={() => setEditing(true)}
       title={auto && value ? "Посчитано от даты выхода в отдел — нажми, чтобы задать вручную" : ""}
     >
-      {value ? fmt(value) : <span className="hf-statuses-cell-placeholder">—</span>}
+      {value ? fmtShort(value) : <span className="hf-statuses-cell-placeholder">—</span>}
     </button>
   );
 }

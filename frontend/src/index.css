@@ -11482,3 +11482,98 @@ a.hf-forms-name:hover { text-decoration: underline; }
   color: var(--hf-red-600);
 }
 .hf-fb-clear:hover { background: var(--hf-red-50, #fef2f2); }
+
+/* ── «Штат» как в ClickUp (этап 6, 11.11.2026) ─────────────────────────────
+   Клиент: «дизайн сделайте таким же, как в ClickUp (такие же расстояния,
+   шрифты, размер шрифтов и объектов)». Размеры сняты в ClickUp: строка 35px,
+   ячейка 4px 12px, текст 14px, шапка 12px/500 без капса, пилюли 20px с
+   радиусом 5–6px, аватар 20px. Цвета — со светлых скринов клиента. */
+.hf-statuses-page {
+  font-family: -apple-system, system-ui, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.hf-statuses-page .hf-statuses-table { font-size: 14px; }
+.hf-statuses-page .hf-statuses-th {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #87909e;
+}
+.hf-statuses-page .hf-statuses-td {
+  height: 35px;
+  padding: 4px 12px;
+  font-size: 14px;
+  line-height: 16px;
+  color: #292d34;
+  border-bottom-color: #eef0f3;
+}
+.hf-statuses-page .hf-statuses-row:hover { background: #f7f8f9; }
+.hf-statuses-page .hf-statuses-name { font-size: 14px; font-weight: 500; color: #292d34; }
+.hf-statuses-page .hf-statuses-sticky .hf-statuses-name-controls { flex-wrap: nowrap; gap: 8px; }
+.hf-statuses-page .hf-statuses-sticky .hf-statuses-name-controls .hf-statuses-name { flex: 1 1 auto; min-width: 0; }
+
+/* Кружок статуса перед именем; выбор статуса — прозрачный select поверх. */
+.hf-statuses-dot {
+  position: relative;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px currentColor;
+  cursor: pointer;
+}
+.hf-statuses-dot::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.hf-statuses-dot-select {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  opacity: 0;
+  cursor: pointer;
+}
+.hf-statuses-dot-transferred { color: #16a34a; }
+.hf-statuses-dot-probation   { color: #d97706; }
+.hf-statuses-dot-dismissed   { color: #dc2626; }
+.hf-statuses-dot-quit        { color: #0284c7; }
+.hf-statuses-dot-hired       { color: #2563eb; }
+.hf-statuses-dot-offer       { color: #7c3aed; }
+
+/* Заголовок группы: пилюля 20px, 12px/500 капсом, счётчик рядом серым. */
+.hf-statuses-page .hf-statuses-group-cell { padding: 14px 12px 6px; }
+.hf-statuses-page .hf-statuses-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 2px 6px 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: uppercase;
+}
+.hf-statuses-page .hf-statuses-group-count { font-size: 12px; font-weight: 500; color: #87909e; }
+
+/* Пилюли значений (отдел, должность, Рук-ль, отметки, сорсеры): 20px, радиус 5px. */
+.hf-statuses-page .hf-statuses-pill,
+.hf-statuses-page .hf-statuses-mark-pill {
+  height: 20px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 16px;
+}
+.hf-statuses-page .hf-statuses-avatar { width: 20px; height: 20px; font-size: 10px; font-weight: 700; }
+.hf-statuses-page .hf-statuses-empty-cell,
+.hf-statuses-page .hf-statuses-cell-placeholder { color: #c3c7ce; font-size: 14px; }
+/* «из SANDBOX» — в той же строке, что отдел, чтобы строка не росла. */
+.hf-statuses-page .hf-statuses-dept-stack { flex-direction: row; align-items: center; gap: 6px; min-width: 0; }
+.hf-statuses-page .hf-statuses-dept-from { font-size: 12px; color: #87909e; }
