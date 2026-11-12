@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Search, Loader2, Plus, Pencil, Check, Copy, Download, X, MoreHorizontal, Trash2,
@@ -3383,6 +3383,20 @@ export function CatalogPicker({
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
   }, [menu?.key]);
+
+  // Высота окошка «…» заранее неизвестна: «Мои цвета» растут до двух рядов, у
+  // песочницы нет «Удалить». Ставили по оценке в 360 px — с двумя рядами своих
+  // цветов «Удалить» уходило за нижний край экрана (владелец, 12.11.2026).
+  // Поэтому после отрисовки меряем НАСТОЯЩУЮ высоту и поднимаем окошко, чтобы
+  // влезло целиком; совсем низкий экран — прокрутка внутри (max-height в CSS).
+  useLayoutEffect(() => {
+    const el = popRef.current;
+    if (!el || !menu) return;
+    const h = el.getBoundingClientRect().height;
+    const top = el.getBoundingClientRect().top;
+    const maxTop = Math.max(8, window.innerHeight - h - 8);
+    if (top > maxTop) el.style.top = `${maxTop}px`;
+  });
 
   const openMenu = (o: PickerOption, btn: HTMLElement) => {
     if (menu?.key === o.key) { closeMenu(true); return; }
