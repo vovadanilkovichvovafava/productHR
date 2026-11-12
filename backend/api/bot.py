@@ -2435,6 +2435,84 @@ async def cmd_vacancy(message: types.Message):
         await message.answer(f"⚠️ Ошибка: {e}")
 
 
+
+async def _suggest_tasks_from_text(session, message: types.Message, text: str, org_id) -> None:
+    """Автозадачи: отчёт о статусе или разбор на задачи с кнопками «Создать /
+    Не надо». Текст — само сообщение или ПОДПИСЬ к фото/документу/видео:
+    до 12.11.2026 подпись к медиа сюда не доходила (фото уходило своей веткой
+    с ранним выходом), и задача «Ильнар, улучшить список…» под скриншотом
+    молча терялась."""
+    _dbg(f"Auto-tasks ON for chat '{message.chat.title}', processing...")
+
+    # 1. Check for status report first (takes priority over task trigger)
+    is_status = False
+    try:
+        status_updates = await update_projects_from_status(
+            db=session,
+            message_text=text,
+            user_name=message.from_user.full_name,
+            telegram_user_id=message.from_user.id,
+            chat_id=message.chat.id,
+        )
+        if status_updates:
+            is_status = True
+            lines = ["\U0001f4ca Статус обновлён:"]
+            for u in status_updates:
+                emoji = "\u2705" if u["status"] == "completed" else "\U0001f4c8"
+                lines.append(f"  {emoji} {u['project_name']} \u2192 {u['progress']}%")
+            await message.reply("\n".join(lines))
+    except Exception as e:
+        logger.error(f"Status report error: {e}")
+
+    # 2. Не отчёт — разбираем на задачи, но НЕ создаём молча:
+    #    показываем разбор с кнопками «Создать / Не надо».
+    #    Раньше бот заводил задачи сам и промахивался — трекер
+    #    зарастал мусором (владелец, 25.09.2026).
+    if not is_status:
+        try:
+            preview = await create_tasks_from_message(
+                db=session,
+                message_text=text,
+                user_name=message.from_user.full_name,
+                telegram_user_id=message.from_user.id,
+                chat_id=message.chat.id,
+                telegram_username=message.from_user.username,
+                dry_run=True,
+            )
+            _dbg(f"Разбор дал {len(preview)} задач для {message.from_user.full_name}")
+            if preview:
+                from .models.database import PendingTaskSuggestion
+
+                suggestion = PendingTaskSuggestion(
+                    org_id=org_id,
+                    chat_id=message.chat.id,
+                    message_text=text[:4000],
+                    payload={"tasks": preview},
+                    created_by=preview[0].get("creator_id"),
+                    status="pending",
+                )
+                session.add(suggestion)
+                await session.commit()
+
+                lines = ["\U0001f4dd Похоже на задачи. Создать?"]
+                for t in preview:
+                    prefix = "\U0001f6a8 " if t.get("is_blocker") else "\u2022 "
+                    lines.append(f"  {prefix}{t['title']} \u2192 {t['assignee']} ({t['project']})")
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text=f"\u2705 Создать ({len(preview)})",
+                        callback_data=f"tasks:ok:{suggestion.id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="\u274c Не надо",
+                        callback_data=f"tasks:no:{suggestion.id}",
+                    ),
+                ]])
+                await message.reply("\n".join(lines), reply_markup=kb)
+        except Exception as e:
+            _dbg(f"Task trigger ERROR: {type(e).__name__}: {e}")
+            logger.error(f"Task trigger error: {e}", exc_info=True)
+
 @dp.message(F.chat.type.in_({"group", "supergroup"}), lambda msg: not (msg.text and msg.text.startswith("/")))
 async def collect_group_message(message: types.Message):
     """Silently collect all messages from groups. Skips commands so they reach their handlers."""
@@ -2571,14 +2649,18 @@ async def collect_group_message(message: types.Message):
                     parse_error=parse_error,
                     timestamp=message.date.replace(tzinfo=None),
                 )
+                chat_auto_tasks = bool(getattr(chat, 'auto_tasks_enabled', False))
                 session.add(db_message)
                 await session.commit()
 
                 # Вечерний отчёт файлом: текст уже разобран парсером
-                await _handle_evening_report(
+                if await _handle_evening_report(
                     session, message, content_type,
                     f"{message.caption or ''}\n{content or ''}", org_id,
-                )
+                ):
+                    return
+                if message.caption and chat_auto_tasks:
+                    await _suggest_tasks_from_text(session, message, message.caption, org_id)
                 return  # Early return since we've already saved
 
             elif message.photo:
@@ -2620,8 +2702,11 @@ async def collect_group_message(message: types.Message):
                     parse_error=parse_error,
                     timestamp=message.date.replace(tzinfo=None),
                 )
+                chat_auto_tasks = bool(getattr(chat, 'auto_tasks_enabled', False))
                 session.add(db_message)
                 await session.commit()
+                if message.caption and chat_auto_tasks:
+                    await _suggest_tasks_from_text(session, message, message.caption, org_id)
                 return  # Early return
 
             elif message.sticker:
@@ -2685,76 +2770,10 @@ async def collect_group_message(message: types.Message):
                 await process_external_links_in_message(content, org_id, owner_id, chat_db_id)
 
             if content_type == "text" and content and chat_auto_tasks:
-                _dbg(f"Auto-tasks ON for chat '{message.chat.title}', processing...")
-
-                # 1. Check for status report first (takes priority over task trigger)
-                is_status = False
-                try:
-                    status_updates = await update_projects_from_status(
-                        db=session,
-                        message_text=content,
-                        user_name=message.from_user.full_name,
-                        telegram_user_id=message.from_user.id,
-                        chat_id=message.chat.id,
-                    )
-                    if status_updates:
-                        is_status = True
-                        lines = ["\U0001f4ca Статус обновлён:"]
-                        for u in status_updates:
-                            emoji = "\u2705" if u["status"] == "completed" else "\U0001f4c8"
-                            lines.append(f"  {emoji} {u['project_name']} \u2192 {u['progress']}%")
-                        await message.reply("\n".join(lines))
-                except Exception as e:
-                    logger.error(f"Status report error: {e}")
-
-                # 2. Не отчёт — разбираем на задачи, но НЕ создаём молча:
-                #    показываем разбор с кнопками «Создать / Не надо».
-                #    Раньше бот заводил задачи сам и промахивался — трекер
-                #    зарастал мусором (владелец, 25.09.2026).
-                if not is_status:
-                    try:
-                        preview = await create_tasks_from_message(
-                            db=session,
-                            message_text=content,
-                            user_name=message.from_user.full_name,
-                            telegram_user_id=message.from_user.id,
-                            chat_id=message.chat.id,
-                            telegram_username=message.from_user.username,
-                            dry_run=True,
-                        )
-                        _dbg(f"Разбор дал {len(preview)} задач для {message.from_user.full_name}")
-                        if preview:
-                            from .models.database import PendingTaskSuggestion
-
-                            suggestion = PendingTaskSuggestion(
-                                org_id=org_id,
-                                chat_id=message.chat.id,
-                                message_text=content[:4000],
-                                payload={"tasks": preview},
-                                created_by=preview[0].get("creator_id"),
-                                status="pending",
-                            )
-                            session.add(suggestion)
-                            await session.commit()
-
-                            lines = ["\U0001f4dd Похоже на задачи. Создать?"]
-                            for t in preview:
-                                prefix = "\U0001f6a8 " if t.get("is_blocker") else "\u2022 "
-                                lines.append(f"  {prefix}{t['title']} \u2192 {t['assignee']} ({t['project']})")
-                            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                                InlineKeyboardButton(
-                                    text=f"\u2705 Создать ({len(preview)})",
-                                    callback_data=f"tasks:ok:{suggestion.id}",
-                                ),
-                                InlineKeyboardButton(
-                                    text="\u274c Не надо",
-                                    callback_data=f"tasks:no:{suggestion.id}",
-                                ),
-                            ]])
-                            await message.reply("\n".join(lines), reply_markup=kb)
-                    except Exception as e:
-                        _dbg(f"Task trigger ERROR: {type(e).__name__}: {e}")
-                        logger.error(f"Task trigger error: {e}", exc_info=True)
+                await _suggest_tasks_from_text(session, message, content, org_id)
+            elif content_type != "text" and message.caption and chat_auto_tasks:
+                # Видео, голос, аудио с подписью — задачу ищем в подписи.
+                await _suggest_tasks_from_text(session, message, message.caption, org_id)
             elif content_type == "text" and content and not chat_auto_tasks:
                 _dbg(f"SKIP: auto_tasks={chat_auto_tasks} for chat '{message.chat.title}'")
 

@@ -1092,6 +1092,49 @@ class TestMessageHandlers:
             assert "Parsed document content" in saved_msg.content
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("auto_tasks", [True, False])
+    async def test_photo_caption_goes_to_task_suggestions(
+        self, auto_tasks, db_session: AsyncSession, telegram_chat, telegram_user,
+        db_user: User, db_chat: Chat, mock_bot, mock_document_parser,
+    ):
+        """Подпись к фото тоже проверяется на задачи (12.11.2026): «Ильнар,
+        задача на проекте New HR…» под скриншотом бот пропускал молча — фото
+        уходило своей веткой с ранним выходом. В чате без автозадач — нет."""
+        from api.bot import collect_group_message
+
+        db_chat.auto_tasks_enabled = auto_tasks
+        await db_session.commit()
+        with patch('api.bot.async_session') as mock_session_maker, \
+             patch('api.bot.get_bot', return_value=mock_bot), \
+             patch('api.bot._suggest_tasks_from_text', new_callable=AsyncMock) as suggest:
+            mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=db_session)
+            mock_session_maker.return_value.__aexit__ = AsyncMock()
+
+            message = MagicMock(spec=TelegramMessage)
+            message.chat = telegram_chat
+            message.from_user = telegram_user
+            message.message_id = 22348
+            message.text = None
+            message.caption = "Ильнар задача на проекте New HR улучшить список воронок"
+            message.date = datetime.utcnow()
+            message.voice = None
+            message.video_note = None
+            message.video = None
+            message.audio = None
+            message.document = None
+            message.photo = [MagicMock(), MagicMock()]
+            message.photo[-1].file_id = "photo_file_task"
+            message.sticker = None
+
+            await collect_group_message(message)
+
+            if auto_tasks:
+                suggest.assert_awaited_once()
+                assert suggest.await_args.args[2] == message.caption
+            else:
+                suggest.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_collect_sticker_message(
         self,
         db_session: AsyncSession,
