@@ -2862,15 +2862,21 @@ const rowAssignees = (r: BoardRow) =>
  *  и «Влад» (наставник практики) — разные люди и не путаются. Уже назначенных
  *  других HR это не снимает — их кружки остаются. */
 const BOARD_HR_FIRST_NAMES = ["мария", "maria", "эльвира", "elvira", "влада", "vlada"];
-/** Ротации человека для ячейки «Отдел»: короткая подпись «↻ Продукт» (последний
- *  прежний отдел, «+N» — если их было больше) и вся история подсказкой.
+/** Ротации человека для ячейки «Отдел».
  *  Мария, 05.11.2026: «Виктор сначала был в продукте, а теперь он байер фб —
  *  отметить на борде, но чтобы не было перегруженности». Поэтому не колонка и
- *  не вторая строка, а та же тихая подпись, что и «из SANDBOX». */
+ *  не вторая строка, а та же тихая подпись, что и «из SANDBOX».
+ *  12.11.2026 (клиент): «не всегда понятно, из какого отдела перешёл… видно,
+ *  откуда и куда, и дату перехода». Было «↻ HR team +2» — ни направления, ни
+ *  даты, путь только в подсказке браузера. Стало: в строке ОТКУДА и КОГДА
+ *  («из HR team · 16/10/26 · ещё 2»), по клику — окно со всем путём:
+ *  песочница → прежние отделы с датами → текущий. */
+export type RotationStep = { name: string; when: string; kind: "sandbox" | "past" | "current" };
 export function rotationNote(
   history: BoardTeamStint[] | undefined,
   current: string,
-): { short: string; title: string } | null {
+  sandbox?: string | null,
+): { short: string; title: string; steps: RotationStep[] } | null {
   const past = (history ?? []).filter((h) => h.name);
   // Вернулся туда же, где был, — это не ротация. Так бывает после ошибки:
   // SEO → «Тестеровшики QA» (завели по ошибке) → снова SEO; отдел QA удалили,
@@ -2879,13 +2885,24 @@ export function rotationNote(
   while (past.length && current && past[past.length - 1].name === current) past.pop();
   if (!past.length) return null;
   const last = past[past.length - 1];
-  const more = past.length > 1 ? ` +${past.length - 1}` : "";
-  const lines = past.map((h) => {
-    const when = [fmt(h.date_from), fmt(h.date_to)].filter(Boolean).join(" – ");
-    return when ? `${h.name} · ${when}` : h.name;
-  });
-  if (current) lines.push(`Сейчас: ${current}`);
-  return { short: `↻ ${last.name}${more}`, title: `Ротации:\n${lines.join("\n")}` };
+  const movedAt = fmtShort(last.date_to);
+
+  const steps: RotationStep[] = [];
+  if (sandbox) steps.push({ name: sandbox, when: "практика", kind: "sandbox" });
+  for (const h of past) {
+    const a = fmtShort(h.date_from);
+    const b = fmtShort(h.date_to);
+    steps.push({ name: h.name, when: a && b ? `${a} – ${b}` : b ? `до ${b}` : a ? `с ${a}` : "", kind: "past" });
+  }
+  if (current) steps.push({ name: current, when: movedAt ? `с ${movedAt} · сейчас` : "сейчас", kind: "current" });
+
+  // «ещё N» — всё, что не попало в строку (прежние отделы и песочница):
+  // ничего не прячем молча.
+  const more = steps.filter((st) => st.kind !== "current").length - 1;
+  const short = [`из ${last.name}`, movedAt, more > 0 ? `ещё ${more}` : ""].filter(Boolean).join(" · ");
+  const title = ["Перемещения:", ...steps.map((st) =>
+    `${st.kind === "current" ? "→ " : ""}${st.name}${st.when ? ` · ${st.when}` : ""}`)].join("\n");
+  return { short, title, steps };
 }
 
 /** Отделы для окна выбора: сначала из списка владельца в его порядке, потом
@@ -2950,7 +2967,8 @@ function DepartmentCell({
   const from = row.department_is_sandbox
     ? (row.team_name ? own : null)   // в строке песочницы подпись — она сама
     : row.sandbox_name;
-  const rotation = rotationNote(row.team_history, name);
+  const rotation = rotationNote(row.team_history, name, from);
+  const moves = useCellMenu();
   // Текущий отдел строки в окне ЕСТЬ — с галочкой, как в ClickUp: иначе его
   // нельзя было переименовать или перекрасить из этой строки (11.11.2026).
   // Сравниваем с отделом САМОЙ строки, а не с тем, что показано главным.
@@ -2977,18 +2995,48 @@ function DepartmentCell({
           >
             {name}
           </span>
-          {(from || rotation) && (
-            /* Одна тихая подпись на всё: «из SANDBOX · ↻ Продукт». */
-            <span
-              className="hf-statuses-dept-from"
-              title={[from && `Остаётся в песочнице ${from}`, rotation?.title].filter(Boolean).join("\n\n")}
+          {rotation ? (
+            /* Откуда и когда пришёл; клик — весь путь. Кнопка лежит ПОВЕРХ
+               прозрачной кнопки выбора отдела, иначе открывалось бы то окно. */
+            <button
+              ref={moves.plusRef}
+              type="button"
+              className="hf-statuses-dept-from hf-statuses-dept-moves"
+              title={rotation.title}
+              aria-label={`Перемещения: ${rotation.short}`}
+              aria-expanded={moves.open}
+              onClick={(e) => { e.stopPropagation(); moves.toggle(); }}
             >
-              {[from && `из ${from}`, rotation?.short].filter(Boolean).join(" · ")}
+              {rotation.short}
+            </button>
+          ) : from ? (
+            <span className="hf-statuses-dept-from" title={`Остаётся в песочнице ${from}`}>
+              из {from}
             </span>
-          )}
+          ) : null}
         </span>
       ) : (
         <span className="hf-statuses-empty-cell">—</span>
+      )}
+      {rotation && moves.open && moves.pos && (
+        <div
+          ref={moves.menuRef}
+          className="hf-statuses-hr-menu hf-statuses-moves"
+          style={menuBox(moves.pos)}
+          role="dialog"
+          aria-label="Перемещения"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="hf-statuses-hr-menu-hint">Перемещения</div>
+          <ol className="hf-statuses-moves-list">
+            {rotation.steps.map((st, i) => (
+              <li key={i} className={`hf-statuses-moves-step is-${st.kind}`}>
+                <span className="hf-statuses-moves-name">{st.name}</span>
+                {st.when && <span className="hf-statuses-moves-when">{st.when}</span>}
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
       {/* Окно «как в ClickUp»: найти, выбрать или добавить свой отдел
           (клиент, 11.11.2026). Кнопка прозрачная и лежит на всей ячейке. */}

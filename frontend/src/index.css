@@ -10706,6 +10706,61 @@ body.performance-mode .glass-card:hover {
   font-size: var(--hf-fs-5xs);
   color: var(--hf-main-500);
 }
+/* Перемещения (12.11.2026): та же тихая подпись, но кликабельная и ПОВЕРХ
+   прозрачной кнопки выбора отдела. */
+.hf-statuses-dept-moves {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: var(--hf-fs-5xs);
+  border-radius: 4px;
+}
+.hf-statuses-dept-moves:hover,
+.hf-statuses-dept-moves[aria-expanded="true"] {
+  color: var(--hf-main-800);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.hf-statuses-moves { width: 260px; padding: 4px 4px 8px; }
+.hf-statuses-moves-list { list-style: none; margin: 0; padding: 2px 8px 0 10px; }
+/* Лента: точка у каждого шага, линия между ними; текущий — жирный и цветной. */
+.hf-statuses-moves-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 0 10px 16px;
+}
+.hf-statuses-moves-step::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--hf-main-300, #cbd5e1);
+}
+.hf-statuses-moves-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 14px;
+  bottom: 0;
+  width: 1px;
+  background: var(--hf-main-200, #e2e8f0);
+}
+.hf-statuses-moves-step:last-child { padding-bottom: 0; }
+.hf-statuses-moves-step.is-current::before { background: #7b68ee; }
+.hf-statuses-moves-step.is-sandbox::before { background: transparent; border: 1px solid var(--hf-main-400, #94a3b8); }
+.hf-statuses-moves-name { font-size: 13px; color: var(--hf-main-800, #1e293b); line-height: 1.3; }
+.hf-statuses-moves-step.is-current .hf-statuses-moves-name { font-weight: 600; }
+.hf-statuses-moves-when { font-size: 12px; color: #87909e; }
+
 .hf-statuses-dept .hf-statuses-pill {
   max-width: 100%;
   overflow: hidden;
