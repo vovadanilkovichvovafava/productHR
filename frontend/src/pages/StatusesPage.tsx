@@ -30,6 +30,7 @@ import {
 import { useUrlTab } from "@/hooks/useUrlTab";
 import { useAuthStore } from "@/stores/authStore";
 import { STATUS_LABELS } from "@/types";
+import DepartureReasonModal from "@/components/hr/DepartureReasonModal";
 
 /**
  * Страница «Статусы» — доска жизненного цикла сотрудника внутри направления.
@@ -758,14 +759,28 @@ export default function StatusesPage() {
    *  оффбординг: гасит аккаунт, отзывает сессии и отвязывает Telegram.
    *  Молча это делать нельзя — сообщаем, что именно произошло. */
   const changeStatus = async (row: BoardRow, status: string) => {
-    const label = STATUSES.find((s2) => s2.key === status)?.label || status;
-    await patch(row, { status });
+    // «Уволен» / «Уволился» — только с причиной (Мария, 12.11.2026): сначала
+    // окно причины, статус уходит вместе с ней (DepartureReasonModal).
     if (status === "dismissed" || status === "quit") {
-      toast(
-        `${row.name} → ${label}. Аккаунт отключён, сессии сброшены, Telegram отвязан.`,
-        { icon: "⚠️", duration: 6000 }
-      );
+      setDepartAsk({ row, status });
+      return;
     }
+    await patch(row, { status });
+  };
+  // Человек, которого увольняют с доски: ждёт причину в окне.
+  const [departAsk, setDepartAsk] = useState<{ row: BoardRow; status: string } | null>(null);
+  const saveDeparture = async (reason: string): Promise<boolean> => {
+    if (!departAsk) return false;
+    const { row, status } = departAsk;
+    const label = STATUSES.find((s2) => s2.key === status)?.label || status;
+    const ok = await patch(row, { status, rejection_reason: reason });
+    if (!ok) return false;
+    setDepartAsk(null);
+    toast(
+      `${row.name} → ${label}. Аккаунт отключён, сессии сброшены, Telegram отвязан.`,
+      { icon: "⚠️", duration: 6000 }
+    );
+    return true;
   };
 
   // Крутилка — только при первой загрузке. Раньше её показывал каждый
@@ -844,7 +859,7 @@ export default function StatusesPage() {
    *  даты практики в песочнице. Статус — у человека, он один на все строки,
    *  поэтому его правка обновляет их все.
    */
-  const patch = async (row: BoardRow, body: BoardRowUpdate) => {
+  const patch = async (row: BoardRow, body: BoardRowUpdate): Promise<boolean> => {
     const prev = rows;
     const personWide = "status" in body;
     const mine = (x: BoardRow) =>
@@ -859,9 +874,11 @@ export default function StatusesPage() {
         // строкам того же человека — только то, что у них общее.
         return rowKey(x) === rowKey(row) ? fresh : { ...x, status: fresh.status } as BoardRow;
       }));
+      return true;
     } catch (e: any) {
       setRows(prev);
       errorToast(e, "Не удалось сохранить");
+      return false;
     } finally {
       setSavingId(null);
     }
@@ -1285,6 +1302,18 @@ export default function StatusesPage() {
               order={arrangeColumns(view, true)}
               onClose={() => setShowExport(false)}
               onExport={(plan, pick) => { exportToExcel(plan, pick); setShowExport(false); }}
+            />
+          )}
+
+          {departAsk && (
+            <DepartureReasonModal
+              name={departAsk.row.name}
+              statusLabel={
+                (STATUS_LABELS as Record<string, string>)[departAsk.status] || departAsk.status
+              }
+              initial={departAsk.row.rejection_reason || ""}
+              onCancel={() => setDepartAsk(null)}
+              onSave={saveDeparture}
             />
           )}
 
@@ -2348,7 +2377,7 @@ function Row({
   sourcerTags: Tag[];
   onSourcerTags: (update: (list: Tag[]) => Tag[]) => void;
   saving: boolean;
-  onPatch: (row: BoardRow, body: BoardRowUpdate) => Promise<void>;
+  onPatch: (row: BoardRow, body: BoardRowUpdate) => Promise<unknown>;
   onStatus: (row: BoardRow, status: string) => Promise<void>;
   onPlace: (row: BoardRow, deptId: number) => Promise<void>;
   onUnplace: (row: BoardRow) => Promise<void>;

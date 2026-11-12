@@ -158,7 +158,7 @@ async def test_dismissed_gets_date_of_board_rejection(
                                       stage_order=1, created_by=admin_user.id, applied_at=now,
                                       last_stage_change_at=now, updated_at=now))
     await db_session.commit()
-    r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"status": "dismissed"}, headers=h)
+    r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"status": "dismissed", "rejection_reason": "Прогулы"}, headers=h)
     assert r.status_code == 200, r.text
     cols = {c["status"]: c for c in (await client.get("/api/candidates/kanban", headers=h)).json()["columns"]}
     card = next(c for c in cols["dismissed"]["cards"] if c["id"] == e.id)

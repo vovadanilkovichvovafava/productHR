@@ -68,7 +68,7 @@ async def test_dismissal_closes_all_live_applications(
     closed = await _application(db_session, organization, admin_user, e, "SEO", ApplicationStage.withdrawn)
 
     r = await client.patch(f"/api/staff-board/rows/{e.id}",
-                           json={"status": "dismissed"}, headers=_h(admin_user))
+                           json={"status": "dismissed", "rejection_reason": "Прогулы"}, headers=_h(admin_user))
     assert r.status_code == 200, r.text
 
     stages = await _stages(db_session, [live.id, other.id, closed.id])
@@ -84,7 +84,7 @@ async def test_dismissal_closes_all_live_applications(
     assert {m.application_id for m in moves} == {live.id, other.id}
     assert all(m.to_stage == ApplicationStage.rejected.value for m in moves)
     # В ленте видно, почему «Отказ»: уволен на доске.
-    assert all(m.comment == "Мы уволили — доска «Штат»" for m in moves)
+    assert all(m.comment == "Мы уволили — Прогулы" for m in moves)
 
 
 @pytest.mark.asyncio

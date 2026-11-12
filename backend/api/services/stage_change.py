@@ -321,6 +321,31 @@ async def apply_entity_status(
 
 DEPARTED = (EntityStatus.dismissed, EntityStatus.quit)
 
+# «Мы уволили» / «Сам уволился» — только с причиной (Мария, 12.11.2026:
+# «рекрутер при переводе на статус обязательно должен указать причину
+# увольнения, без причины — не переведётся, она и будет видна на борде»).
+DEPARTURE_REASON_REQUIRED = "Укажите причину увольнения — без неё статус не сменится"
+
+
+def departure_needs_reason(old_status, new_status, reason: Optional[str]) -> bool:
+    """Перевод в «Мы уволили» / «Сам уволился» без причины. Повторный выбор
+    того же статуса ничего не меняет — причину не требуем."""
+    if new_status not in DEPARTED:
+        return False
+    if _value(old_status) == _value(new_status):
+        return False
+    return not comment_plain_text(reason)
+
+
+def remember_departure_reason(entity: Entity, reason: Optional[str]) -> None:
+    """Причина увольнения — в поле карточки `rejection_reason`: его показывает
+    колонка «Причина отказа» на доске «Штат» и поле «Причина отказа» в
+    «Редактировать». Отдельного поля не заводим — у человека одна причина
+    ухода, и на доске она должна быть в одном месте."""
+    text = comment_plain_text(reason)
+    if text:
+        entity.extra_data = {**(entity.extra_data or {}), REJECTION_REASON_KEY: text}
+
 
 async def close_applications_for_departure(
     db: AsyncSession,
@@ -385,6 +410,9 @@ async def depart_entity(
     note = await change_status_without_application(
         db, entity, new_status, changed_by=changed_by, comment=comment, stage_label=label,
     )
+    # После закрытия заявок: их «Отказ» записал в карточку «Мы уволили — …»,
+    # а на доске должна стоять сама причина.
+    remember_departure_reason(entity, comment)
     return moves, note
 
 

@@ -145,7 +145,7 @@ async def test_dismissal_reaches_both_rows(
 
     r = await client.patch(
         f"/api/staff-board/rows/{e.id}",
-        json={"status": EntityStatus.dismissed.value}, headers=_h(admin_user),
+        json={"status": EntityStatus.dismissed.value, "rejection_reason": "Прогулы"}, headers=_h(admin_user),
     )
     assert r.status_code == 200, r.text
 

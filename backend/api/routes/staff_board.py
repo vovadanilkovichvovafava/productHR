@@ -465,7 +465,7 @@ async def _move_board_application(
         from ..services.hr_stages import STATUS_LABELS
         return await close_applications_for_departure(
             db, entity, new_status, changed_by=user,
-            comment=f"{STATUS_LABELS[new_status.value]} — доска «Штат»",
+            comment=f"{STATUS_LABELS[new_status.value]} — {comment or 'доска «Штат»'}",
         )
     target_stage = STATUS_SYNC_MAP.get(new_status)
     if target_stage is None:
@@ -500,14 +500,16 @@ def _stage_note(
     old_status: EntityStatus,
     new_status: EntityStatus,
     user: User,
+    text: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Запись о переводе для ленты карточки — та же, что пишет «Все кандидаты».
 
     Лента кандидата вне воронок хранит переводы комментарием в
     ``extra_data.notes`` (поля ``stage`` + ``from_status``), и её корзина
     возвращает прежний статус (маркер ``NOTE_STAGE_UNDO``). Доска пишет такую
-    же запись, чтобы перевод отсюда не был невидимым. Текста нет: в ленте это
-    одна строка со статусом.
+    же запись, чтобы перевод отсюда не был невидимым. Текст — только причина
+    увольнения (12.11.2026); у прочих переводов он пустой, и в ленте это одна
+    строка со статусом.
 
     Возвращает готовую запись или None, если статус не менялся.
     """
@@ -517,7 +519,8 @@ def _stage_note(
         return None
     return {
         "id": str(uuid.uuid4()),
-        "text": "",
+        # Текст — причина увольнения (12.11.2026); у прочих переводов пусто.
+        "text": text,
         "date": datetime.now(timezone.utc).isoformat(),
         "stage": new,
         "stage_label": STATUS_LABELS_RU.get(new, new),
@@ -2794,9 +2797,21 @@ async def update_row(
         # статус обратно. Перевод заявки пишет историю — это и есть строка в
         # ленте (её корзина отменяет перевод), поэтому отдельную запись-
         # комментарий пишем только человеку без открытых воронок.
-        board_moves = await _move_board_application(db, entity, new_status, current_user)
+        # «Уволен» / «Уволился» — только с причиной (Мария, 12.11.2026). Она
+        # приходит в этом же запросе полем «Причина отказа» (окно на доске), им
+        # и останется видна в строке; в ленту и в «Отказ» заявок — она же.
+        from ..services.stage_change import DEPARTURE_REASON_REQUIRED, comment_plain_text, departure_needs_reason
+
+        departure_reason = ""
+        if new_status in (EntityStatus.dismissed, EntityStatus.quit):
+            if departure_needs_reason(entity.status, new_status, payload.get("rejection_reason")):
+                raise HTTPException(400, DEPARTURE_REASON_REQUIRED)
+            departure_reason = comment_plain_text(payload.get("rejection_reason"))
+        board_moves = await _move_board_application(
+            db, entity, new_status, current_user, comment=departure_reason or None,
+        )
         if not board_moves:
-            status_note = _stage_note(entity, entity.status, new_status, current_user)
+            status_note = _stage_note(entity, entity.status, new_status, current_user, text=departure_reason)
         entity.status = new_status
 
     if "position" in payload:

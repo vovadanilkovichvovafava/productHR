@@ -7861,6 +7861,26 @@ body.performance-mode .glass-card:hover {
   color: var(--hf-status-red);
 }
 
+/* Причина увольнения на доске «Штат» (DepartureReasonModal, 12.11.2026). */
+.hf-departure-reason-input {
+  display: block;
+  width: 100%;
+  margin-top: var(--hf-space-m);
+  resize: vertical;
+  min-height: 72px;
+  border: var(--hf-border-xs) solid var(--hf-main-200);
+  border-radius: var(--hf-radius-s);
+  background: var(--hf-white);
+  color: var(--hf-main-900);
+  padding: 8px 10px;
+  font-size: var(--hf-fs-xs);
+  line-height: 1.4;
+  outline: none;
+}
+.hf-departure-reason-input:focus {
+  border-color: var(--hf-main-400);
+}
+
 .hf-stage-dropdown-menu {
   border-radius: var(--hf-radius-l);
   box-shadow: var(--hf-shadow-2xl);

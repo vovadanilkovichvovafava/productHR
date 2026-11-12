@@ -611,8 +611,10 @@ async def change_candidate_status(
     """
     from api.services.stage_change import (
         DEPARTED,
+        DEPARTURE_REASON_REQUIRED,
         change_status_without_application,
         depart_entity,
+        departure_needs_reason,
         log_moves,
         log_out_of_funnel,
         move_application,
@@ -664,7 +666,10 @@ async def change_candidate_status(
     departure_moves: list = []
     if new_status in DEPARTED:
         # «Мы уволили» / «Сам уволился» (10.11.2026): как с доски «Штат» — все
-        # живые заявки «Отказом», статус точный, запись в ленте.
+        # живые заявки «Отказом», статус точный, запись в ленте. С 12.11.2026 —
+        # только с причиной (комментарий окна смены этапа).
+        if departure_needs_reason(old_status, new_status, body.comment):
+            raise HTTPException(400, DEPARTURE_REASON_REQUIRED)
         try:
             departure_moves, note = await depart_entity(
                 db, entity, new_status, changed_by=current_user,

@@ -40,6 +40,18 @@ _SERVER_OWNED_EXTRA_KEYS = frozenset({
 })
 
 
+def _ensure_departure_via_stage_picker(old_status, new_status) -> None:
+    """«Мы уволили» / «Сам уволился» ставятся только окном смены этапа (там
+    причина обязательна, 12.11.2026) или доской «Штат». Правка карточки и
+    прямой PATCH /status их не ставят: причины у них нет, а без неё увольнение
+    не проходит. Интерфейс эти ручки для увольнения не зовёт — это закрытая
+    дверь для прямых запросов."""
+    from ...services.stage_change import DEPARTED, DEPARTURE_REASON_REQUIRED
+
+    if new_status in DEPARTED and new_status != old_status:
+        raise HTTPException(400, DEPARTURE_REASON_REQUIRED)
+
+
 @router.get("/")
 async def list_entities(
     type: Optional[EntityType] = None,
@@ -758,6 +770,7 @@ async def update_entity(
     _is_candidate = entity.type == EntityType.candidate
     _identity_before = identity_fingerprint(entity) if _is_candidate else None
     _status_before = entity.status
+    _ensure_departure_via_stage_picker(_status_before, update_data.get('status'))
 
     # extra_data: MERGE, не заменять — иначе частичный апдейт (напр. форма правки
     # шлёт только salary/city/...) затрёт notes, merged_from, timeline_reactions,
@@ -902,6 +915,7 @@ async def update_entity_status(
     )
 
     old_status = entity.status
+    _ensure_departure_via_stage_picker(old_status, data.status)
     from ...services.stage_change import apply_entity_status, log_moves
 
     # Статус, единственная открытая заявка, выход из архива, песочница на

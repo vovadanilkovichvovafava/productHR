@@ -19,7 +19,7 @@ import toast from "react-hot-toast";
 import { HuntflowComposer } from "@/components/hr/HuntflowComposer";
 import { HuntflowRichInput } from "@/components/hr/HuntflowRichInput";
 import { RejectionReasonSelect } from "@/components/entities/RejectionReasonSelect";
-import { buildRejectionComment, rejectionReady } from "@/constants/hrStages";
+import { DEPARTED_STATUSES, buildRejectionComment, rejectionReady } from "@/constants/hrStages";
 import { HuntflowActionChip as ActionChip } from "@/components/hr/HuntflowControls";
 
 import { downloadEntityFile } from "@/services/api/entities";
@@ -406,6 +406,11 @@ function CandidateVacancyCard({
   const stageAlreadyCurrent = pendingStage === resolvedCurrentStageStatus;
   const rejectPick = pendingStage === "rejected" && !stageAlreadyCurrent;
   const rejectBlocked = rejectPick && !rejectionReady(rejectionReason, stageChangeComment);
+  // «Мы уволили» / «Сам уволился» — только с причиной (Мария, 12.11.2026):
+  // списка нет, причина — сам комментарий. Её же требует сервер.
+  const departPick = DEPARTED_STATUSES.has(pendingStage) && !stageAlreadyCurrent;
+  const departBlocked = departPick && !rejectionReady(null, stageChangeComment);
+  const reasonBlocked = rejectBlocked || departBlocked;
   // Сменили этап в окне или закрыли окно — выбранная причина не переносится.
   useEffect(() => {
     if (!rejectPick) setRejectionReason(null);
@@ -610,7 +615,13 @@ function CandidateVacancyCard({
                     <HuntflowRichInput
                       value={stageChangeComment}
                       onChange={setStageChangeComment}
-                      placeholder={rejectPick ? "Комментарий (если причины нет в списке)" : "Записать комментарий"}
+                      placeholder={
+                        rejectPick
+                          ? "Комментарий (если причины нет в списке)"
+                          : departPick
+                            ? "Причина увольнения (обязательно)"
+                            : "Записать комментарий"
+                      }
                       showMention
                       toolbarClassName="hf-stage-picker-toolbar"
                       editableClassName="hf-stage-picker-textarea overflow-y-auto"
@@ -621,10 +632,16 @@ function CandidateVacancyCard({
                   <div className="hf-stage-picker-footer">
                     <button
                       type="button"
-                      disabled={savingStageChange || stageAlreadyCurrent || rejectBlocked}
-                      title={rejectBlocked ? "Выберите причину отказа или напишите комментарий" : undefined}
+                      disabled={savingStageChange || stageAlreadyCurrent || reasonBlocked}
+                      title={
+                        rejectBlocked
+                          ? "Выберите причину отказа или напишите комментарий"
+                          : departBlocked
+                            ? "Напишите причину увольнения"
+                            : undefined
+                      }
                       onClick={async () => {
-                        if (savingStageChange || stageAlreadyCurrent || rejectBlocked) return;
+                        if (savingStageChange || stageAlreadyCurrent || reasonBlocked) return;
                         setSavingStageChange(true);
                         try {
                           const selectedOption = stagePickerOptions.find(
@@ -686,6 +703,11 @@ function CandidateVacancyCard({
                     {rejectBlocked && (
                       <span className="hf-reject-reason-hint">
                         Выберите причину или напишите комментарий
+                      </span>
+                    )}
+                    {departBlocked && (
+                      <span className="hf-reject-reason-hint">
+                        Напишите причину увольнения
                       </span>
                     )}
                   </div>

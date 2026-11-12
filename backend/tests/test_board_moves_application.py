@@ -145,8 +145,8 @@ async def test_closed_funnel_and_no_funnel_keep_timeline_note(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status, note", [
-    (EntityStatus.dismissed, "Мы уволили — доска «Штат»"),
-    (EntityStatus.quit, "Сам уволился — доска «Штат»"),
+    (EntityStatus.dismissed, "Мы уволили — Прогулы"),
+    (EntityStatus.quit, "Сам уволился — Прогулы"),
 ])
 async def test_dismissal_moves_application_to_rejected(
     client, db_session, organization, department, admin_user, org_owner, status, note,
@@ -158,7 +158,7 @@ async def test_dismissal_moves_application_to_rejected(
 
     r = await client.patch(
         f"/api/staff-board/rows/{e.id}",
-        json={"status": status.value}, headers=_h(admin_user),
+        json={"status": status.value, "rejection_reason": "Прогулы"}, headers=_h(admin_user),
     )
     assert r.status_code == 200, r.text
     await db_session.refresh(app)
