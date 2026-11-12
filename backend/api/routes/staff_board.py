@@ -120,8 +120,8 @@ STATUS_LABELS_RU = {
     EntityStatus.hired.value: "Оффер принят",
     EntityStatus.probation.value: "Практика",
     EntityStatus.transferred.value: "Перешёл в отдел",
-    EntityStatus.dismissed.value: "Уволен",
-    EntityStatus.quit.value: "Уволился",
+    EntityStatus.dismissed.value: "Мы уволили",
+    EntityStatus.quit.value: "Сам уволился",
     EntityStatus.rejected.value: "Отказ",
     EntityStatus.withdrawn.value: "Отозван",
 }
