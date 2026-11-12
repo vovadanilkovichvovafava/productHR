@@ -256,6 +256,9 @@ SERVER_MANAGED_EXTRA = (
     # Значок вакансии подбирает сервер (services/vacancy_icon.py): форма,
     # открытая до подбора, не должна его стирать.
     "icon", "icon_for",
+    # Когда закрыли — чтобы «закрыл и сразу открыл» не начинал новую серию
+    # (services/vacancy_series.py).
+    "closed_at",
 )
 
 

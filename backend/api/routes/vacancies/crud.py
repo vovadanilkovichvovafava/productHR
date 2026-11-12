@@ -18,6 +18,7 @@ from .common import (
 )
 from ...services.auth import get_current_user, get_user_org
 from ...services.cache import scoring_cache
+from ...services.vacancy_series import CLOSED_STATUSES, apply_reopen, remember_closed
 from ...services.hr_notifications import notify_new_request, notify_request_assigned
 
 
@@ -573,8 +574,12 @@ async def update_vacancy(
     # только визуальная сегментация. NAIVE UTC — как все таймстемпы в проекте
     # (колонки TIMESTAMP WITHOUT TIME ZONE, last_stage_change_at тоже naive),
     # иначе сравнение в case() рассинхронится по смещению.
+    # Открыли снова меньше чем через сутки после закрытия — это исправление
+    # ошибки, а не новый набор: серия прежняя (services/vacancy_series.py).
     if was_closed and data.status == VacancyStatus.open:
-        vacancy.reopened_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        apply_reopen(vacancy)
+    if data.status in CLOSED_STATUSES and prev_status not in CLOSED_STATUSES:
+        remember_closed(vacancy)
 
     # Когда рекрутёр закрывает/отменяет свой клон заявки, заявка должна исчезнуть
     # у него из "Заявок": убираем его из assigned_to оригинала и помечаем dismissed_by.

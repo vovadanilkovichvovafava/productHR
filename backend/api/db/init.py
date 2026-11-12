@@ -658,6 +658,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Departed apps sync failed (non-critical): {e}")
 
+    # Случайное «закрыл — открыл» вакансии сделало всех её кандидатов
+    # «предыдущей серией» (12.11.2026, services/vacancy_series.py). Одноразово.
+    try:
+        from ..services.vacancy_series import undo_quick_reopens_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await undo_quick_reopens_once(session)
+    except Exception as e:
+        logger.warning(f"Vacancy quick reopen undo failed (non-critical): {e}")
+
     # Объединённые карточки, оставшиеся в «Новых» при закрытых заявках влитой:
     # слияние не пересчитывало статус (11.11.2026, services/merged_status_sync.py).
     try:
