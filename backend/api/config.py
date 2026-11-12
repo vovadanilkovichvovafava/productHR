@@ -118,6 +118,11 @@ class Settings(BaseSettings):
         default="claude-haiku-5-5",
         alias="RESUME_PARSER_MODEL"
     )
+    # Значок вакансии в левой панели — подбирает ИИ (services/vacancy_icon.py).
+    vacancy_icon_model: str = Field(
+        default="claude-haiku-5-5",
+        alias="VACANCY_ICON_MODEL"
+    )
     # Сколько первых разборов после запуска сервера сверить с основной моделью
     # в фоне (лог RESUME_COMPARE). 0 — не сверять.
     resume_compare_runs: int = Field(

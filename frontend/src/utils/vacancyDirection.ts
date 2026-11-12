@@ -40,7 +40,8 @@ const RULES: ReadonlyArray<[VacancyDirection, RegExp]> = [
     "видео", "video", "монтаж", "motion", "моушн", "\\bugc\\b", "ugc-", "клип", "reels", "рилс", "shorts",
     "youtube", "ютуб", "аниматор", "animator", "анимац", "animation", "\\b3d\\b", "3d-", "after effects",
     "premiere", "съ[её]мк", "режисс[её]р", "продюсер", "producer", "оператор-постановщик", "видеограф",
-    "videograph", "сторисмейкер", "stories ?maker",
+    "videograph", "сторисмейкер", "stories ?maker", "movie", "\\bfilm", "фильм", "(^|[^а-я])кино",
+    "cinema", "кинемат", "ролик", "trailer", "трейлер", "\\bvfx\\b", "cgi", "стрим", "stream",
   ].join("|"))],
   ["design", new RegExp([
     "дизайн", "design", "\\bux\\b", "\\bui\\b", "ux/ui", "ui/ux", "креатив", "creative", "иллюстрат",

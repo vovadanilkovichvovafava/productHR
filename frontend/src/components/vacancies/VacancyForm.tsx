@@ -19,7 +19,7 @@ import {
   HuntflowClose28Icon, HuntflowEyeOffIcon, HuntflowFlagIcon,
 } from './vacancyFormParts';
 import { apiErrorDetail, buildVacancyPayload, validateVacancyForm } from './vacancyFormPayload';
-import { VacancyDirectionGlyph } from './VacancyDirectionIcon';
+import { VacancyDirectionGlyph, vacancyMark } from './VacancyDirectionIcon';
 import { DIRECTION_LABELS, DIRECTION_ORDER, isVacancyDirection, vacancyDirection } from '@/utils/vacancyDirection';
 import VacancyConfirmModal, { type VacancyConfirmAction } from './VacancyConfirmModal';
 import { isVacancyParticipant, hasPersonallyAccepted, isExplicitlyAssigned, getVacancyExitOptions, findSameTitleVacancy } from '@/utils/vacancy';
@@ -272,6 +272,14 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
           await assignVacancy(created.id, selectedRecruiters, assignAll);
         }
         toast.success('Вакансия создана');
+      }
+      // Значок для левой панели сервер подбирает в фоне (ИИ, пара секунд) —
+      // перечитываем список чуть позже, чтобы он появился без ожидания
+      // минутного обновления.
+      if (!vacancy || vacancy.title !== data.title) {
+        window.setTimeout(() => {
+          useVacancyStore.getState().fetchVacancies(true).catch(() => undefined);
+        }, 6000);
       }
       onSuccess();
     } catch (error) {
@@ -667,15 +675,29 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
                   <HfSelect
                     value={direction}
                     options={(() => {
-                      const guess = vacancyDirection(
-                        formData.title,
-                        (vacancy?.extra_data as Record<string, unknown> | undefined)?.department,
-                      );
+                      // «Автоматически» показывает то, что увидят в панели без
+                      // ручного выбора: значок от ИИ (если подобран под это
+                      // название) или угаданное по словам направление.
+                      const ex = { ...((vacancy?.extra_data as Record<string, unknown> | undefined) || {}) };
+                      delete ex.direction;
+                      const auto = vacancyMark({ title: formData.title, extra_data: ex });
+                      const aiPicked = typeof ex.icon === "string" && !!ex.icon && ex.icon_for === formData.title;
+                      const guess = vacancyDirection(formData.title, ex.department);
+                      const AutoIcon = auto.Icon;
                       return [
                         {
                           value: "",
-                          label: `Автоматически: ${DIRECTION_LABELS[guess]}`,
-                          icon: <VacancyDirectionGlyph direction={guess} className="hf-vacancy-select-icon-svg" />,
+                          label: aiPicked
+                            ? "Автоматически (подобран по названию)"
+                            : `Автоматически: ${DIRECTION_LABELS[guess]}`,
+                          icon: (
+                            <AutoIcon
+                              aria-hidden="true"
+                              strokeWidth={1.9}
+                              className="hf-vacancy-select-icon-svg"
+                              style={{ color: `hsl(${auto.hue} 65% 45%)` }}
+                            />
+                          ),
                         },
                         ...DIRECTION_ORDER.map((d) => ({
                           value: d,

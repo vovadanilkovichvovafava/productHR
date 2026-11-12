@@ -333,6 +333,8 @@ async def create_vacancy(
     await db.refresh(vacancy)
 
     logger.info(f"Created vacancy {vacancy.id}: {vacancy.title}")
+    from ...services.vacancy_icon import kick_icon_worker
+    kick_icon_worker()  # значок для левой панели подберётся в фоне
 
     # Новая заявка → уведомить HR-админов/owner'ов (кроме создателя). Они
     # распределяют заявки между рекрутёрами. Fire-and-forget (свой commit/rollback).
@@ -603,6 +605,9 @@ async def update_vacancy(
 
     await db.commit()
     await db.refresh(vacancy)
+    if (vacancy.extra_data or {}).get("icon_for") != vacancy.title:
+        from ...services.vacancy_icon import kick_icon_worker
+        kick_icon_worker()  # название сменилось — значок пересчитается в фоне
 
     # Заявка из ТГ-чата: при закрытии (не повторном) бот отчитывается в исходный чат «Найм завершён».
     # Ошибка Telegram не должна ломать закрытие — только лог.

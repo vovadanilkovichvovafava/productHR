@@ -247,6 +247,10 @@ async def lifespan(app: FastAPI):
     from api.onboarding.runtime import run_worker as onboarding_worker
     onboarding_bg_task = asyncio.create_task(onboarding_worker())
 
+    # Значки вакансий для левой панели — подбирает ИИ (services/vacancy_icon.py).
+    from api.services.vacancy_icon import icon_worker
+    vacancy_icon_task = asyncio.create_task(icon_worker())
+
     # Log all registered routes for debugging
     logger.info("=== REGISTERED API ROUTES ===")
     vacancy_routes = []
@@ -267,6 +271,7 @@ async def lifespan(app: FastAPI):
     if employee_reminders_bg_task:
         employee_reminders_bg_task.cancel()
     onboarding_bg_task.cancel()
+    vacancy_icon_task.cancel()
 
     # Close Redis connection
     try:

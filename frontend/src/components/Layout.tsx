@@ -38,8 +38,7 @@ import {
   Trash2,
   type LucideIcon,
 } from "lucide-react";
-import { DIRECTION_LABELS, resolveVacancyDirection } from "@/utils/vacancyDirection";
-import { DIRECTION_ICONS } from "@/components/vacancies/VacancyDirectionIcon";
+import { vacancyMark } from "@/components/vacancies/VacancyDirectionIcon";
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import { useVacancyStore } from "@/stores/vacancyStore";
@@ -1465,17 +1464,17 @@ export default function Layout() {
                               воронке кандидатов. Были буква названия и цветная
                               точка — владелец: «какой смысл». */}
                           {(() => {
-                            // Выбранное в форме вакансии главнее угаданного.
-                            const dir = resolveVacancyDirection({
+                            // Выбранное в форме → подобранное ИИ → угаданное
+                            // по словам (vacancyMark).
+                            const { Icon, hue, label } = vacancyMark({
                               title: v.title,
                               extra_data: v.extra_data as Record<string, unknown> | undefined,
                             });
-                            const { Icon, hue } = DIRECTION_ICONS[dir];
                             return (
                               <span
                                 className="hf-hr-vac-mark"
                                 style={{ ["--vac-hue" as string]: hue }}
-                                title={DIRECTION_LABELS[dir]}
+                                title={label}
                               >
                                 <Icon aria-hidden="true" strokeWidth={1.9} />
                               </span>

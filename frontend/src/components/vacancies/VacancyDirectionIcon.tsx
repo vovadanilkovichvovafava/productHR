@@ -15,7 +15,13 @@ import {
   Wallet,
   type LucideIcon,
 } from "lucide-react";
-import type { VacancyDirection } from "@/utils/vacancyDirection";
+import {
+  DIRECTION_LABELS,
+  isVacancyDirection,
+  vacancyDirection,
+  type VacancyDirection,
+} from "@/utils/vacancyDirection";
+import { VACANCY_ICONS } from "./vacancyIcons";
 
 // Значок направления вакансии: левая панель («Мои вакансии») и поле
 // «Направление» в форме вакансии. Иконка и оттенок плашки — здесь, правила
@@ -49,4 +55,28 @@ export function VacancyDirectionGlyph({ direction, className }: { direction: Vac
       style={{ color: `hsl(${hue} 65% 45%)` }}
     />
   );
+}
+
+/**
+ * Значок вакансии в левой панели — что показать:
+ * 1) направление, выбранное в форме руками;
+ * 2) значок, который подобрал ИИ под название (`extra_data.icon`, сервер,
+ *    services/vacancy_icon.py) — только если подобран под ТЕКУЩЕЕ название;
+ * 3) направление, угаданное по словам.
+ * Оттенок плашки — по направлению (выбранному или угаданному), вид один.
+ */
+export function vacancyMark(v: { title: string; extra_data?: Record<string, unknown> | null }): {
+  Icon: LucideIcon;
+  hue: number;
+  label: string;
+} {
+  const ex = v.extra_data || {};
+  const chosen = ex.direction;
+  if (isVacancyDirection(chosen)) {
+    return { ...DIRECTION_ICONS[chosen], label: DIRECTION_LABELS[chosen] };
+  }
+  const guess = vacancyDirection(v.title, ex.department);
+  const ai = typeof ex.icon === "string" && ex.icon_for === v.title ? VACANCY_ICONS[ex.icon] : undefined;
+  if (ai) return { Icon: ai, hue: DIRECTION_ICONS[guess].hue, label: v.title };
+  return { ...DIRECTION_ICONS[guess], label: DIRECTION_LABELS[guess] };
 }

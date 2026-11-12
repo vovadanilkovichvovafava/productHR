@@ -264,7 +264,12 @@ async def can_access_vacancy(vacancy: Vacancy, user: User, org: Organization, db
 # случилось за это время: «Взять в работу» коллеги (accepted_by), «Выйти»
 # (dismissed_by). А через ту же форму можно было вписать чат бота или id
 # «исходной заявки», которую потом правил сервер (20.10.2026).
-SERVER_MANAGED_EXTRA = ("accepted_by", "dismissed_by", "source_chat_id", "cloned_from_request_id")
+SERVER_MANAGED_EXTRA = (
+    "accepted_by", "dismissed_by", "source_chat_id", "cloned_from_request_id",
+    # Значок вакансии подбирает сервер (services/vacancy_icon.py): форма,
+    # открытая до подбора, не должна его стирать.
+    "icon", "icon_for",
+)
 
 
 def keep_server_extra(current: Optional[dict], incoming: Optional[dict]) -> dict:
