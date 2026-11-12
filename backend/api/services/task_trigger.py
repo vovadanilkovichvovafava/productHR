@@ -734,6 +734,35 @@ async def parse_message_to_tasks(text: str, user_name: str, existing_tasks: list
         return []
 
 
+def _norm_name(s: str) -> str:
+    """Название для сравнения: без регистра и знаков, кириллица → латиница."""
+    s = (s or "").lower()
+    s = ''.join(_CYR_TO_LAT.get(c, c) for c in s)
+    return re.sub(r'[^a-z0-9]+', '', s)
+
+
+def find_projects_by_name(query: str, projects: list) -> list:
+    """Проекты под название, которое человек написал руками (/chatproject).
+
+    Совпало целиком (без регистра и знаков) — один он; иначе все, в чьём
+    названии есть написанное; иначе похожий с опечаткой (≥ 0.8). Несколько —
+    вызывающий переспрашивает."""
+    q = _norm_name(query)
+    if not q:
+        return []
+    exact = [p for p in projects if _norm_name(p.name) == q]
+    if exact:
+        return exact[:1]
+    part = [p for p in projects if q in _norm_name(p.name)]
+    if part:
+        return part
+    scored = sorted(
+        ((difflib.SequenceMatcher(None, q, _norm_name(p.name)).ratio(), p) for p in projects),
+        key=lambda x: -x[0],
+    )
+    return [scored[0][1]] if scored and scored[0][0] >= 0.8 else []
+
+
 async def create_tasks_from_message(
     db: AsyncSession,
     message_text: str,
@@ -908,6 +937,18 @@ async def create_tasks_from_message(
                 f"🎯 Matched project '{best_p.name}' from message text "
                 f"(fuzzy, ratio={best_ratio:.2f})"
             )
+
+    # Проект в тексте не назван — берём проект чата, если его закрепили
+    # командой /chatproject (владелец, 12.11.2026: «чтобы не писать название
+    # проекта, бот понимал, что из этого чата задачи — для New Hr»).
+    if not text_matched_project and chat_id:
+        chat_row = (await db.execute(
+            select(Chat).where(Chat.telegram_chat_id == chat_id)
+        )).scalar_one_or_none()
+        if chat_row and chat_row.project_id:
+            text_matched_project = next((p for p in all_projects if p.id == chat_row.project_id), None)
+            if text_matched_project:
+                logger.info(f"🎯 Project from chat default: '{text_matched_project.name}'")
 
     if not text_matched_project:
         logger.warning(

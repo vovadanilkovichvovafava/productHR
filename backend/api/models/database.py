@@ -430,6 +430,9 @@ class Chat(Base):
     entity_id = Column(Integer, ForeignKey("entities.id", ondelete="SET NULL"), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     auto_tasks_enabled = Column(Boolean, default=True, server_default="true")  # Auto-create tasks & status detection (on by default)
+    # Проект чата по умолчанию (12.11.2026): задачи из сообщения без названия
+    # проекта бот заводит сюда. Ставится командой /chatproject в самом чате.
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
     remind_enabled = Column(Boolean, default=True, server_default="true")  # Standup reminders via /remind
     last_standup_at = Column(DateTime, nullable=True)  # Last time auto-tasks created tasks from this chat
     created_at = Column(DateTime, default=func.now())

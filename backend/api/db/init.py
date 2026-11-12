@@ -209,6 +209,13 @@ async def init_database():
          "project_tasks.source_chat_id"),
         ("ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS source_message TEXT",
          "project_tasks.source_message"),
+        # Проект чата по умолчанию (12.11.2026, /chatproject): пусто — как было,
+        # проект берётся только из текста сообщения.
+        ("ALTER TABLE chats ADD COLUMN IF NOT EXISTS project_id INTEGER "
+         "REFERENCES projects(id) ON DELETE SET NULL",
+         "chats.project_id"),
+        ("CREATE INDEX IF NOT EXISTS ix_chats_project_id ON chats (project_id)",
+         "индекс chats.project_id"),
         # Иерархия и видимость отделов доски (30.09.2026): песочницы —
         # родительские, команды — дочерние; юниты видны не всем.
         ("ALTER TABLE staff_board_departments ADD COLUMN IF NOT EXISTS kind VARCHAR(10) DEFAULT 'team'",

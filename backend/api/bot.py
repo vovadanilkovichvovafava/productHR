@@ -866,6 +866,82 @@ async def cmd_project(message: types.Message):
         await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+@dp.message(Command("chatproject"))
+async def cmd_chat_project(message: types.Message):
+    """Проект чата по умолчанию (владелец, 12.11.2026): задачи из сообщения,
+    где проект не назван, бот заводит в этот проект.
+
+        /chatproject            — какой проект у чата
+        /chatproject New Hr     — закрепить проект
+        /chatproject -          — снять
+    Только в групповом чате; менять может участник организации чата."""
+    from .services.task_trigger import find_projects_by_name
+
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer("Команда работает в рабочем чате: напишите её там, где ставите задачи.")
+        return
+    arg = (message.text or "").split(maxsplit=1)
+    query = arg[1].strip() if len(arg) > 1 else ""
+
+    async with async_session() as session:
+        chat = (await session.execute(
+            select(Chat).where(Chat.telegram_chat_id == message.chat.id)
+        )).scalar_one_or_none()
+        if not chat:
+            await message.answer("Этот чат ещё не подключён к Enceladus.")
+            return
+
+        current = await session.get(Project, chat.project_id) if chat.project_id else None
+        if not query:
+            await message.answer(
+                f"Проект чата: «{current.name}». Задачи без названия проекта идут туда.\n"
+                "Сменить — /chatproject <название>, снять — /chatproject -"
+                if current else
+                "У чата нет проекта по умолчанию — проект нужно писать в сообщении.\n"
+                "Закрепить — /chatproject <название проекта>"
+            )
+            return
+
+        access = await _get_user_access(session, message.from_user.id)
+        if not access or not access['org_id']:
+            await message.answer(_link_problem_text(access['user'] if access else None))
+            return
+        if chat.org_id and chat.org_id != access['org_id']:
+            await message.answer("Этот чат относится к другой организации — менять его проект нельзя.")
+            return
+
+        if query in ("-", "—", "нет", "снять", "off"):
+            chat.project_id = None
+            await session.commit()
+            logger.info(f"CHAT_PROJECT unset: chat {chat.id} by tg {message.from_user.id}")
+            await message.answer("Проект чата снят. Проект снова нужно писать в сообщении.")
+            return
+
+        projects = (await session.execute(
+            select(Project).where(Project.org_id == access['org_id'])
+        )).scalars().all()
+        found = find_projects_by_name(query, list(projects))
+        if not found:
+            names = ", ".join(sorted(p.name for p in projects)[:15])
+            await message.answer(f"Проект «{query}» не нашёл. Есть: {names}")
+            return
+        if len(found) > 1:
+            names = "\n".join(f"  • {p.name}" for p in found[:10])
+            await message.answer(f"Под «{query}» подходит несколько проектов — напишите точнее:\n{names}")
+            return
+
+        project = found[0]
+        chat.project_id = project.id
+        if not chat.org_id:
+            chat.org_id = access['org_id']
+        await session.commit()
+        logger.info(f"CHAT_PROJECT set: chat {chat.id} → project {project.id} «{project.name}» by tg {message.from_user.id}")
+        await message.answer(
+            f"✅ Проект чата — «{project.name}». Задачи из сообщений, где проект не назван, "
+            "бот будет предлагать завести туда. Назовёте другой проект в сообщении — возьмёт его."
+        )
+
+
 @dp.message(Command("my"))
 async def cmd_my_tasks(message: types.Message):
     """My tasks for today and upcoming."""
@@ -1116,6 +1192,7 @@ async def cmd_help(message: types.Message):
         "/blocker — сообщить менеджеру что застрял\n"
         "/my — мои задачи\n"
         "/project — выбрать проект\n"
+        "/chatproject — проект чата по умолчанию (в рабочем чате)\n"
         "/status — статус проекта / стендап\n"
         "/dept — мой отдел\n\n"
         "*HR*\n"
