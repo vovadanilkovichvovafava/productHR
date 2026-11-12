@@ -11760,7 +11760,9 @@ a.hf-forms-name:hover { text-decoration: underline; }
 }
 .hf-fb-join { flex: 0 0 64px; padding-top: 6px; font-size: 13px; color: var(--hf-main-600); }
 .hf-fb-join-select { width: 64px; margin-top: -6px; }
-.hf-fb-join-text { padding-left: 4px; font-weight: 500; }
+/* «ИЛИ» начинает новую группу условий — отступ сверху показывает границу. */
+.hf-fb-rule.is-or { margin-top: 8px; }
+.hf-fb-formula { margin-top: 10px; padding: 6px 8px; border-radius: 6px; background: var(--hf-main-50, #f5f6f8); font-size: 12px; color: var(--hf-main-600); line-height: 1.4; }
 .hf-fb-body { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .hf-fb-select {
   display: inline-flex;

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_FILTERS, describeFilters, newRule, opsFor, readSavedFilters, rowMatchesFilters,
+  EMPTY_FILTERS, describeFilters, filterGroups, newRule, opsFor, readSavedFilters, rowMatchesFilters,
   ruleComplete, type BoardFilters,
 } from "../StatusesPage";
 import type { BoardRow } from "@/services/api/staffBoard";
@@ -52,6 +52,47 @@ describe("rowMatchesFilters", () => {
     ];
     expect([seo, push].map((r) => rowMatchesFilters(r, f("or", ...rules)))).toEqual([true, true]);
     expect([seo, push].map((r) => rowMatchesFilters(r, f("and", ...rules)))).toEqual([false, false]);
+  });
+
+  it("своя связка у каждой строки — формула: «И» сильнее «ИЛИ»", () => {
+    // Отдел: SEO И выход в октябре ИЛИ Отдел: Push  =  (SEO и октябрь) или Push
+    const formula: BoardFilters = { join: "or", rules: [
+      { ...newRule("department"), op: "is", values: ["SEO team"] },
+      { ...newRule("department_start_date"), op: "between", from: "2026-10-01", to: "2026-10-31", join: "and" },
+      { ...newRule("department"), op: "is", values: ["Push team"], join: "or" },
+    ] };
+    const seoSep = row({ department_name: "SEO team", department_start_date: "2026-09-01" });
+    expect([seo, push, seoSep, none].map((r) => rowMatchesFilters(r, formula))).toEqual([true, true, false, false]);
+    expect(filterGroups(formula).map((g) => g.length)).toEqual([2, 1]);
+    expect(describeFilters(formula)).toMatch(/^Показываем: \(Отдел: SEO team и .+\) или Отдел: Push team\.$/);
+
+    // Push ИЛИ SEO И октябрь  =  Push или (SEO и октябрь) — не ((Push или SEO) и октябрь)
+    const other: BoardFilters = { join: "or", rules: [
+      { ...newRule("department"), op: "is", values: ["Push team"] },
+      { ...newRule("department"), op: "is", values: ["SEO team"], join: "or" },
+      { ...newRule("department_start_date"), op: "between", from: "2026-10-01", to: "2026-10-31", join: "and" },
+    ] };
+    expect([seo, push, seoSep].map((r) => rowMatchesFilters(r, other))).toEqual([true, true, false]);
+  });
+
+  it("незаполненная строка посередине формулу не ломает", () => {
+    const withBlank: BoardFilters = { join: "or", rules: [
+      { ...newRule("department"), op: "is", values: ["SEO team"] },
+      { ...newRule(), join: "or" },
+      { ...newRule("department_start_date"), op: "between", from: "2026-10-01", to: "2026-10-31", join: "and" },
+    ] };
+    expect(filterGroups(withBlank).map((g) => g.length)).toEqual([2]);
+  });
+
+  it("сохранённые связки строк читаются; старые без связки — по общей", () => {
+    const saved = { join: "and", rules: [
+      { id: "a", key: "department", op: "is", values: ["SEO team"] },
+      { id: "b", key: "department", op: "is", values: ["Push team"], join: "or" },
+      { id: "c", key: "department", op: "is", values: ["X"] },
+    ] };
+    const r = readSavedFilters(saved);
+    expect(r.rules.map((x) => x.join)).toEqual([undefined, "or", undefined]);
+    expect(filterGroups({ ...r, rules: r.rules }).map((g) => g.map((x) => x.id))).toEqual([["a"], ["b", "c"]]);
   });
 
   it("HR — по каждому человеку, а не по склеенной строке", () => {
