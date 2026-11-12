@@ -73,3 +73,20 @@ describe("apiErrorDetail", () => {
     expect(apiErrorDetail(new Error("network"), "Ошибка при создании")).toBe("Ошибка при создании");
   });
 });
+
+describe("направление (значок в левой панели)", () => {
+  it("выбранное сохраняется в extra_data.direction", () => {
+    const p = buildVacancyPayload(form(), { customerText: "", sandboxId: "", direction: "video" });
+    expect(p.extra_data.direction).toBe("video");
+  });
+  it("«Автоматически» снимает прежний выбор", () => {
+    const vacancy = { id: 1, extra_data: { direction: "video" } } as unknown as Vacancy;
+    const p = buildVacancyPayload(form(), { vacancy, customerText: "", sandboxId: "", direction: "" });
+    expect(p.extra_data.direction).toBeUndefined();
+  });
+  it("форма без поля не трогает сохранённое", () => {
+    const vacancy = { id: 1, extra_data: { direction: "video" } } as unknown as Vacancy;
+    const p = buildVacancyPayload(form(), { vacancy, customerText: "", sandboxId: "" });
+    expect(p.extra_data.direction).toBe("video");
+  });
+});

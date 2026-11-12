@@ -44,8 +44,8 @@ export function validateVacancyForm(
 export function buildVacancyPayload(
   f: VacancyFormData,
   {
-    vacancy, customerText, sandboxId, positionsCount,
-  }: { vacancy?: Vacancy; customerText: string; sandboxId: string; positionsCount?: string },
+    vacancy, customerText, sandboxId, positionsCount, direction,
+  }: { vacancy?: Vacancy; customerText: string; sandboxId: string; positionsCount?: string; direction?: string },
 ) {
   return {
     title: f.title.trim(),
@@ -79,6 +79,9 @@ export function buildVacancyPayload(
       board_sandbox_id: sandboxId ? Number(sandboxId) : undefined,
       // Сколько человек нужно нанять (пишет и бот, показывает предпросмотр заявки).
       ...(positionsCount !== undefined ? { positions_count: Math.max(1, Number(positionsCount) || 1) } : {}),
+      // Значок направления в левой панели (12.11.2026). Пусто — «Автоматически»
+      // (угадывается по названию): ключ убираем, а не храним "".
+      ...(direction !== undefined ? { direction: direction || undefined } : {}),
     },
   };
 }

@@ -19,6 +19,8 @@ import {
   HuntflowClose28Icon, HuntflowEyeOffIcon, HuntflowFlagIcon,
 } from './vacancyFormParts';
 import { apiErrorDetail, buildVacancyPayload, validateVacancyForm } from './vacancyFormPayload';
+import { VacancyDirectionGlyph } from './VacancyDirectionIcon';
+import { DIRECTION_LABELS, DIRECTION_ORDER, isVacancyDirection, vacancyDirection } from '@/utils/vacancyDirection';
 import VacancyConfirmModal, { type VacancyConfirmAction } from './VacancyConfirmModal';
 import { isVacancyParticipant, hasPersonallyAccepted, isExplicitlyAssigned, getVacancyExitOptions, findSameTitleVacancy } from '@/utils/vacancy';
 import { backdropClose } from '@/utils/backdropClose';
@@ -166,6 +168,11 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
     const n = vacancy?.extra_data?.positions_count ?? initialData?.extra_data?.positions_count;
     return typeof n === 'number' && n >= 1 ? String(n) : '1';
   });
+  // Направление — значок вакансии в левой панели. "" — угадать по названию.
+  const [direction, setDirection] = useState<string>(() => {
+    const d = vacancy?.extra_data?.direction;
+    return isVacancyDirection(d) ? d : '';
+  });
   const [sandboxes, setSandboxes] = useState<BoardDepartment[]>([]);
   useEffect(() => {
     getBoardDepartments()
@@ -251,7 +258,7 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
 
     setLoading(true);
     try {
-      const data = buildVacancyPayload(formData, { vacancy, customerText, sandboxId, positionsCount });
+      const data = buildVacancyPayload(formData, { vacancy, customerText, sandboxId, positionsCount, direction });
 
       if (vacancy) {
         await updateVacancy(vacancy.id, data);
@@ -649,6 +656,35 @@ export default function VacancyForm({ vacancy, prefillData, onClose, onSuccess }
                       { value: 1, label: "Высокий", icon: <HuntflowFlagIcon className="hf-vacancy-select-icon-svg hf-vacancy-select-icon-danger" /> },
                     ]}
                     onChange={(value) => setFormData({ ...formData, priority: parseInt(value) })}
+                    disabled={isReadOnlyRequest}
+                  />
+                </div>
+                <div>
+                  {/* Значок вакансии в левой панели (12.11.2026). По умолчанию
+                      угадывается по названию; не угадался («Car», «C P») —
+                      выбирают руками, и выбор главнее догадки. */}
+                  <label className={hfLabelClass}>Направление</label>
+                  <HfSelect
+                    value={direction}
+                    options={(() => {
+                      const guess = vacancyDirection(
+                        formData.title,
+                        (vacancy?.extra_data as Record<string, unknown> | undefined)?.department,
+                      );
+                      return [
+                        {
+                          value: "",
+                          label: `Автоматически: ${DIRECTION_LABELS[guess]}`,
+                          icon: <VacancyDirectionGlyph direction={guess} className="hf-vacancy-select-icon-svg" />,
+                        },
+                        ...DIRECTION_ORDER.map((d) => ({
+                          value: d,
+                          label: DIRECTION_LABELS[d],
+                          icon: <VacancyDirectionGlyph direction={d} className="hf-vacancy-select-icon-svg" />,
+                        })),
+                      ];
+                    })()}
+                    onChange={(value) => setDirection(String(value))}
                     disabled={isReadOnlyRequest}
                   />
                 </div>

@@ -37,19 +37,9 @@ import {
   Building2,
   Trash2,
   type LucideIcon,
-  Clapperboard,
-  Code2,
-  Folder,
-  BadgeDollarSign,
-  Headphones,
-  Palette,
-  PenLine,
-  Target,
-  TrendingUp,
-  UserSearch,
-  Wallet,
 } from "lucide-react";
-import { DIRECTION_LABELS, vacancyDirection, type VacancyDirection } from "@/utils/vacancyDirection";
+import { DIRECTION_LABELS, resolveVacancyDirection } from "@/utils/vacancyDirection";
+import { DIRECTION_ICONS } from "@/components/vacancies/VacancyDirectionIcon";
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import { useVacancyStore } from "@/stores/vacancyStore";
@@ -271,23 +261,6 @@ function getBlockForPath(path: string): string | null {
   return null;
 }
 
-
-/** Значок направления вакансии в левой панели: иконка и оттенок плашки. */
-const DIRECTION_ICONS: Record<VacancyDirection, { Icon: LucideIcon; hue: number }> = {
-  traffic: { Icon: Target, hue: 210 },
-  design: { Icon: Palette, hue: 290 },
-  video: { Icon: Clapperboard, hue: 335 },
-  content: { Icon: PenLine, hue: 30 },
-  dev: { Icon: Code2, hue: 250 },
-  analytics: { Icon: BarChart3, hue: 185 },
-  recruiting: { Icon: UserSearch, hue: 160 },
-  finance: { Icon: Wallet, hue: 45 },
-  support: { Icon: Headphones, hue: 15 },
-  growth: { Icon: TrendingUp, hue: 140 },
-  sales: { Icon: BadgeDollarSign, hue: 95 },
-  management: { Icon: Briefcase, hue: 225 },
-  other: { Icon: Folder, hue: 220 },
-};
 
 export default function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -1492,10 +1465,11 @@ export default function Layout() {
                               воронке кандидатов. Были буква названия и цветная
                               точка — владелец: «какой смысл». */}
                           {(() => {
-                            const dir = vacancyDirection(
-                              v.title,
-                              (v.extra_data as Record<string, unknown> | undefined)?.department,
-                            );
+                            // Выбранное в форме вакансии главнее угаданного.
+                            const dir = resolveVacancyDirection({
+                              title: v.title,
+                              extra_data: v.extra_data as Record<string, unknown> | undefined,
+                            });
                             const { Icon, hue } = DIRECTION_ICONS[dir];
                             return (
                               <span
