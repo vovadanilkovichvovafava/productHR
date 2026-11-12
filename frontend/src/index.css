@@ -10820,9 +10820,12 @@ body.performance-mode .glass-card:hover {
 .hf-statuses-picker-row:hover .hf-statuses-picker-grip { visibility: visible; }
 .hf-statuses-picker-row.is-dragging { opacity: 0.4; }
 .hf-statuses-picker-row.is-over { box-shadow: inset 0 2px 0 #7b68ee; }
-.hf-statuses-picker-unset { margin-left: auto; flex-shrink: 0; color: var(--hf-main-400); }
-.hf-statuses-hr-option:hover .hf-statuses-picker-unset { color: var(--hf-red-600); }
-.hf-statuses-picker-person { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: var(--hf-main-800); }
+/* ✓ у выбранного (как у текущего значения), при наведении — «×» «снять». */
+.hf-statuses-picker-onmark { display: inline-grid; margin-left: auto; flex-shrink: 0; color: var(--hf-main-400); }
+.hf-statuses-picker-onmark > * { grid-area: 1 / 1; }
+.hf-statuses-picker-onmark .is-x { visibility: hidden; color: var(--hf-red-600); }
+.hf-statuses-hr-option:hover .hf-statuses-picker-onmark .is-check { visibility: hidden; }
+.hf-statuses-hr-option:hover .hf-statuses-picker-onmark .is-x { visibility: visible; }
 .hf-statuses-picker-row.is-menu .hf-statuses-picker-more { color: var(--hf-main-900); background: var(--hf-main-100); }
 /* Окошко «…» у пункта — как в ClickUp (скрин клиента, 11.11.2026): поле с
    названием, палитра 4×6 кружками, «Мои цвета» с «+», «Удалить». */

@@ -44,7 +44,7 @@ describe("CatalogPicker", () => {
     expect(onPick).toHaveBeenCalledWith("1");
   });
 
-  it("закрытый список (HR): без «Добавить» и без «…», свой заголовок выбранных", () => {
+  it("закрытый список (HR): без «Добавить» и без «…»; выбранный — на месте, с ✓, без отдельного блока", () => {
     const onPick = vi.fn();
     render(
       <CatalogPicker
@@ -52,25 +52,28 @@ describe("CatalogPicker", () => {
         pos={{ top: 0, left: 0, maxHeight: 360 }}
         placeholder="Поиск…"
         groups={[{ label: "Люди", options: [
-          { key: "1", label: "Эльвира", avatar: <span>Э</span> },
-          { key: "2", label: "Мария", avatar: <span>М</span> },
+          { key: "1", label: "Эльвира" },
+          { key: "2", label: "Мария" },
         ] }]}
         taken={[]}
-        selected={["1"]}
-        selectedLabel="Назначены"
+        selected={["2"]}
         onPick={onPick}
       />,
     );
-    expect(screen.getByText("Назначены")).toBeTruthy();
+    expect(screen.queryByText("Назначены")).toBeNull();
+    expect(screen.queryByText("Выбраны")).toBeNull();
+    // порядок списка не меняется: выбранная Мария — второй, как и была
+    const labels = [...document.querySelectorAll(".hf-statuses-picker-pill")].map((e) => e.textContent);
+    expect(labels).toEqual(["Эльвира", "Мария"]);
     expect(screen.queryByText(/Добавить/)).toBeNull();
     expect(screen.queryByLabelText(/Настроить/)).toBeNull();
     const input = screen.getByPlaceholderText("Поиск…");
     fireEvent.change(input, { target: { value: "Новый человек" } });
     expect(screen.queryByText(/Добавить/)).toBeNull();
     expect(screen.getByText("Ничего не найдено")).toBeTruthy();
-    fireEvent.change(input, { target: { value: "мар" } });
+    fireEvent.change(input, { target: { value: "эль" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onPick).toHaveBeenCalledWith("2");
+    expect(onPick).toHaveBeenCalledWith("1");
   });
 
   it("после «Добавить» поиск пустеет и остальные пункты снова видны", () => {

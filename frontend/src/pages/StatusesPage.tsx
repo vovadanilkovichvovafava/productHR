@@ -3151,8 +3151,6 @@ type PickerOption = {
   style?: React.CSSProperties;
   /** Можно переименовать и перекрасить, но не удалить (песочница). */
   noDelete?: boolean;
-  /** Люди (HR): кружок с инициалами и имя обычным текстом вместо пилюли. */
-  avatar?: ReactNode;
 };
 
 /** Палитра в «…» — та же, что у выпадающих списков ClickUp (скрин клиента,
@@ -3201,7 +3199,7 @@ const OPTION_MENU_H = 360;
  *  ячейкой поверх доски (useCellMenu: закрытие по клику мимо, Escape и
  *  прокрутке доски). */
 export function CatalogPicker({
-  menuRef, pos, placeholder, groups, taken, current, selected, selectedLabel = "Выбраны",
+  menuRef, pos, placeholder, groups, taken, current, selected,
   onPick, onAdd, onRename, onDelete, deleteWarning, onClear, clearLabel, onRecolor, onReorder,
 }: {
   menuRef: React.RefObject<HTMLDivElement>;
@@ -3213,8 +3211,6 @@ export function CatalogPicker({
   current?: string | null;
   /** Несколько значений: ключи выбранных. Клик по выбранному — снять. */
   selected?: string[];
-  /** Заголовок над выбранными («Выбраны», у HR — «Назначены»). */
-  selectedLabel?: string;
   onPick: (key: string) => void;
   /** Нет — список закрытый (люди-HR): «Добавить» не предлагаем. */
   onAdd?: (text: string) => void;
@@ -3254,10 +3250,13 @@ export function CatalogPicker({
   const chosen = new Set(selected ?? []);
   const all = groups.flatMap((g) => g.options);
   const match = (o: PickerOption) => !needle || o.label.toLowerCase().includes(needle);
+  // Выбранные остаются на своём месте в списке — подсвечены и с ✓, как
+  // текущее значение у должности. Отдельного блока «Выбраны» / «Назначены»
+  // больше нет: «меня наругают за 3 разных дропдауна, надо чтобы был как
+  // третий» (владелец, 12.11.2026 — должность, сорсер и HR выглядели по-разному).
   const shown = groups
-    .map((g) => ({ ...g, options: g.options.filter((o) => match(o) && !chosen.has(o.key)) }))
+    .map((g) => ({ ...g, options: g.options.filter(match) }))
     .filter((g) => g.options.length);
-  const picked = all.filter((o) => chosen.has(o.key) && match(o));
   // Окно с несколькими значениями после выбора не закрывается, поэтому поиск
   // чистим сами: иначе набранное «Вера» оставалось в поле и прятало весь
   // остальной список — казалось, что прежние сорсеры пропали (11.11.2026).
@@ -3344,9 +3343,7 @@ export function CatalogPicker({
     onReorder(group, keys);
   };
 
-  const pill = (o: PickerOption) => (o.avatar ? (
-    <span className="hf-statuses-picker-person">{o.avatar}{o.label}</span>
-  ) : (
+  const pill = (o: PickerOption) => (
     <span
       className="hf-statuses-picker-pill"
       style={o.color ? colorPill(o.color) : o.style ?? {
@@ -3356,7 +3353,7 @@ export function CatalogPicker({
     >
       {o.label}
     </span>
-  ));
+  );
 
   const optionMenu = (o: PickerOption) => {
     if (!menu || menu.key !== o.key) return null;
@@ -3466,12 +3463,16 @@ export function CatalogPicker({
         {pill(o)}
         {o.hint && <span className="hf-statuses-picker-hint">{o.hint}</span>}
         {o.key === current && !multi && <Check size={13} className="hf-statuses-picker-hint" />}
-        {/* Выбранное в окне с несколькими значениями снимается кликом, но
-            галочка этого не говорила: «как убрать Валю с кандидата —
-            непонятно, я не хочу её удалять» (владелец, 11.11.2026). Теперь
-            справа «×», как у HR («такой же должен быть дроп-лист, единый»);
-            «Удалить» в «…» — удаление из СПИСКА, другое действие. */}
-        {isOn && <X size={14} className="hf-statuses-picker-unset" aria-label="Снять" />}
+        {/* Выбранное в окне с несколькими значениями — ✓ справа, как текущее
+            у должности; при наведении ✓ сменяется на «×»: клик снимает с
+            ЭТОГО человека («как убрать Валю с кандидата — непонятно»,
+            владелец 11.11.2026). «Удалить» в «…» — удаление из СПИСКА. */}
+        {isOn && (
+          <span className="hf-statuses-picker-onmark">
+            <Check size={13} className="is-check" />
+            <X size={14} className="is-x" aria-label="Снять" />
+          </span>
+        )}
       </button>
       {o.editable && (onRename || onDelete || onRecolor) && (
         <button
@@ -3507,7 +3508,7 @@ export function CatalogPicker({
           // Точное имя ищем среди ВСЕХ, включая уже выбранные: раньше Enter на
           // имени выбранного сорсера ставил ПЕРВОГО из остальных.
           const exact = all.find((o) => o.label.trim().toLowerCase() === needle);
-          const first = shown[0]?.options[0] ?? picked[0];
+          const first = shown[0]?.options[0];
           if (exact) pick(exact.key);
           else if (canAdd) add(text);
           else if (first) pick(first.key);
@@ -3526,21 +3527,15 @@ export function CatalogPicker({
           {clearLabel || "— убрать"}
         </button>
       )}
-      {multi && picked.length > 0 && (
-        <div>
-          <div className="hf-statuses-hr-menu-hint">{selectedLabel}</div>
-          {picked.map((o) => row(o, null, true))}
-        </div>
-      )}
       {shown.map((g) => (
         <div key={g.label}>
           <div className="hf-statuses-hr-menu-hint">{g.label}</div>
-          {g.options.map((o) => row(o, g.label, false))}
+          {g.options.map((o) => row(o, g.label, chosen.has(o.key)))}
         </div>
       ))}
       {/* Пока ничего не ввели — видимая подсказка, что новое добавляется
           отсюда же: клик ставит курсор в поиск. */}
-      {onAdd && !needle && (shown.length > 0 || picked.length > 0) && (
+      {onAdd && !needle && shown.length > 0 && (
         <button
           type="button"
           className="hf-statuses-hr-option hf-statuses-picker-add is-hint"
@@ -3549,7 +3544,7 @@ export function CatalogPicker({
           <Plus size={13} /> Добавить — введите название в поиске
         </button>
       )}
-      {!shown.length && !picked.length && !canAdd && (
+      {!shown.length && !canAdd && (
         <div className="hf-statuses-hr-menu-hint">
           {needle ? "Ничего не найдено" : onAdd ? "Список пуст — начните вводить, чтобы добавить" : "Список пуст"}
         </div>
@@ -3768,6 +3763,8 @@ function SourcerCell({
           taken={catalog.map((t) => t.name)}
           selected={ids}
           onPick={toggle}
+          onClear={ids.length ? () => ids.forEach((k) => toggle(k)) : undefined}
+          clearLabel="— убрать всех"
           onAdd={async (name) => {
             try {
               const tag = await createTag({ name, color: SOURCER_COLORS[catalog.length % SOURCER_COLORS.length] });
@@ -3843,7 +3840,7 @@ function AssigneeCell({
   const options = [
     ...people.map((p) => ({ id: p.user_id, name: p.user_name })),
     ...assignees.filter((a) => !people.some((p) => p.user_id === a.user_id)).map((a) => ({ id: a.user_id, name: a.name })),
-  ].map((p) => ({ key: String(p.id), label: p.name || `#${p.id}`, avatar: avatar(p.name, true) }));
+  ].map((p) => ({ key: String(p.id), label: p.name || `#${p.id}` }));
 
   return (
     <div className="hf-statuses-assignee" data-many={assignees.length > 2}>
@@ -3865,10 +3862,11 @@ function AssigneeCell({
         )}
       </button>
       {menu.open && menu.pos && (
-        /* То же окно, что у сорсеров и всех списков доски («дроп-лист
-           единый», владелец 11.11.2026): сверху «Назначены» с «×», ниже
-           «Люди», поиск. Людей отсюда не добавляют и не переименовывают —
-           поэтому без «Добавить» и без «…». */
+        /* То же окно, что у должности, сорсеров и всех списков доски
+           («дроп-лист единый», «надо, чтобы был как третий» — владелец
+           11–12.11.2026): один список «Люди», назначенные подсвечены и с ✓
+           (при наведении «×»), сверху «— убрать всех». Людей отсюда не
+           добавляют и не переименовывают — поэтому без «Добавить» и «…». */
         <CatalogPicker
           menuRef={menu.menuRef}
           pos={menu.pos}
@@ -3876,8 +3874,9 @@ function AssigneeCell({
           groups={[{ label: "Люди", options }]}
           taken={[]}
           selected={ids.map(String)}
-          selectedLabel="Назначены"
           onPick={toggle}
+          onClear={ids.length ? () => onSave([]) : undefined}
+          clearLabel="— убрать всех"
         />
       )}
     </div>
