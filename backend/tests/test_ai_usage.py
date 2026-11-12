@@ -53,6 +53,10 @@ async def test_card_parse_asks_only_card_fields_and_is_counted(monkeypatch, capl
         return httpx.Response(200, json=_ok_message(json.dumps(answer, ensure_ascii=False)))
 
     monkeypatch.setattr(parser, "_get_ai_client", lambda: _client(handler))
+    # С 12.11.2026 окно разбора — на Haiku 5.5; фоновую сверку здесь не ждём.
+    monkeypatch.setattr(parser.settings, "resume_parser_model", "claude-haiku-5-5")
+    monkeypatch.setattr(parser.settings, "claude_model", "claude-sonnet-4-6")
+    monkeypatch.setattr(parser, "_compare_left", 0)
 
     class _Doc:
         status, content, error = "parsed", "Иванов Иван\nМаркетолог\nivan@mail.ru", None
@@ -67,14 +71,17 @@ async def test_card_parse_asks_only_card_fields_and_is_counted(monkeypatch, capl
     prompt = sent["messages"][0]["content"]
     assert prompt.startswith(parser.RESUME_CARD_PROMPT)
     assert "experience\"" not in parser.RESUME_CARD_PROMPT and "education" not in parser.RESUME_CARD_PROMPT
-    assert sent["max_tokens"] == 2048
+    assert sent["model"] == "claude-haiku-5-5"
+    assert sent["max_tokens"] == 4096               # запас на размышления Haiku
+    assert sent["output_config"] == {"effort": "low"}
     assert resume.name == "Иванов Иван" and resume.summary
     assert resume.salary_currency == "RUB"          # null от модели → по умолчанию
     assert len(resume.skills) == 30                 # не больше 30
 
     line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("AI_USAGE model"))
-    assert "caller=services/parser.py:parse_with_ai" in line
+    assert "caller=services/parser.py:_ask_json" in line
     assert "in=1200 out=150" in line
+    # Модель и цену учёт берёт из ОТВЕТА; заглушка отвечает от имени Sonnet.
     assert "cost=$0.00585" in line                  # 1200×3 + 150×15 за миллион
 
 

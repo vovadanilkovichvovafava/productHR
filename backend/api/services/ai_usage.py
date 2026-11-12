@@ -44,6 +44,7 @@ PRICES: Tuple[Tuple[str, float, float], ...] = (
 # Откуда вызван → подпись по-русски для страницы «Расход ИИ».
 CALLER_LABELS: Tuple[Tuple[str, str], ...] = (
     ("services/parser.py:parse_with_ai", "Разбор резюме / вакансии (окно «Загрузка из файла»)"),
+    ("services/parser.py:_ask_json", "Разбор резюме / вакансии (окно «Загрузка из файла»)"),
     ("services/parser.py:split_vacancy_description", "Разбивка описания вакансии"),
     ("services/documents.py", "Распознавание картинок и сканов (Vision)"),
     ("services/resume_parser.py", "Разбор резюме (массовый, «PDF → Резюме»)"),

@@ -112,6 +112,19 @@ class Settings(BaseSettings):
         alias="CLAUDE_MODEL"
     )
 
+    # Разбор резюме в окне «Загрузка из файла» — дешёвая модель (12.11.2026).
+    # Совпадает с claude_model — работает как раньше, одной моделью.
+    resume_parser_model: str = Field(
+        default="claude-haiku-5-5",
+        alias="RESUME_PARSER_MODEL"
+    )
+    # Сколько первых разборов после запуска сервера сверить с основной моделью
+    # в фоне (лог RESUME_COMPARE). 0 — не сверять.
+    resume_compare_runs: int = Field(
+        default=30,
+        alias="RESUME_COMPARE_RUNS"
+    )
+
     # Redis (optional, for future use)
     redis_url: str = Field(
         default="redis://localhost:6379",

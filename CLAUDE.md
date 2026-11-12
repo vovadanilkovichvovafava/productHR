@@ -1469,6 +1469,19 @@ immutable`): байты файла по id не меняются никогда.
   ИИ не работал целиком. Пополняет владелец в консоли Anthropic.
 - Сканы и фото: без текста в файле каждая страница идёт отдельным вызовом
   Vision (`documents._ocr_images`), потом — сам разбор.
+- **С 12.11.2026 окно «Загрузка из файла» разбирает на Haiku 5.5**
+  (`RESUME_PARSER_MODEL`, по умолчанию `claude-haiku-5-5`; Sonnet 4.6 стоил
+  ≈1,5 цента за резюме, Haiku ≈0,05). Только `resume_card`; полный разбор,
+  вакансии, Vision, бот — на `CLAUDE_MODEL`. Запрос — `parser._ask_json`:
+  усилие `low` полем `extra_body` (SDK 0.76 не знает `output_config`), ответ
+  берётся мимо блоков размышлений (у Haiku 5.5 они идут ПЕРВЫМИ — `content[0]`
+  уже не ответ), без `temperature` (на Haiku 5.5 — 400). Отказ, кривой JSON
+  или ошибка Haiku — тот же запрос уходит `CLAUDE_MODEL` (`RESUME_PARSE_FALLBACK`).
+  Первые `RESUME_COMPARE_RUNS` (30) разборов после запуска сервера ещё раз
+  прогоняются основной моделью в фоне, в лог — `RESUME_COMPARE`: сколько из 11
+  полей совпало, какие разные, у кого пусто, совпадение навыков (только
+  названия полей, без данных кандидата). Вернуть Sonnet — `RESUME_PARSER_MODEL`
+  = значение `CLAUDE_MODEL`. Сторож — `tests/test_resume_parser_model.py`.
 
 ## Расширение «Magic Button» (проверка 22.10.2026)
 Код — `backend/chrome-extension/` (попап `popup.html`/`popup.js`, фон

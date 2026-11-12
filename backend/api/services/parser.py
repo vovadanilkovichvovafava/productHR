@@ -701,18 +701,59 @@ async def parse_with_ai(
         if source_context:
             prompt = source_context + "\n\n" + prompt
 
+    # Окно «Загрузка из файла» (resume_card) — на дешёвой модели (12.11.2026:
+    # «распознание резюме ест очень много», Sonnet 4.6 ≈ 1,5 цента за резюме,
+    # Haiku 5.5 ≈ 0,05). Не справилась (отказ, кривой JSON, ошибка) — тот же
+    # запрос уходит основной модели: человек получает разбор в любом случае.
+    if parse_type == "resume_card" and settings.resume_parser_model != settings.claude_model:
+        try:
+            result = await _ask_json(client, settings.resume_parser_model, prompt, 4096)
+        except Exception as e:  # noqa: BLE001 — любая неудача → основная модель
+            logger.warning(
+                "RESUME_PARSE_FALLBACK: %s не справилась (%s), разбор — %s",
+                settings.resume_parser_model, type(e).__name__, settings.claude_model,
+            )
+            return await _ask_json(client, settings.claude_model, prompt, 2048)
+        _maybe_compare_with_main_model(client, prompt, result)
+        return result
+
+    return await _ask_json(
+        client,
+        settings.claude_model,
+        prompt,
+        # 8192 чтобы длинные резюме (опыт работы 15+ лет) не упирались
+        # в лимит и JSON не обрывался на середине. Короткому разбору
+        # хватает 2048: в нём нет опыта и образования.
+        2048 if parse_type == "resume_card" else 8192,
+    )
+
+
+async def _ask_json(client: AsyncAnthropic, model: str, prompt: str, max_tokens: int) -> Dict[str, Any]:
+    """Один запрос «верни JSON» → словарь. Ошибка — исключение."""
+    kwargs: Dict[str, Any] = {}
+    if model.startswith("claude-haiku-5"):
+        # Haiku 5.5 думает по умолчанию; для выписывания полей хватает
+        # «низкого» усилия — модель почти не тратит токены на размышления.
+        # SDK 0.76 не знает output_config — передаём полем запроса.
+        kwargs["extra_body"] = {"output_config": {"effort": "low"}}
     response_text = ""
     try:
         response = await client.messages.create(
-            model=settings.claude_model,
-            # 8192 чтобы длинные резюме (опыт работы 15+ лет) не упирались
-            # в лимит и JSON не обрывался на середине. Короткому разбору
-            # хватает 2048: в нём нет опыта и образования.
-            max_tokens=2048 if parse_type == "resume_card" else 8192,
+            model=model,
+            max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
+            **kwargs,
         )
+        if response.stop_reason == "refusal":
+            raise ValueError("Модель отказалась разбирать документ")
 
-        response_text = response.content[0].text
+        # Ответ берём по типу блока: у новых моделей перед текстом бывают
+        # блоки размышлений (thinking), и content[0] — уже не ответ.
+        response_text = "".join(
+            b.text for b in response.content
+            if getattr(b, "type", None) not in ("thinking", "redacted_thinking")
+            and isinstance(getattr(b, "text", None), str)
+        )
 
         # Clean and parse JSON response
         json_str = _clean_json_response(response_text)
@@ -741,6 +782,86 @@ async def parse_with_ai(
     except Exception as e:
         logger.error(f"AI parsing failed: {e}")
         raise
+
+
+# Проверка дешёвой модели на живых резюме (12.11.2026, «проверь до жалоб»):
+# первые N разборов после запуска сервера ещё раз прогоняются основной моделью
+# В ФОНЕ, и в лог пишется, какие поля совпали (RESUME_COMPARE). Человек этого не
+# ждёт и не видит; в лог идут только названия полей, без данных кандидата.
+_compare_left = settings.resume_compare_runs
+_compare_tasks: set = set()
+
+_COMPARE_FIELDS = (
+    "name", "email", "phone", "telegram", "position", "company", "location",
+    "experience_years", "salary_min", "salary_max", "salary_currency",
+)
+
+
+def _norm(field: str, value: Any) -> Any:
+    if value in (None, "", []):
+        return None
+    if field == "phone":
+        return re.sub(r"\D", "", str(value))[-9:] or None
+    if field == "experience_years":
+        try:
+            return round(float(value))
+        except (TypeError, ValueError):
+            return str(value)
+    if field in ("salary_min", "salary_max"):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return str(value)
+    text = re.sub(r"\s+", " ", str(value)).strip().lower().replace("ё", "е")
+    return text.lstrip("@") if field == "telegram" else text
+
+
+def compare_parses(cheap: Dict[str, Any], main: Dict[str, Any]) -> Dict[str, Any]:
+    """Сравнить два разбора одного резюме: какие поля совпали, какие нет,
+    у какой модели поле пустое, насколько совпали навыки."""
+    same, diff, only_main, only_cheap = [], [], [], []
+    for f in _COMPARE_FIELDS:
+        a, b = _norm(f, cheap.get(f)), _norm(f, main.get(f))
+        if a == b:
+            same.append(f)
+        elif a is None:
+            only_main.append(f)
+        elif b is None:
+            only_cheap.append(f)
+        else:
+            diff.append(f)
+    sa = {str(x).strip().lower() for x in (cheap.get("skills") or []) if str(x).strip()}
+    sb = {str(x).strip().lower() for x in (main.get("skills") or []) if str(x).strip()}
+    skills = round(len(sa & sb) / len(sa | sb), 2) if (sa or sb) else 1.0
+    return {"same": same, "diff": diff, "only_main": only_main,
+            "only_cheap": only_cheap, "skills_overlap": skills}
+
+
+def _maybe_compare_with_main_model(client: AsyncAnthropic, prompt: str, cheap: Dict[str, Any]) -> None:
+    global _compare_left
+    if _compare_left <= 0:
+        return
+    _compare_left -= 1
+
+    async def run() -> None:
+        try:
+            main = await _ask_json(client, settings.claude_model, prompt, 2048)
+        except Exception as e:  # noqa: BLE001
+            logger.info("RESUME_COMPARE skipped: %s", type(e).__name__)
+            return
+        c = compare_parses(cheap, main)
+        logger.info(
+            "RESUME_COMPARE: %s vs %s · совпали %d/%d · разные=%s · пусто у дешёвой=%s · "
+            "пусто у основной=%s · навыки %.0f%% · осталось сравнений %d",
+            settings.resume_parser_model, settings.claude_model,
+            len(c["same"]), len(_COMPARE_FIELDS), ",".join(c["diff"]) or "-",
+            ",".join(c["only_main"]) or "-", ",".join(c["only_cheap"]) or "-",
+            c["skills_overlap"] * 100, _compare_left,
+        )
+
+    task = asyncio.create_task(run())
+    _compare_tasks.add(task)
+    task.add_done_callback(_compare_tasks.discard)
 
 
 async def split_vacancy_description(description: str) -> Dict[str, Optional[str]]:
