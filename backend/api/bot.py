@@ -4004,7 +4004,7 @@ async def notify_comment_to_chat(
     from .services import evening_report as ev
 
     try:
-        await get_bot().send_message(
+        sent = await get_bot().send_message(
             chat_id=chat_id,
             text=ev.format_comment_ping(
                 author, project_name, task_key, task_title, content, project_id, task_id
@@ -4015,6 +4015,52 @@ async def notify_comment_to_chat(
         logger.info(f"COMMENT_PING: чат {chat_id}, задача {task_key}")
     except Exception as e:
         logger.warning(f"COMMENT_PING не доставлен в чат {chat_id}: {e}")
+        return
+    # Вложения комментария — следом, ответом на пинг: картинка фото, прочее
+    # документом. Раньше в чат уходила только служебная метка
+    # «[attachment:242:…png:149845]» (владелец, 12.11.2026).
+    _, files = ev.split_attachments(content)
+    if files:
+        await _send_comment_attachments(chat_id, task_id, task_key, files, getattr(sent, "message_id", None))
+
+
+# Telegram: фото до 10 МБ, документ до 50 МБ.
+_TG_PHOTO_MAX = 10 * 1024 * 1024
+_TG_DOC_MAX = 50 * 1024 * 1024
+
+
+async def _send_comment_attachments(
+    chat_id: int, task_id: int, task_key: str, files: list, reply_to: int | None,
+) -> None:
+    from aiogram.types import BufferedInputFile
+    from .models.database import TaskAttachment
+
+    async with async_session() as session:
+        for att_id, name in files:
+            att = await session.get(TaskAttachment, att_id)
+            # Только вложения ЭТОЙ задачи: id в тексте комментария пишет клиент.
+            if not att or att.task_id != task_id or not att.file_data:
+                logger.info(f"COMMENT_PING вложение {att_id} не найдено/пустое — пропускаю")
+                continue
+            data = bytes(att.file_data)
+            filename = att.original_filename or name or "file"
+            caption = f"📎 {task_key} · {filename}"[:1000]
+            try:
+                is_image = (att.content_type or "").startswith("image/") and not (att.content_type or "").endswith("svg+xml")
+                if is_image and len(data) <= _TG_PHOTO_MAX:
+                    await get_bot().send_photo(
+                        chat_id=chat_id, photo=BufferedInputFile(data, filename=filename),
+                        caption=caption, reply_to_message_id=reply_to,
+                    )
+                elif len(data) <= _TG_DOC_MAX:
+                    await get_bot().send_document(
+                        chat_id=chat_id, document=BufferedInputFile(data, filename=filename),
+                        caption=caption, reply_to_message_id=reply_to,
+                    )
+                else:
+                    logger.info(f"COMMENT_PING вложение {att_id} больше 50 МБ — только ссылка на задачу")
+            except Exception as e:
+                logger.warning(f"COMMENT_PING вложение {att_id} не доставлено в чат {chat_id}: {e}")
 
 
 async def evening_digest_task():

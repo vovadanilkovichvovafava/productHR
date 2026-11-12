@@ -11,6 +11,7 @@
 3. В 18:00 по Москве бот собирает итог дня по каждому рабочему чату:
    отчёт + комментарии к задачам за день. Отчёта нет — пингует сотрудника.
 """
+import html
 import json
 import logging
 import os
@@ -267,18 +268,41 @@ def task_url(project_id: int, task_id: int) -> str:
     return f"{base}/projects/{project_id}/tasks/{task_id}"
 
 
+# Вложение в тексте комментария: так его пишет окно задачи
+# (TaskDetailModal, `[attachment:<id>:<имя>:<размер>]`).
+ATTACHMENT_RE = re.compile(r'\[attachment:(\d+):([^\]]*?):(\d+)\]')
+
+
+def split_attachments(content: str) -> tuple[str, list[tuple[int, str]]]:
+    """Текст комментария без служебных меток вложений + список (id, имя).
+
+    В Telegram метка уходила как есть — «[attachment:242:screenshot-…png:149845]»
+    вместо картинки (владелец, 12.11.2026)."""
+    found = [(int(m.group(1)), m.group(2)) for m in ATTACHMENT_RE.finditer(content or "")]
+    text = ATTACHMENT_RE.sub("", content or "")
+    text = re.sub(r'[ \t]+\n', '\n', text)
+    return re.sub(r'\n{3,}', '\n\n', text).strip(), found
+
+
 def format_comment_ping(
     author: str, project_name: str, task_key: str, task_title: str,
     content: str, project_id: int, task_id: int,
 ) -> str:
-    """Пинг в рабочий чат: кто, по какой задаче и что написал."""
-    short = content.strip()
+    """Пинг в рабочий чат: кто, по какой задаче и что написал. Вложения —
+    строками «📎 имя» (сами файлы бот присылает следом). Всё, что пришло от
+    людей, экранируется: «<» в комментарии ломал HTML-разметку, и пинг не
+    доходил вовсе."""
+    text, files = split_attachments(content)
+    short = text
     if len(short) > 600:
         short = short[:600] + "…"
+    body = html.escape(short)
+    if files:
+        body = (body + "\n" if body else "") + "\n".join(f"📎 {html.escape(name)}" for _, name in files)
     return (
-        f"💬 <b>{author}</b> — комментарий по задаче\n"
-        f"📂 {project_name} · {task_key} «{task_title}»\n\n"
-        f"{short}\n\n"
+        f"💬 <b>{html.escape(author or '—')}</b> — комментарий по задаче\n"
+        f"📂 {html.escape(project_name or '')} · {html.escape(task_key or '')} «{html.escape(task_title or '')}»\n\n"
+        f"{body}\n\n"
         f'🔗 <a href="{task_url(project_id, task_id)}">Открыть задачу</a>'
     )
 
@@ -301,12 +325,16 @@ def format_digest(
     if comments:
         lines.append(f"\n💬 <b>Комментарии по задачам ({len(comments)})</b>")
         for c in comments:
-            text = c["content"].strip().replace("\n", " ")
+            text, files = split_attachments(c["content"])
+            text = text.replace("\n", " ")
             if len(text) > 160:
                 text = text[:160] + "…"
+            text = html.escape(text)
+            if files:
+                text = (text + " " if text else "") + " ".join(f"📎 {html.escape(n)}" for _, n in files)
             lines.append(
-                f'  • <a href="{task_url(c["project_id"], c["task_id"])}">{c["task_key"]}</a> '
-                f'{c["task_title"]} — {text}'
+                f'  • <a href="{task_url(c["project_id"], c["task_id"])}">{html.escape(c["task_key"])}</a> '
+                f'{html.escape(c["task_title"] or "")} — {text}'
             )
     else:
         lines.append("\n💬 Комментариев по задачам сегодня не было.")
