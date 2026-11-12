@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_FILTERS, describeFilters, filterGroups, newRule, opsFor, readSavedFilters, rowMatchesFilters,
+  EMPTY_FILTERS, describeFilters, newRule, opsFor, readSavedFilters, rowMatchesFilters,
   ruleComplete, type BoardFilters,
 } from "../StatusesPage";
 import type { BoardRow } from "@/services/api/staffBoard";
@@ -54,25 +54,40 @@ describe("rowMatchesFilters", () => {
     expect([seo, push].map((r) => rowMatchesFilters(r, f("and", ...rules)))).toEqual([false, false]);
   });
 
-  it("своя связка у каждой строки — формула: «И» сильнее «ИЛИ»", () => {
-    // Отдел: SEO И выход в октябре ИЛИ Отдел: Push  =  (SEO и октябрь) или Push
+  it("формула считается по порядку, слева направо: (Катя или Лиза) и ноябрь", () => {
+    // Скрин владельца 12.11.2026: «вот так должно быть».
+    const katya = row({ sourcers: [{ id: 1, name: "Катя", color: "#f6c844" }] as any, department_start_date: "2026-10-01" });
+    const lizaNov = row({ sourcers: [{ id: 2, name: "Лиза", color: "#e8a9a9" }] as any, department_start_date: "2026-11-16" });
+    const lizaOct = row({ sourcers: [{ id: 2, name: "Лиза", color: "#e8a9a9" }] as any, department_start_date: "2026-10-05" });
+    const katyaNov = row({ sourcers: [{ id: 1, name: "Катя", color: "#f6c844" }] as any, department_start_date: "2026-11-03" });
     const formula: BoardFilters = { join: "or", rules: [
+      { ...newRule("sourcer"), op: "is", values: ["Катя"] },
+      { ...newRule("sourcer"), op: "is", values: ["Лиза"], join: "or" },
+      { ...newRule("department_start_date"), op: "between", from: "2026-11-01", to: "2026-11-30", join: "and" },
+    ] };
+    expect([katya, lizaNov, lizaOct, katyaNov].map((r) => rowMatchesFilters(r, formula))).toEqual([false, true, false, true]);
+    expect(describeFilters(formula)).toBe(
+      "Показываем: (Сорсер: Катя или Сорсер: Лиза) и Выход в отдел: с 01.11.2026 по 30.11.2026.",
+    );
+
+    // И наоборот: «SEO и октябрь или Push» = (SEO и октябрь) или Push
+    const other: BoardFilters = { join: "or", rules: [
       { ...newRule("department"), op: "is", values: ["SEO team"] },
       { ...newRule("department_start_date"), op: "between", from: "2026-10-01", to: "2026-10-31", join: "and" },
       { ...newRule("department"), op: "is", values: ["Push team"], join: "or" },
     ] };
     const seoSep = row({ department_name: "SEO team", department_start_date: "2026-09-01" });
-    expect([seo, push, seoSep, none].map((r) => rowMatchesFilters(r, formula))).toEqual([true, true, false, false]);
-    expect(filterGroups(formula).map((g) => g.length)).toEqual([2, 1]);
-    expect(describeFilters(formula)).toMatch(/^Показываем: \(Отдел: SEO team и .+\) или Отдел: Push team\.$/);
+    expect([seo, push, seoSep, none].map((r) => rowMatchesFilters(r, other))).toEqual([true, true, false, false]);
+    expect(describeFilters(other)).toMatch(/^Показываем: \(Отдел: SEO team и .+\) или Отдел: Push team\.$/);
+  });
 
-    // Push ИЛИ SEO И октябрь  =  Push или (SEO и октябрь) — не ((Push или SEO) и октябрь)
-    const other: BoardFilters = { join: "or", rules: [
-      { ...newRule("department"), op: "is", values: ["Push team"] },
-      { ...newRule("department"), op: "is", values: ["SEO team"], join: "or" },
-      { ...newRule("department_start_date"), op: "between", from: "2026-10-01", to: "2026-10-31", join: "and" },
+  it("одна и та же связка подряд — без лишних скобок", () => {
+    const allOr: BoardFilters = { join: "or", rules: [
+      { ...newRule("department"), op: "is", values: ["SEO team"] },
+      { ...newRule("department"), op: "is", values: ["Push team"], join: "or" },
+      { ...newRule("department"), op: "empty", join: "or" },
     ] };
-    expect([seo, push, seoSep].map((r) => rowMatchesFilters(r, other))).toEqual([true, true, false]);
+    expect(describeFilters(allOr)).toBe("Показываем: Отдел: SEO team или Отдел: Push team или Отдел пусто.");
   });
 
   it("незаполненная строка посередине формулу не ломает", () => {
@@ -81,7 +96,7 @@ describe("rowMatchesFilters", () => {
       { ...newRule(), join: "or" },
       { ...newRule("department_start_date"), op: "between", from: "2026-10-01", to: "2026-10-31", join: "and" },
     ] };
-    expect(filterGroups(withBlank).map((g) => g.length)).toEqual([2]);
+    expect([seo, push].map((r) => rowMatchesFilters(r, withBlank))).toEqual([true, false]);
   });
 
   it("сохранённые связки строк читаются; старые без связки — по общей", () => {
@@ -92,7 +107,8 @@ describe("rowMatchesFilters", () => {
     ] };
     const r = readSavedFilters(saved);
     expect(r.rules.map((x) => x.join)).toEqual([undefined, "or", undefined]);
-    expect(filterGroups({ ...r, rules: r.rules }).map((g) => g.map((x) => x.id))).toEqual([["a"], ["b", "c"]]);
+    // (SEO или Push) и X — третья строка без своей связки берёт общую «и»
+    expect(rowMatchesFilters(seo, r)).toBe(false);
   });
 
   it("HR — по каждому человеку, а не по склеенной строке", () => {

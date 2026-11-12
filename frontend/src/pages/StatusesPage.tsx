@@ -409,25 +409,26 @@ function ruleMatches(row: BoardRow, r: FilterRule): boolean {
 /** Связка перед строкой: своя или общая (старые фильтры). */
 export const ruleJoin = (filters: BoardFilters, r: FilterRule): "and" | "or" => r.join ?? filters.join;
 
-/** Формула фильтра — группы условий. Как в обычной формуле, «И» сильнее
- *  «ИЛИ»: «И» склеивает соседние условия в группу, «ИЛИ» начинает новую.
- *  «А и Б или В» = (А и Б) или В. Незаполненные строки пропускаются. */
-export function filterGroups(filters: BoardFilters): FilterRule[][] {
-  const groups: FilterRule[][] = [];
-  for (const r of filters.rules.filter(ruleComplete)) {
-    if (!groups.length || ruleJoin(filters, r) === "or") groups.push([r]);
-    else groups[groups.length - 1].push(r);
-  }
-  return groups;
+/** Формула считается ПО ПОРЯДКУ, слева направо, как её читают: каждая
+ *  следующая строка со своей связкой применяется ко всему, что собрано выше.
+ *  «Катя или Лиза и ноябрь» = (Катя или Лиза) и ноябрь (владелец,
+ *  12.11.2026: «вот так должно быть»). До этого «И» было сильнее «ИЛИ», как
+ *  в математике, и выходило «Катя или (Лиза и ноябрь)».
+ *  Незаполненные строки пропускаются. */
+export function activeRules(filters: BoardFilters): FilterRule[] {
+  return filters.rules.filter(ruleComplete);
 }
 
-/** Проходит ли строка. Заполненных правил нет — проходит всё; иначе — если
- *  в какой-нибудь группе формулы выполнены ВСЕ условия. Значения внутри
- *  одного правила всегда по «или»: «Отдел является SEO, Push». */
+/** Проходит ли строка. Заполненных правил нет — проходит всё. Значения
+ *  внутри одного правила всегда по «или»: «Отдел является SEO, Push». */
 export function rowMatchesFilters(row: BoardRow, filters: BoardFilters): boolean {
-  const groups = filterGroups(filters);
-  if (!groups.length) return true;
-  return groups.some((g) => g.every((r) => ruleMatches(row, r)));
+  const rules = activeRules(filters);
+  if (!rules.length) return true;
+  let ok = ruleMatches(row, rules[0]);
+  for (const r of rules.slice(1)) {
+    ok = ruleJoin(filters, r) === "and" ? ok && ruleMatches(row, r) : ok || ruleMatches(row, r);
+  }
+  return ok;
 }
 
 /** Правило словами — для чипа над таблицей. */
@@ -446,14 +447,18 @@ export function ruleText(r: FilterRule): string {
 
 /** Фильтр словами целиком. */
 export function describeFilters(filters: BoardFilters): string {
-  const groups = filterGroups(filters);
-  if (!groups.length) return "Ничего не выбрано — показываем всех.";
-  const text = groups
-    .map((g) => {
-      const inner = g.map(ruleText).join(" и ");
-      return groups.length > 1 && g.length > 1 ? `(${inner})` : inner;
-    })
-    .join(" или ");
+  const rules = activeRules(filters);
+  if (!rules.length) return "Ничего не выбрано — показываем всех.";
+  // Скобка закрывает всё собранное, когда связка меняется: так видно, что
+  // считается по порядку. «(Катя или Лиза) и ноябрь».
+  let text = ruleText(rules[0]);
+  let prev: "and" | "or" | null = null;
+  for (const r of rules.slice(1)) {
+    const op = ruleJoin(filters, r);
+    if (prev && op !== prev) text = `(${text})`;
+    text += ` ${op === "and" ? "и" : "или"} ${ruleText(r)}`;
+    prev = op;
+  }
   return `Показываем: ${text}.`;
 }
 
@@ -1474,13 +1479,13 @@ function FilterBuilder({
   onRemove: (id: string) => void;
   onClearAll: () => void;
 }) {
-  const groups = filterGroups(filters);
+  const active = activeRules(filters);
   return (
     <div className="hf-statuses-picker hf-fb">
       <div className="hf-fb-head">Фильтры</div>
       <div className="hf-fb-rules">
         {filters.rules.map((r, i) => (
-          <div key={r.id} className={clsx("hf-fb-rule", i > 0 && ruleJoin(filters, r) === "or" && "is-or")}>
+          <div key={r.id} className="hf-fb-rule">
             <div className="hf-fb-join">
               {i === 0 ? "Где" : (
                 /* У каждой строки своя связка — получается формула. */
@@ -1488,7 +1493,7 @@ function FilterBuilder({
                   className="hf-fb-select hf-fb-join-select"
                   value={ruleJoin(filters, r)}
                   onChange={(e) => onUpdate(r.id, { join: e.target.value as "and" | "or" })}
-                  title="«И» — вместе с условием выше, «ИЛИ» — новая группа условий"
+                  title="«И» — сузить то, что собрано выше; «ИЛИ» — добавить к нему"
                 >
                   <option value="and">И</option>
                   <option value="or">ИЛИ</option>
@@ -1546,8 +1551,8 @@ function FilterBuilder({
         ))}
       </div>
       {/* Формула словами: видно, как поняты «И» и «ИЛИ» (скобки — группы). */}
-      {groups.flat().length > 1 && (
-        <div className="hf-fb-formula" title="«И» объединяет соседние условия в группу, «ИЛИ» начинает новую">
+      {active.length > 1 && (
+        <div className="hf-fb-formula" title="Условия применяются по порядку, сверху вниз: каждая строка — к тому, что собрано выше">
           {describeFilters(filters)}
         </div>
       )}
