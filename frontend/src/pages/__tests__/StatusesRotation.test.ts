@@ -16,7 +16,9 @@ describe("rotationNote", () => {
     )!;
     expect(note.short).toBe("из Продукт · 3/10/26");
     expect(note.steps).toEqual([
-      { name: "Продукт", when: "12/8/26 – 3/10/26", kind: "past" },
+      // stint — сама запись истории: её «×» в окне отдаёт серверу как есть
+      { name: "Продукт", when: "12/8/26 – 3/10/26", kind: "past",
+        stint: { department_id: 1, name: "Продукт", date_from: "2026-08-12", date_to: "2026-10-03" } },
       { name: "Байер FB", when: "с 3/10/26 · сейчас", kind: "current" },
     ]);
     expect(note.title).toContain("→ Байер FB · с 3/10/26 · сейчас");

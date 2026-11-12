@@ -1972,6 +1972,69 @@ async def delete_placement(
     return {"success": True}
 
 
+class TeamStintRemove(BaseModel):
+    """Какую запись истории отделов убрать — ровно так, как её отдал сервер."""
+    department_id: Optional[int] = None
+    name: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+
+@router.post("/rows/{entity_id}/team-history/remove")
+async def remove_team_stint(
+    entity_id: int,
+    data: TeamStintRemove,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Убрать прежний отдел из истории перемещений (окно «Перемещения», «×»).
+
+    Владелец, 12.11.2026: «тут ещё можно убирать отделы на крестик» — запись
+    бывает ошибочной (поставили не в тот отдел и сразу перевели: «тест» на
+    один день). Убирается только запись истории; где человек стоит сейчас, не
+    меняется — для этого «×» у самого отдела. Ищем по отделу и датам, а не по
+    номеру: сервер прячет записи удалённых отделов, и номера на экране с
+    номерами в карточке не совпадают.
+    """
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    entity = (await db.execute(
+        select(Entity).where(Entity.id == entity_id, Entity.org_id == org.id)
+    )).scalar_one_or_none()
+    if not entity:
+        raise HTTPException(404, "Кандидат не найден")
+
+    ex = dict(_extra(entity))
+    raw = [h for h in (ex.get(_K_TEAM_HISTORY) or []) if isinstance(h, dict)]
+
+    def _same(item: Dict[str, Any]) -> bool:
+        did = _as_int(item.get("department_id"))
+        if data.department_id is not None or did is not None:
+            if did != data.department_id:
+                return False
+        elif (item.get("name") or "") != (data.name or ""):
+            return False
+        return (item.get("from") or None) == (data.date_from or None) and \
+            (item.get("to") or None) == (data.date_to or None)
+
+    idx = next((i for i, h in enumerate(raw) if _same(h)), None)
+    if idx is None:
+        raise HTTPException(404, "Такой записи в истории нет — обновите страницу")
+    removed = raw.pop(idx)
+    ex[_K_TEAM_HISTORY] = raw
+    entity.extra_data = ex
+    flag_modified(entity, "extra_data")
+    await db.commit()
+    logger.info(
+        f"BOARD_ROTATION remove: entity {entity.id} запись «{removed.get('name')}» "
+        f"{removed.get('from')}–{removed.get('to')} by user {current_user.id}"
+    )
+    depts = await _board_depts(db, org.id)
+    return {"team_history": [h.model_dump() for h in _team_history(ex, depts)]}
+
+
 # ============================================================
 # ЛИЧНЫЕ НАБОРЫ СЕКЦИЙ (конструктор статусов)
 # ============================================================

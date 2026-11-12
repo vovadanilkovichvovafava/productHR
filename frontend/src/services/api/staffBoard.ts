@@ -317,6 +317,13 @@ export async function removeBoardPlacement(placementId: number): Promise<void> {
   await api.delete(`/staff-board/placements/${placementId}`);
 }
 
+/** Убрать прежний отдел из истории перемещений (окно «Перемещения», «×»).
+ *  Где человек стоит сейчас, не меняется. Запись ищется по отделу и датам. */
+export async function removeTeamStint(entityId: number, stint: BoardTeamStint): Promise<BoardTeamStint[]> {
+  const { data } = await api.post(`/staff-board/rows/${entityId}/team-history/remove`, stint);
+  return data.team_history ?? [];
+}
+
 // ─── Личные наборы секций доски ─────────────────────────────
 
 /** Общий вид доски (клиент, 11.11.2026): одна настройка на всех HR и все

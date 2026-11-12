@@ -15,6 +15,7 @@ import {
   getCatalog, addCatalogItem, renameCatalogItem, deleteCatalogItem,
   type CatalogItem, type CatalogKind,
   type BoardDepartment, type BoardRow, type BoardRowUpdate, type BoardTeamStint,
+  removeTeamStint,
 } from "@/services/api/staffBoard";
 import { uploadEntityFile, deleteEntityFile, downloadEntityFile } from "@/services/api/entities";
 import {
@@ -2871,7 +2872,7 @@ const BOARD_HR_FIRST_NAMES = ["мария", "maria", "эльвира", "elvira",
  *  даты, путь только в подсказке браузера. Стало: в строке ОТКУДА и КОГДА
  *  («из HR team · 16/10/26 · ещё 2»), по клику — окно со всем путём:
  *  песочница → прежние отделы с датами → текущий. */
-export type RotationStep = { name: string; when: string; kind: "sandbox" | "past" | "current" };
+export type RotationStep = { name: string; when: string; kind: "sandbox" | "past" | "current"; stint?: BoardTeamStint };
 export function rotationNote(
   history: BoardTeamStint[] | undefined,
   current: string,
@@ -2892,7 +2893,7 @@ export function rotationNote(
   for (const h of past) {
     const a = fmtShort(h.date_from);
     const b = fmtShort(h.date_to);
-    steps.push({ name: h.name, when: a && b ? `${a} – ${b}` : b ? `до ${b}` : a ? `с ${a}` : "", kind: "past" });
+    steps.push({ name: h.name, when: a && b ? `${a} – ${b}` : b ? `до ${b}` : a ? `с ${a}` : "", kind: "past", stint: h });
   }
   if (current) steps.push({ name: current, when: movedAt ? `с ${movedAt} · сейчас` : "сейчас", kind: "current" });
 
@@ -2969,6 +2970,9 @@ function DepartmentCell({
     : row.sandbox_name;
   const rotation = rotationNote(row.team_history, name, from);
   const moves = useCellMenu();
+  const [busyStint, setBusyStint] = useState(false);
+  // Текущий отдел убираем «×» из окна, только если это отдел САМОЙ строки.
+  const canUnplaceCurrent = !row.department_is_sandbox && canLeaveDepartment(row, isAdmin);
   // Текущий отдел строки в окне ЕСТЬ — с галочкой, как в ClickUp: иначе его
   // нельзя было переименовать или перекрасить из этой строки (11.11.2026).
   // Сравниваем с отделом САМОЙ строки, а не с тем, что показано главным.
@@ -3033,6 +3037,35 @@ function DepartmentCell({
               <li key={i} className={`hf-statuses-moves-step is-${st.kind}`}>
                 <span className="hf-statuses-moves-name">{st.name}</span>
                 {st.when && <span className="hf-statuses-moves-when">{st.when}</span>}
+                {/* «×» (владелец, 12.11.2026): у прежнего отдела — убрать
+                    ошибочную запись из истории; у текущего — то же, что «×»
+                    у отдела в строке (по тем же правам). Песочницу отсюда не
+                    снимаем, и текущий отдел в строке песочницы — это другое
+                    назначение, его «×» сняло бы саму песочницу. */}
+                {(st.kind === "past" || (st.kind === "current" && canUnplaceCurrent)) && (
+                  <button
+                    type="button"
+                    className="hf-statuses-moves-x"
+                    title={st.kind === "past" ? `Убрать «${st.name}» из истории` : `Убрать из отдела «${st.name}»`}
+                    aria-label={st.kind === "past" ? `Убрать «${st.name}» из истории` : `Убрать из отдела «${st.name}»`}
+                    disabled={busyStint}
+                    onClick={async () => {
+                      if (st.kind === "current") { moves.close(); onUnplace(); return; }
+                      if (!st.stint) return;
+                      setBusyStint(true);
+                      try {
+                        await removeTeamStint(row.entity_id, st.stint);
+                        onReload();
+                      } catch (e: any) {
+                        errorToast(e, `Не удалось убрать «${st.name}» из истории`);
+                      } finally {
+                        setBusyStint(false);
+                      }
+                    }}
+                  >
+                    <X size={11} />
+                  </button>
+                )}
               </li>
             ))}
           </ol>
