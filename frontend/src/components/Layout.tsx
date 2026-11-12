@@ -1563,18 +1563,22 @@ export default function Layout() {
                       className="hf-hr-fab-menu"
                     >
                       {[
-                        // «Создать заявку» — все админы (owner/admin/hr) и
-                        // суперадмин. Открывает модалку-форму прямо на месте.
+                        // «Добавить кандидата» — первым у всех: самое частое
+                        // действие (Эльвира, 12.11.2026 — стала админом, и
+                        // сверху оказалась заявка). Порядок постоянный, не «по
+                        // частоте»: меню из трёх пунктов нажимают по памяти.
+                        {
+                          label: "Добавить кандидата",
+                          action: () => navigate("/all-candidates?add=resume"),
+                        },
+                        // «Создать заявку» — owner/admin и суперадмин.
+                        // Открывает модалку-форму прямо на месте.
                         ...(isHrSidebarAdmin
                           ? [{
                               label: "Создать заявку",
                               action: () => setShowFabVacancyForm(true),
                             }]
                           : []),
-                        {
-                          label: "Добавить кандидата",
-                          action: () => navigate("/all-candidates?add=resume"),
-                        },
                         {
                           label: "Перейти к заявкам",
                           action: () => navigate("/vacancies"),
