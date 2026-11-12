@@ -41,7 +41,7 @@ from api.models.database import (
     AccessLevel,
     STATUS_SYNC_MAP,
 )
-from api.services.auth import get_current_user, get_user_org, has_full_database_access
+from api.services.auth import get_current_user, get_user_org, has_full_database_access, require_hr_segment
 from api.utils.csv_safe import csv_safe
 from api.services.shadow_filter import get_isolated_creator_ids
 from api.services.hr_stages import (
@@ -53,7 +53,9 @@ from api.services.vacancy_scope import (
 
 logger = logging.getLogger("hr-analyzer.candidate-search")
 
-router = APIRouter()
+# HR-раздел целиком: сотрудник без HR-роли (member) получает 403 на любой ручке,
+# включая чтение (12.11.2026 — до этого закрыт был только интерфейс).
+router = APIRouter(dependencies=[Depends(require_hr_segment)])
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -444,6 +446,13 @@ async def bulk_action(
     if not body.entity_ids:
         raise HTTPException(400, "entity_ids is required")
 
+    # Массового удаления НЕТ (12.11.2026). Ветка `delete` стирала карточки мимо
+    # корзины и без проверки «удаляет автор или админ» — сотрудник без HR-роли
+    # так удалил кандидата. Интерфейс эту ручку не зовёт вовсе; удаление — только
+    # из карточки (`DELETE /entities/{id}`: права + слепок в корзину на 7 дней).
+    if body.action == "delete":
+        raise HTTPException(400, "Массовое удаление отключено — удаляйте кандидата из его карточки")
+
     # Fetch entities
     q = select(Entity).where(
         Entity.id.in_(body.entity_ids),
@@ -544,14 +553,6 @@ async def bulk_action(
                 updated += 1
         await db.commit()
         return {"success": True, "action": "add_tag", "affected": updated}
-
-    # --- delete ---
-    elif body.action == "delete":
-        count = len(entities)
-        for entity in entities:
-            await db.delete(entity)
-        await db.commit()
-        return {"success": True, "action": "delete", "affected": count}
 
     # --- export_csv ---
     elif body.action == "export_csv":

@@ -46,8 +46,9 @@ async def test_recruiter_can_manage_others_candidate(db_session, organization):
     assert await check_entity_access(cand, other, organization.id, db_session, AccessLevel.edit) is True
     assert await check_entity_access(cand, other, organization.id, db_session, AccessLevel.full) is False
 
-    # Обычный член (не рекрутёр): видит, но НЕ управляет.
-    assert await check_entity_access(cand, plain, organization.id, db_session, None) is True
+    # Обычный член (не рекрутёр, без HR-раздела): не видит и не управляет
+    # (до 12.11.2026 видел — дыра, см. tests/test_hr_segment_access.py).
+    assert await check_entity_access(cand, plain, organization.id, db_session, None) is False
     assert await check_entity_access(cand, plain, organization.id, db_session, AccessLevel.edit) is False
 
 

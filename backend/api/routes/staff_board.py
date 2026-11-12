@@ -50,7 +50,10 @@ from ..services.board_placements import DEFAULT_SANDBOX_KEY, place_current_pract
 
 logger = logging.getLogger("hr-analyzer.staff-board")
 
-router = APIRouter()
+from ..services.auth import require_hr_segment
+# HR-раздел целиком: сотрудник без HR-роли (member) получает 403 на любой ручке,
+# включая чтение (12.11.2026 — до этого закрыт был только интерфейс).
+router = APIRouter(dependencies=[Depends(require_hr_segment)])
 
 # Статусы, попадающие на доску, в порядке отображения секций.
 # Доска — про СВОИХ: практика, штат и уход из него (владелец, 06.10.2026:

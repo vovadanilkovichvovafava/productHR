@@ -97,21 +97,8 @@ async def has_hr_segment_access(user: User, org: Organization, db: AsyncSession)
     «Наблюдатель» (is_readonly, любой org_role). Обычный member HR-раздела не
     имеет (сайдбар и RoleRoute его туда не пускают) — сюда он тоже не попадает.
     """
-    if getattr(user, 'role', None) == UserRole.superadmin:
-        return True
-    if org is None:
-        return False
-    result = await db.execute(
-        select(OrgMember.role, OrgMember.is_readonly).where(
-            OrgMember.org_id == org.id,
-            OrgMember.user_id == user.id,
-        )
-    )
-    row = result.first()
-    if row is None:
-        return False
-    member_role, member_readonly = row
-    return member_role in (OrgRole.owner, OrgRole.admin, OrgRole.hr) or bool(member_readonly)
+    from ...services.auth import has_hr_segment
+    return await has_hr_segment(user, org.id if org is not None else None, db)
 
 
 async def sees_all_candidates(user: User, org: Organization, db: AsyncSession) -> bool:

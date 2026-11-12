@@ -118,6 +118,11 @@ async def global_search(
     org = await get_user_org(current_user, db)
     if not org:
         return GlobalSearchResponse()
+    # Палитра Cmd+K есть у всех, а кандидаты и вакансии — только HR-разделу
+    # (12.11.2026): сотрудник без HR-роли находил здесь любого кандидата.
+    from ..services.auth import has_hr_segment
+    if not await has_hr_segment(current_user, org.id, db):
+        return GlobalSearchResponse()
 
     query_lower = query.lower().strip()
 

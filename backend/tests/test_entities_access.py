@@ -173,17 +173,17 @@ class TestEntityNoAccess:
     async def test_no_access_user_cannot_view_entity(
         self, db_session, client, second_user, second_user_token, entity, get_auth_headers, org_member
     ):
-        """Test that user without share cannot view a non-candidate entity (not in their dept).
+        """Сотрудник без HR-раздела и без шары не видит ни кандидата, ни контакт.
 
-        Кандидат (фикстура entity) — общий для организации: его читает любой
-        член орга (модель «общий пул HR»). Закрытым без шаринга остаётся
-        контакт другого типа.
+        До 12.11.2026 кандидата (фикстура entity) читал любой член орга — это
+        была дыра: «общий пул HR» только для HR-раздела (hr/admin/owner,
+        наблюдатель), см. tests/test_hr_segment_access.py.
         """
         response = await client.get(
             f"/api/entities/{entity.id}",
             headers=get_auth_headers(second_user_token)
         )
-        assert response.status_code == 200
+        assert response.status_code == 404
 
         entity.type = EntityType.partner
         await db_session.commit()

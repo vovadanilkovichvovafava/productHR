@@ -253,12 +253,28 @@ async def ensure_entity_visible(entity_id: int, user: Optional[User], db: AsyncS
     Основную проверку делает check_entity_access, но часть эндпоинтов (метки,
     анкеты, история писем, рекомендации) достаёт данные по entity_id напрямую,
     мимо неё — им нужна эта строчка, иначе чужой кандидат утекает по кусочкам.
+
+    С 12.11.2026 здесь же проверка HR-раздела: сотруднику без него (role=member)
+    эти ручки отвечали по любому кандидату. Теперь ему доступны только карточки,
+    с которыми он связан явно, — ровно по правилам check_entity_access.
     """
+    from fastapi import HTTPException
     scope_ids = await get_scope_vacancy_ids(user, db)
-    if scope_ids is None:
+    if scope_ids is not None and not await entity_in_scope(entity_id, scope_ids, db):
+        raise HTTPException(status_code=404, detail="Кандидат не найден")
+    if user is None:
         return
-    if not await entity_in_scope(entity_id, scope_ids, db):
-        from fastapi import HTTPException
+    from .auth import get_user_org, has_hr_segment
+    if getattr(user, "role", None) == UserRole.superadmin:
+        return
+    org = await get_user_org(user, db)
+    if await has_hr_segment(user, org.id if org else None, db):
+        return
+    entity = await db.get(Entity, entity_id)
+    if entity is None or org is None or entity.org_id != org.id:
+        raise HTTPException(status_code=404, detail="Кандидат не найден")
+    from ..routes.entities.common import check_entity_access
+    if not await check_entity_access(entity, user, org.id, db, required_level=None):
         raise HTTPException(status_code=404, detail="Кандидат не найден")
 
 

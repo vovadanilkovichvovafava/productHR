@@ -21,6 +21,23 @@ def _h(u):
     return {"Authorization": f"Bearer {create_access_token(data={'sub': str(u.id)})}"}
 
 
+@pytest_asyncio.fixture
+async def org_member(db_session, organization, second_user):
+    """second_user здесь — РЕКРУТЁР (OrgRole.hr), а не сотрудник.
+
+    Тест писался, когда рекрутёра заводили как member + фича отдела. С 12.11.2026
+    HR-ручки закрыты для member на сервере (tests/test_hr_segment_access.py), а
+    рекрутёр в системе — это роль hr (фронт пускает в HR только её).
+    """
+    from api.models.database import OrgMember, OrgRole
+    m = OrgMember(org_id=organization.id, user_id=second_user.id, role=OrgRole.hr,
+                  created_at=datetime.utcnow())
+    db_session.add(m)
+    await db_session.commit()
+    await db_session.refresh(m)
+    return m
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def candidate_database_feature(db_session, organization):
     """check_vacancy_access требует фичу candidate_database для member —

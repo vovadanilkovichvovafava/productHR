@@ -396,22 +396,28 @@ async def check_entity_access(
     #     права на управление кандидатами.
     #   • FULL (удаление/трансфер) — НЕ здесь, остаётся у создателя/админа.
     # Строго в границах орга (cross-org закрыт).
+    # READ «любому члену орга» было дырой (12.11.2026): сотрудник без HR-раздела
+    # (role=member) открывал по номеру любую карточку. Теперь общий пул — только
+    # для HR-раздела (hr/admin/owner + «Наблюдатель»); сотруднику остаются ЯВНЫЕ
+    # связи ниже: отдел, шара, вакансия, где он нанимающий менеджер/назначен.
     if (
         required_level in (None, AccessLevel.edit)
         and getattr(entity, "type", None) == EntityType.candidate
         and getattr(entity, "org_id", None) == org_id
     ):
         om = await db.execute(
-            select(OrgMember.role).where(
+            select(OrgMember.role, OrgMember.is_readonly).where(
                 OrgMember.org_id == org_id,
                 OrgMember.user_id == user.id,
             ).limit(1)
         )
-        role = om.scalar()
-        if role is not None:
-            if required_level is None:
-                return True  # read — любому члену орга
-            if role in (OrgRole.hr, OrgRole.admin, OrgRole.owner):
+        row = om.first()
+        if row is not None:
+            role, readonly = row
+            is_recruiter = role in (OrgRole.hr, OrgRole.admin, OrgRole.owner)
+            if required_level is None and (is_recruiter or readonly):
+                return True  # read — HR-разделу (наблюдатель смотрит всё)
+            if is_recruiter:
                 return True  # управление — любому рекрутёру
 
     # 4. Department-based access (ADMIN/SUB_ADMIN/MEMBER)
@@ -448,19 +454,21 @@ async def check_entity_access(
     shared_access = shared_result.scalar_one_or_none()
 
     if not shared_access:
-        # 6. Доступ через вакансию: рекрутёр работает с заявкой,
-        # на которую этот entity подал заявку. Только для read-доступа.
+        # 6. Доступ через вакансию: человек ЛИЧНО связан с вакансией, в которой
+        # у кандидата заявка (автор, нанимающий менеджер, назначен). Только read.
+        # «Видна всем» / «назначена всем» сюда НЕ входят (12.11.2026): это флаги
+        # для рекрутёров, а рекрутёры уже прошли выше (п. 3.5). Здесь они открывали
+        # сотруднику без HR-раздела любого кандидата из общей вакансии.
         if required_level is None:
             from sqlalchemy import text as _text
             vac_app_q = select(VacancyApplication.id).join(
                 Vacancy, Vacancy.id == VacancyApplication.vacancy_id
             ).where(
                 VacancyApplication.entity_id == entity.id,
+                Vacancy.org_id == org_id,
                 or_(
                     Vacancy.created_by == user.id,
                     Vacancy.hiring_manager_id == user.id,
-                    Vacancy.visible_to_all == True,
-                    Vacancy.assigned_to_all == True,
                     _text(f"vacancies.assigned_to::jsonb @> '[{int(user.id)}]'::jsonb"),
                 ),
             ).limit(1)

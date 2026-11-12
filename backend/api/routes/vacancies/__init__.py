@@ -8,7 +8,7 @@ This package contains all vacancy-related endpoints split into modules:
 - kanban: канбан (ради тестов приватности), bulk-move, порядок в колонке
 - sharing: Vacancy sharing endpoints
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 # Import common schemas and helpers for backwards compatibility
 from .common import (
@@ -36,7 +36,10 @@ from .common import (
 
 # Create the combined router
 # Note: This router is mounted at /api/vacancies in main.py
-router = APIRouter()
+from ...services.auth import require_hr_segment
+# HR-раздел целиком: сотрудник без HR-роли (member) получает 403 на любой ручке,
+# включая чтение (12.11.2026 — до этого закрыт был только интерфейс).
+router = APIRouter(dependencies=[Depends(require_hr_segment)])
 
 # Import route handlers from submodules and add them to the router
 # We need to import them after creating the router and add routes manually

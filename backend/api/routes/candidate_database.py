@@ -28,7 +28,10 @@ from ..services.hr_stages import STAGE_LABELS
 
 logger = logging.getLogger("hr-analyzer.candidate-database")
 
-router = APIRouter()
+from ..services.auth import require_hr_segment
+# HR-раздел целиком: сотрудник без HR-роли (member) получает 403 на любой ручке,
+# включая чтение (12.11.2026 — до этого закрыт был только интерфейс).
+router = APIRouter(dependencies=[Depends(require_hr_segment)])
 
 
 # Подписи этапов — общий справочник (services/hr_stages.py).
@@ -379,6 +382,11 @@ async def merge_candidates(
     org = await get_user_org(current_user, db)
     if not org:
         raise HTTPException(status_code=403, detail="No organization found")
+    # Слияние стирает source — права как у `/entities/{id}/merge`: только админ,
+    # владелец, суперадмин (12.11.2026; раньше мог любой член орга).
+    from .vacancies.common import is_org_admin_or_owner
+    if not await is_org_admin_or_owner(current_user, org, db):
+        raise HTTPException(status_code=403, detail="Объединять дубли могут только администраторы")
 
     # Verify both entities exist
     source = await db.get(Entity, source_id)

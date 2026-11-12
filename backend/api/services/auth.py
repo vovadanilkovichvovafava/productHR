@@ -626,6 +626,43 @@ async def has_full_database_access(user: User, org_id: int, db: AsyncSession) ->
     return member_role in (OrgRole.owner, OrgRole.admin) or bool(member_readonly)
 
 
+async def has_hr_segment(user: User, org_id: Optional[int], db: AsyncSession) -> bool:
+    """Есть ли у человека HR-раздел: superadmin, owner, admin, hr или «Наблюдатель».
+
+    Обычный member (сотрудник) HR-раздела не имеет: в меню его нет, RoleRoute не
+    пускает. До 12.11.2026 закрыт был ТОЛЬКО интерфейс — через API сотрудник читал
+    всю базу кандидатов, вакансии и правил «Штат». Теперь эта же проверка стоит
+    на сервере (`require_hr_segment` на роутерах и в check_entity_access).
+    """
+    if getattr(user, "role", None) == UserRole.superadmin:
+        return True
+    if org_id is None:
+        return False
+    row = (await db.execute(
+        select(OrgMember.role, OrgMember.is_readonly).where(
+            OrgMember.org_id == org_id,
+            OrgMember.user_id == user.id,
+        )
+    )).first()
+    if row is None:
+        return False
+    member_role, member_readonly = row
+    return member_role in (OrgRole.owner, OrgRole.admin, OrgRole.hr) or bool(member_readonly)
+
+
+async def require_hr_segment(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Зависимость роутера: без HR-раздела — 403 на ЛЮБОЙ ручке (и чтение тоже)."""
+    if user.role == UserRole.superadmin:
+        return user
+    org = await get_user_org(user, db)
+    if not await has_hr_segment(user, org.id if org else None, db):
+        raise HTTPException(status_code=403, detail="Нет доступа к HR-разделу")
+    return user
+
+
 # === Helper functions for role-based access control ===
 
 def is_superadmin(user: User) -> bool:
