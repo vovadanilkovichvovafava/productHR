@@ -553,26 +553,77 @@
   color: var(--hf-white-alpha-56);
 }
 
+/* Вакансии под «Мои вакансии» — карточками (12.11.2026, задача на проекте
+   New HR: «чтобы список не был монотонным: каждая воронка крупнее, у неё
+   небольшая заливка, и она как блок должна выглядеть»). */
 .hf-hr-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-top: var(--hf-space-s);
+  /* Левый край — ровно по кнопке «Мои вакансии» (владелец, 12.11.2026). */
   padding-left: 0;
 }
 
-.hf-hr-subnav > * + * {
-  margin-top: var(--hf-space-xxs);
-}
-
 .hf-hr-subnav-link {
-  display: block;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  border-radius: var(--hf-sidebar-subnav-radius);
-  padding-block: var(--hf-sidebar-subnav-py);
-  padding-right: var(--hf-sidebar-subnav-px);
-  padding-left: var(--hf-sidebar-subnav-indent);
+  border: 1px solid var(--hf-white-alpha-08);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--hf-white-alpha-08), var(--hf-white-alpha-04));
+  padding: 7px 10px 7px 8px;
   text-align: left;
-  transition: background-color var(--hf-transition-fast), color var(--hf-transition-fast);
+  overflow: hidden;
+  transition: background-color var(--hf-transition-fast), border-color var(--hf-transition-fast);
+}
+
+.hf-hr-subnav-link .hf-hr-request-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--hf-fs-xs);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+/* Значок направления (utils/vacancyDirection.ts): иконка на мягкой плашке,
+   оттенок — по направлению (DIRECTION_ICONS в Layout). */
+.hf-hr-vac-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: hsl(var(--vac-hue) 80% 62% / 0.2);
+  color: hsl(var(--vac-hue) 90% 82%);
+}
+
+.hf-hr-vac-mark svg {
+  width: 16px;
+  height: 16px;
+}
+
+.hf-hr-vac-count {
+  flex: 0 0 auto;
+  min-width: 22px;
+  border-radius: 999px;
+  background: var(--hf-white-alpha-10);
+  padding: 2px 7px;
+  color: var(--hf-white-alpha-70);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .hf-hr-subnav-link > * {
@@ -580,11 +631,31 @@
 }
 
 .hf-hr-subnav-link:hover {
-  background: var(--hf-white-alpha-08);
+  background: var(--hf-white-alpha-12);
+  border-color: var(--hf-white-alpha-15);
 }
 
-.hf-hr-subnav-link-active {
+.hf-hr-subnav-link-active,
+.hf-hr-subnav-link-active:hover {
   background: var(--hf-sidebar-active-bg);
+  border-color: rgba(154, 211, 255, 0.4);
+}
+
+/* Открытая воронка — голубая полоса слева. */
+.hf-hr-subnav-link-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: rgb(154, 211, 255);
+}
+
+.hf-hr-subnav-link-active .hf-hr-vac-count {
+  background: rgba(154, 211, 255, 0.22);
+  color: var(--hf-white);
 }
 
 .hf-hr-chevron-btn {

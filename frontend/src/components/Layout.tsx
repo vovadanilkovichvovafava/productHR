@@ -37,7 +37,19 @@ import {
   Building2,
   Trash2,
   type LucideIcon,
+  Clapperboard,
+  Code2,
+  Folder,
+  BadgeDollarSign,
+  Headphones,
+  Palette,
+  PenLine,
+  Target,
+  TrendingUp,
+  UserSearch,
+  Wallet,
 } from "lucide-react";
+import { DIRECTION_LABELS, vacancyDirection, type VacancyDirection } from "@/utils/vacancyDirection";
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import { useVacancyStore } from "@/stores/vacancyStore";
@@ -258,6 +270,24 @@ function getBlockForPath(path: string): string | null {
   }
   return null;
 }
+
+
+/** Значок направления вакансии в левой панели: иконка и оттенок плашки. */
+const DIRECTION_ICONS: Record<VacancyDirection, { Icon: LucideIcon; hue: number }> = {
+  traffic: { Icon: Target, hue: 210 },
+  design: { Icon: Palette, hue: 290 },
+  video: { Icon: Clapperboard, hue: 335 },
+  content: { Icon: PenLine, hue: 30 },
+  dev: { Icon: Code2, hue: 250 },
+  analytics: { Icon: BarChart3, hue: 185 },
+  recruiting: { Icon: UserSearch, hue: 160 },
+  finance: { Icon: Wallet, hue: 45 },
+  support: { Icon: Headphones, hue: 15 },
+  growth: { Icon: TrendingUp, hue: 140 },
+  sales: { Icon: BadgeDollarSign, hue: 95 },
+  management: { Icon: Briefcase, hue: 225 },
+  other: { Icon: Folder, hue: 220 },
+};
 
 export default function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -823,10 +853,6 @@ export default function Layout() {
   const isClosedFunnelsView =
     location.pathname === "/my-funnels" &&
     sidebarSearchParams.get("status") === "closed";
-  const isMyFunnelsRootView =
-    location.pathname === "/my-funnels" &&
-    !sidebarSelectedVacancyId &&
-    !isClosedFunnelsView;
   // Все исходные заявки, у которых уже есть клон («взяли в работу»).
   // Оригинал после взятия переходит в status=open и без этого фильтра
   // дублировал клон в «Мои вакансии» (видно как два одинаковых «Тест»).
@@ -1271,12 +1297,10 @@ export default function Layout() {
                     <div className="hf-hr-funnels-header">
                       <button
                         type="button"
-                        className={clsx(
-                          "hf-hr-nav-item hf-hr-funnels-trigger min-w-0",
-                          isMyFunnelsRootView
-                            ? "hf-hr-nav-item-active"
-                            : "hf-hr-nav-item-white",
-                        )}
+                        // Без заливки «активного пункта» (владелец, 12.11.2026):
+                        // под заголовком теперь карточки вакансий, и подсвеченный
+                        // заголовок спорил с ними — выбранную видно по карточке.
+                        className="hf-hr-nav-item hf-hr-nav-item-white hf-hr-funnels-trigger min-w-0"
                         onClick={() => setShowHrFunnelsPicker((value) => !value)}
                         aria-label="Выбрать владельца вакансий"
                         aria-expanded={showHrFunnelsPicker}
@@ -1461,6 +1485,28 @@ export default function Layout() {
                               одинаково — заглушка, когда отдел не указан, — и
                               удваивала длину списка. Отдел, если указан, — в
                               подсказке. */}
+                          {/* Карточка вакансии (12.11.2026, «чтобы список не был
+                              монотонным»): значок направления — трафик, дизайн,
+                              видео, разработка… (угадывается по названию и отделу,
+                              utils/vacancyDirection.ts), справа — сколько в
+                              воронке кандидатов. Были буква названия и цветная
+                              точка — владелец: «какой смысл». */}
+                          {(() => {
+                            const dir = vacancyDirection(
+                              v.title,
+                              (v.extra_data as Record<string, unknown> | undefined)?.department,
+                            );
+                            const { Icon, hue } = DIRECTION_ICONS[dir];
+                            return (
+                              <span
+                                className="hf-hr-vac-mark"
+                                style={{ ["--vac-hue" as string]: hue }}
+                                title={DIRECTION_LABELS[dir]}
+                              >
+                                <Icon aria-hidden="true" strokeWidth={1.9} />
+                              </span>
+                            );
+                          })()}
                           <span
                             className="hf-hr-request-title"
                             title={(() => {
@@ -1470,6 +1516,14 @@ export default function Layout() {
                           >
                             {v.title}
                           </span>
+                          {v.applications_count > 0 && (
+                            <span
+                              className="hf-hr-vac-count"
+                              title={`${v.applications_count} ${pluralRu(v.applications_count, "кандидат", "кандидата", "кандидатов")} в воронке`}
+                            >
+                              {v.applications_count}
+                            </span>
+                          )}
                         </NavLink>
                       ))}
                     </div>
