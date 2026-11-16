@@ -215,7 +215,67 @@ async def move_application_to_trash(
         snapshot=snap,
     )
     db.add(record)
+    if entity is not None:
+        await keep_removed_funnel_history(db, entity, application, vacancy, user, owner, now)
     return record
+
+
+# История воронки остаётся в карточке после «Удалить с воронки» (тикет Маши
+# 13.11.2026, «права HR»: «привязать и отвязать кандидата от воронки не должно
+# сносить статусы по рассмотрению и содержание этапов»). Корзина живёт 7 дней,
+# а копия этапов и комментариев — в карточке, пока кандидат есть: серый блок
+# «Убран из воронки» (только чтение). Вернули заявку — копия убирается.
+REMOVED_FUNNELS_KEY = "removed_funnels"
+REMOVED_FUNNELS_KEEP = 30
+
+
+async def keep_removed_funnel_history(db, entity, application, vacancy, user, owner, now) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from ..models.database import StageTransition
+
+    rows = (await db.execute(
+        select(StageTransition)
+        .where(StageTransition.application_id == application.id)
+        .order_by(StageTransition.created_at.desc(), StageTransition.id.desc())
+    )).scalars().all()
+    ids = {r.changed_by for r in rows if r.changed_by}
+    names = {}
+    if ids:
+        names = dict((await db.execute(select(User.id, User.name).where(User.id.in_(ids)))).all())
+    entry = {
+        "application_id": application.id,
+        "vacancy_id": application.vacancy_id,
+        "vacancy_title": vacancy.title if vacancy else None,
+        "stage": application.stage.value if hasattr(application.stage, "value") else application.stage,
+        "owner_name": owner.name if owner else None,
+        "removed_at": now.isoformat(),
+        "removed_by_name": user.name,
+        "events": [
+            {
+                "id": r.id, "from_stage": r.from_stage, "to_stage": r.to_stage, "comment": r.comment,
+                "changed_by_name": names.get(r.changed_by),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ],
+    }
+    ex = dict(entity.extra_data) if isinstance(entity.extra_data, dict) else {}
+    kept = [e for e in (ex.get(REMOVED_FUNNELS_KEY) or []) if e.get("application_id") != application.id]
+    ex[REMOVED_FUNNELS_KEY] = [*kept, entry][-REMOVED_FUNNELS_KEEP:]
+    entity.extra_data = ex
+    flag_modified(entity, "extra_data")
+
+
+def _drop_removed_funnel(entity, application_id: int) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
+
+    ex = dict(entity.extra_data) if isinstance(entity.extra_data, dict) else {}
+    kept = [e for e in (ex.get(REMOVED_FUNNELS_KEY) or []) if e.get("application_id") != application_id]
+    if len(kept) != len(ex.get(REMOVED_FUNNELS_KEY) or []):
+        ex[REMOVED_FUNNELS_KEY] = kept
+        entity.extra_data = ex
+        flag_modified(entity, "extra_data")
 
 
 class RestoreError(Exception):
@@ -280,6 +340,13 @@ async def restore_from_trash(db: AsyncSession, record: DeletedEntity, user: User
             .where(and_(*cond), col.is_(None))
             .values({col.name: _decode(col, link["value"])})
         )
+
+    if root_name != ROOT_TABLE:
+        # Заявка вернулась — её копия «Убран из воронки» в карточке больше не нужна.
+        root_rows = tables.get(root_name) or []
+        entity = await db.get(Entity, record.entity_id) if record.entity_id else None
+        if entity is not None and root_rows:
+            _drop_removed_funnel(entity, int(root_rows[0].get("id")))
 
     record.restored_at = datetime.utcnow()
     record.restored_by_id = user.id

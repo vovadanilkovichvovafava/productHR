@@ -1032,13 +1032,18 @@ def _row_from_entity(
     # лежат в extra_data.system_hr_tags (их считает services/hr_tags по
     # активным заявкам), поэтому лишних запросов не нужно. Правка руками
     # (добавить / снять) перебивает метки целиком.
-    manual = _manual_assignee_ids(ex)
+    # С 16.11.2026 HR у кандидата один (services/candidate_hr.py): человек в
+    # воронках — HR из воронки, вписанное на доске руками не перебивает его
+    # (так и расходились доска и карточка — тикет Маши 13.11.2026). Без воронок
+    # — как раньше, HR с доски.
+    hr_tags = ex.get("system_hr_tags")
+    in_funnel = isinstance(hr_tags, list) and any(isinstance(t, dict) and t.get("hr_id") for t in hr_tags)
+    manual = None if in_funnel else _manual_assignee_ids(ex)
     assignees: List[BoardAssignee] = [
         BoardAssignee(user_id=i, name=(assignee_names or {}).get(i))
         for i in (manual or [])
     ]
     if manual is None:
-        hr_tags = ex.get("system_hr_tags")
         if isinstance(hr_tags, list):
             for t in hr_tags:
                 hid = _as_int(t.get("hr_id")) if isinstance(t, dict) else None
@@ -2945,6 +2950,34 @@ async def update_row(
     # HR: список главнее одиночного поля. Одиночное (старые клиенты) заменяет
     # весь список, иначе второй HR «воскресал» бы после смены первого.
     assignees_touched = "assignee_user_ids" in payload or "assignee_user_id" in payload
+    from ..services.candidate_hr import (
+        BOARD_HR_KEYS, HR_CHANGES_KEY, active_applications, change_hr, current_hr_id,
+    )
+    funnel_apps = await active_applications(db, entity.id) if assignees_touched else []
+    hr_changed = False
+    if funnel_apps:
+        # Человек в воронках: HR у него один и живёт в воронке. Правка на доске
+        # = «Сменить HR» (тот же путь, что в карточке): новый — тот, кого
+        # добавили; снять HR совсем нельзя.
+        raw_ids = payload.pop("assignee_user_ids", None)
+        one = payload.pop("assignee_user_id", None)
+        ids = [int(v) for v in (raw_ids if raw_ids is not None else ([one] if one not in (None, "") else []))]
+        current = await current_hr_id(db, entity, funnel_apps)
+        added = [i for i in ids if i != current]
+        if not ids:
+            raise HTTPException(400, "У кандидата в воронке HR есть всегда — выберите другого HR")
+        if added:
+            from ..services.hr_notifications import valid_handover_recipients
+            if added[-1] not in await valid_handover_recipients(db, org.id, [added[-1]]):
+                raise HTTPException(400, "HR может быть только рекрутёр или админ")
+            await change_hr(db, entity, added[-1], actor=current_user, via="staff_board")
+            hr_changed = True
+            fresh_ex = entity.extra_data if isinstance(entity.extra_data, dict) else {}
+            for k in BOARD_HR_KEYS:
+                ex.pop(k, None)
+            ex[HR_CHANGES_KEY] = fresh_ex.get(HR_CHANGES_KEY)
+            touched_extra = True
+        assignees_touched = False
     if "assignee_user_ids" in payload:
         ids: List[int] = []
         for v in payload.pop("assignee_user_ids") or []:
@@ -3109,6 +3142,12 @@ async def update_row(
 
     await db.commit()
     log_moves(board_moves, current_user, via="staff_board")
+    if hr_changed:
+        try:
+            from ..services.hr_tags import sync_for_entity
+            await sync_for_entity(db, entity.id)
+        except Exception:
+            logger.exception("HR-tags sync failed after board HR change (non-critical)")
 
     # НЕ db.refresh(): он сбрасывает уже загруженную связь department, и
     # следующее обращение к entity.department.name ушло бы в ленивую подгрузку —

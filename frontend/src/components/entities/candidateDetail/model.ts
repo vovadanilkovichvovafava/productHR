@@ -908,3 +908,26 @@ export function countPracticeMentors(cards: KanbanCard[]): { key: MentorFilter; 
   out.push({ key: "none", count: cards.filter((c) => cardMatchesMentor(c, "none")).length });
   return out;
 }
+
+
+/** Воронка, из которой кандидата убрали: копия этапов и комментариев (сервер,
+ *  entity_trash.keep_removed_funnel_history; тикет Маши 13.11.2026). */
+export type RemovedFunnel = {
+  application_id: number;
+  vacancy_id?: number | null;
+  vacancy_title?: string | null;
+  stage?: string | null;
+  owner_name?: string | null;
+  removed_at?: string | null;
+  removed_by_name?: string | null;
+  events: ActivityEvent[];
+};
+
+export function readRemovedFunnels(extra: Record<string, unknown> | null | undefined): RemovedFunnel[] {
+  const raw = extra?.removed_funnels;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((f): f is RemovedFunnel => !!f && typeof (f as RemovedFunnel).application_id === "number")
+    .map((f) => ({ ...f, events: Array.isArray(f.events) ? f.events : [] }))
+    .reverse();
+}

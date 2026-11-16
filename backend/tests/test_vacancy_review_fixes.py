@@ -124,7 +124,8 @@ async def test_take_into_new_funnel_does_not_inherit_rejection(client, db_sessio
 
 
 async def test_take_always_starts_new_and_keeps_previous_owner(client, db_session, organization, team):
-    """«Забрать» в свою воронку: там кандидат на «Новом», у прежнего — как был."""
+    """«Забрать» в свою воронку: там кандидат на «Новом», в прежней этап как был.
+    С 16.11.2026 HR у кандидата один: забравший — HR и в прежней воронке."""
     a_vac = await _vac(db_session, organization, team["anna"], "Трафик")
     p_vac = await _vac(db_session, organization, team["petr"], "Продажи")
     e = await _cand(db_session, organization, team["anna"], "На интервью", EntityStatus.practice)
@@ -135,7 +136,8 @@ async def test_take_always_starts_new_and_keeps_previous_owner(client, db_sessio
     assert r.status_code == 200, r.text
     assert r.json()["stage"] == "applied"
     kept = await db_session.get(VacancyApplication, old_id, populate_existing=True)
-    assert kept.stage == ApplicationStage.phone_screen and kept.created_by == anna_id
+    assert kept.stage == ApplicationStage.phone_screen and kept.created_by == team["ids"]["petr"]
+    assert anna_id
 
 
 async def test_new_funnel_keeps_dismissed_person(client, db_session, organization, team):
@@ -261,7 +263,9 @@ async def test_transfer_moves_co_recruiter_rows_and_null_author_tags(db_session,
         select(ApplicationCoRecruiter.user_id).where(ApplicationCoRecruiter.application_id == a2_id)
     )).scalars().all()
     assert co == [ids["petr"]]
-    for eid in eids:
-        tags = ((await db_session.get(Entity, eid, populate_existing=True)).extra_data or {}).get("system_hr_tags") or []
-        assert ids["anna"] not in {t.get("hr_id") for t in tags}
-        assert ids["petr"] in {t.get("hr_id") for t in tags}
+    # Метка «HR: …» — только у HR кандидата (с 16.11.2026 со-рекрутёр —
+    # участник, без метки): у первого Пётр — HR, у второго HR — Мария.
+    tags1 = ((await db_session.get(Entity, eids[0], populate_existing=True)).extra_data or {}).get("system_hr_tags") or []
+    tags2 = ((await db_session.get(Entity, eids[1], populate_existing=True)).extra_data or {}).get("system_hr_tags") or []
+    assert {t.get("hr_id") for t in tags1} == {ids["petr"]}
+    assert ids["anna"] not in {t.get("hr_id") for t in tags2} and ids["petr"] not in {t.get("hr_id") for t in tags2}

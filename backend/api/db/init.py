@@ -658,6 +658,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Board mentor migration failed (non-critical): {e}")
 
+    # Расхождения «HR на доске ≠ HR в воронке» на проде (16.11.2026,
+    # services/hr_conflicts_fix.py). Одноразово.
+    try:
+        from ..services.hr_conflicts_fix import fix_hr_conflicts_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await fix_hr_conflicts_once(session)
+    except Exception as e:
+        logger.warning(f"HR conflicts fix failed (non-critical): {e}")
+
     # Живые заявки у тех, кого уволили до 20.10.2026: увольнение тогда не
     # закрывало воронки (11.11.2026, services/departed_apps_sync.py). Одноразово.
     try:

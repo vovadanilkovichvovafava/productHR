@@ -22,6 +22,7 @@ from .entity_vacancies import router as entity_vacancies_router
 from .duplicates import router as duplicates_router
 from .bulk import router as bulk_router
 from .share_links import router as share_links_router
+from .hr_team import router as hr_team_router
 
 # Re-export common items for backwards compatibility with tests
 from .common import (
@@ -64,6 +65,8 @@ router.include_router(crud_router, tags=["entities-crud"])
 # Лента карточки и архив — части прежнего crud.py (разрезан 20.10.2026).
 router.include_router(notes_router, tags=["entities-crud"])
 router.include_router(archive_router, tags=["entities-crud"])
+# Команда кандидата: HR, сорсер, участники (16.11.2026, services/candidate_hr.py).
+router.include_router(hr_team_router, tags=["entities-crud"])
 
 # Hire operations (кандидат → сотрудник Factorial)
 router.include_router(hire_router, tags=["entities-hire"])

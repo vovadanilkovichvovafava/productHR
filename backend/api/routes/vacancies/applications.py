@@ -490,6 +490,12 @@ async def create_application(
     min_order = min_order_result.scalar()
     new_order = (min_order - 1000) if min_order is not None else 0
 
+    # HR у кандидата один (16.11.2026, services/candidate_hr.py): добавить в
+    # свою воронку ≠ забрать. Если у кандидата уже есть HR, заявка — его, а
+    # добавивший — участник. Нет HR (первая воронка) — HR тот, кто добавил.
+    from ...services.candidate_hr import current_hr_id
+    existing_hr = await current_hr_id(db, entity)
+    owner_id = existing_hr or current_user.id
     application = VacancyApplication(
         vacancy_id=vacancy_id,
         entity_id=data.entity_id,
@@ -498,10 +504,13 @@ async def create_application(
         rating=data.rating,
         notes=data.notes,
         source=data.source,
-        created_by=current_user.id
+        created_by=owner_id,
     )
 
     db.add(application)
+    if owner_id != current_user.id:
+        await db.flush()
+        db.add(ApplicationCoRecruiter(application_id=application.id, user_id=current_user.id))
 
     # Sync Entity.status if the application stage differs from current entity status
     # This ensures Entity.status matches VacancyApplication.stage.
@@ -654,32 +663,9 @@ async def take_application(
     outcome = "unchanged"
     prev_owner = None
     if application:
-        # Уже в воронке — ПЕРЕНОС к новому рекрутёру. Раньше (28.08) было
-        # аддитивно: новый добавлялся со-рекрутёром, прежний оставался, и
-        # «Забрать» у уходящего рекрутёра ничего у него не забирало.
-        prev_owner = application.created_by
-        if prev_owner != data.recruiter_id:
-            outcome = "transferred"
-            application.created_by = data.recruiter_id
-            # Новый мог быть со-рекрутёром — теперь он владелец, запись лишняя.
-            # Остальных со-рекрутёров не трогаем.
-            await db.execute(
-                delete(ApplicationCoRecruiter).where(
-                    ApplicationCoRecruiter.application_id == application.id,
-                    ApplicationCoRecruiter.user_id == data.recruiter_id,
-                )
-            )
-            # Карточка («кто добавил») — за новым, если ею владел прежний: как в
-            # передаче уходящего рекрутёра (services/recruiter_transfer.py). Иначе
-            # у нового кандидат не попадал в «Только по моим» на «Все кандидаты».
-            if prev_owner is not None and entity.created_by == prev_owner:
-                entity.created_by = data.recruiter_id
-                entity.updated_at = datetime.utcnow()
-            logger.info(
-                "TAKE_TRANSFER app=%s entity=%s vacancy=%s from=%s to=%s by=%s",
-                application.id, data.entity_id, vacancy_id, prev_owner,
-                data.recruiter_id, current_user.id,
-            )
+        # Уже в воронке. С 16.11.2026 «Забрать» = стать HR кандидата во ВСЕХ
+        # его воронках (HR у кандидата один, services/candidate_hr.py); прежний
+        # HR становится сорсером, если сорсера нет. Ниже, после коммита.
         application.updated_at = datetime.utcnow()
     else:
         created = True
@@ -724,30 +710,28 @@ async def take_application(
             comment="Забрал в воронку",
         )
         await db.commit()
-    elif outcome == "transferred":
-        # След в ленте карточки: кто кому передал (раньше перенос был виден только
-        # в логе сервера, а он живёт до перезапуска). Этап тот же — отмена этой
-        # записи ничего не двигает.
-        names = dict((await db.execute(
-            select(User.id, User.name).where(User.id.in_([u for u in (prev_owner, data.recruiter_id) if u]))
-        )).all())
-        new_name = names.get(data.recruiter_id) or "новый рекрутёр"
-        prev_part = f", раньше {names[prev_owner]}" if names.get(prev_owner) else ""
-        db.add(StageTransition(
-            application_id=application.id, entity_id=application.entity_id,
-            from_stage=application.stage.value, to_stage=application.stage.value,
-            changed_by=actor_id,
-            # Имена не склоняем — только именительный падеж.
-            comment=f"Сменился рекрутёр: теперь {new_name}{prev_part}",
-        ))
+
+    # HR кандидата — тот, кто забрал, во всех живых воронках (16.11.2026).
+    from ...services.candidate_hr import change_hr
+    change = await change_hr(db, entity, data.recruiter_id, actor=current_user, via="take")
+    if change.changed:
+        prev_owner = change.prev_hr_id
+        if not created:
+            outcome = "transferred"
+        new_name = (await db.get(User, data.recruiter_id)).name or "новый рекрутёр"
         from ...services.hr_notifications import notify_candidate_taken
         await notify_candidate_taken(
             db, entity_id=application.entity_id, entity_name=entity.name or "Кандидат",
-            vacancy_title=vacancy.title, prev_owner_id=prev_owner,
-            new_owner_id=data.recruiter_id, new_owner_name=new_name,
+            vacancy_title=", ".join(change.vacancy_titles) or vacancy.title,
+            prev_owner_id=prev_owner, new_owner_id=data.recruiter_id, new_owner_name=new_name,
             actor_id=actor_id, actor_name=actor_name,
         )
-        await db.commit()
+        logger.info(
+            "TAKE_TRANSFER app=%s entity=%s vacancy=%s from=%s to=%s by=%s",
+            application.id, data.entity_id, vacancy_id, prev_owner, data.recruiter_id, current_user.id,
+        )
+    await db.commit()
+    await db.refresh(application)
 
     request.state.audit_action = {
         "added": "Забрал кандидата в воронку",

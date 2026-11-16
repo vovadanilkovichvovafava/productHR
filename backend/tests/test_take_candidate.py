@@ -154,9 +154,10 @@ async def test_take_into_funnel_without_candidate_creates_application(
     assert r.status_code == 200, r.text
     assert r.json()["created_by"] == s["petr"].id
 
-    # В первой воронке кандидат по-прежнему у Марии.
+    # С 16.11.2026 HR у кандидата один (services/candidate_hr.py): кто забрал —
+    # тот HR и в первой воронке; Мария — сорсер.
     await db_session.refresh(s["app"])
-    assert s["app"].created_by == s["maria"].id
+    assert s["app"].created_by == s["petr"].id
 
 
 @pytest.mark.asyncio
@@ -181,7 +182,7 @@ async def test_take_transfer_leaves_trace_and_notifies(client, db_session, admin
         select(StageTransition).where(StageTransition.application_id == s["app"].id)
         .order_by(StageTransition.id.desc())
     )).scalars().first()
-    assert last.comment == "Сменился рекрутёр: теперь Пётр, раньше Мария"
+    assert last.comment == "Сменился HR: теперь Пётр, раньше Мария. Мария — сорсер"
     assert last.from_stage == last.to_stage == "probation"  # этап не двигали
     for uid, title in ((s["maria"].id, "Кандидата забрали"), (s["petr"].id, "Вам передали кандидата")):
         n = (await db_session.execute(select(Notification).where(

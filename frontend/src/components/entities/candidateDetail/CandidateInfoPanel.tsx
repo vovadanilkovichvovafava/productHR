@@ -1,6 +1,5 @@
 import { copyOrShowLink } from '@/utils/copyOrShowLink';
 import { useState, useEffect, useCallback, useMemo, memo, lazy, Suspense, useContext } from "react";
-import { useNavigate } from "react-router-dom";
 
 import { AnimatePresence } from "framer-motion";
 import {
@@ -11,14 +10,12 @@ import {
   Send,
   ExternalLink,
   MapPin,
-  ChevronRight,
-  Lock,
   Archive,
 } from "lucide-react";
 import clsx from "clsx";
 import toast from "react-hot-toast";
 
-import { buildStageContainers, buildStagePickerOptions, readSystemHrTags } from "@/components/entities/candidateDetail/model";
+import { buildStageContainers, buildStagePickerOptions, readRemovedFunnels } from "@/components/entities/candidateDetail/model";
 import { htmlToPlainText } from "@/components/entities/candidateDetail/timelineParts";
 
 import type { KanbanCard, KanbanColumn } from "@/services/api/candidates";
@@ -41,6 +38,7 @@ import { useVisiblePriorRejections } from "@/components/candidates/priorRejectio
 import { useAuthStore } from "@/stores/authStore";
 
 import { HuntflowInfoRow as InfoRow } from "@/components/hr/HuntflowControls";
+import { CandidateTeamRows } from "@/components/entities/candidateDetail/CandidateTeamRows";
 import { useFormBadgeStore } from "@/stores/formBadgeStore";
 import {
   getEntityFormsUnreadCount,
@@ -114,7 +112,6 @@ export const InfoTab = memo(function InfoTab({
   deleted?: DeletedCardSource;
 }) {
   const { user: currentUser } = useAuthStore();
-  const navigate = useNavigate();
   // «Наблюдатель» (read-only): все изменяющие действия карточки заблокированы.
   // Просмотр (анкета/резюме, клики по тг/почте/ссылкам) и «Поделиться» — доступны.
   // Удалённую карточку из корзины тоже только смотрят.
@@ -133,6 +130,9 @@ export const InfoTab = memo(function InfoTab({
   // Бамп после загрузки файла → useResumeSources перечитывает файлы (вкладка
   // «Резюме» кэширует по card.id, который не меняется → иначе файл не виден).
   const [filesNonce, setFilesNonce] = useState(0);
+  // Сменили HR / участников — перечитать сорсеров (прежний HR мог им стать).
+  const [teamVersion, setTeamVersion] = useState(0);
+  const removedFunnels = useMemo(() => readRemovedFunnels(card.extra_data), [card.extra_data]);
   const { sources: resumeSources, files: allEntityFiles } = useResumeSources(
     card,
     filesNonce,
@@ -801,59 +801,24 @@ export const InfoTab = memo(function InfoTab({
               </InfoRow>
             )}
 
-          {/* Tags row */}
-          <InfoRow label="Метки">
+          {/* HR и участники — тикет Маши 13.11.2026 («права HR»): HR у
+              кандидата один, во всех его воронках; меняется здесь, на доске
+              «Штат» или через «Забрать». Раньше тут были чипы «HR: Имя ·
+              воронка» — по одному на каждого, кто добавлял, и их бывало два. */}
+          {!deleted && (
+            <CandidateTeamRows
+              entityId={card.id}
+              readonly={readonly}
+              refreshKey={notesVersion}
+              onChanged={() => {
+                setTeamVersion((v) => v + 1);
+                void loadActivity();
+              }}
+            />
+          )}
+          {/* Метки = сорсеры (с 21.09.2026 любая метка — сорсер). */}
+          <InfoRow label="Сорсер">
             <div className="flex flex-wrap items-center gap-1.5">
-              {/* Авто-метки HR: кто забрал кандидата в воронку. Проставляются
-                  бэкендом (extra_data.system_hr_tags). Клик по метке ведёт прямо
-                  в эту воронку конкретного рекрутёра (?v=…&recruiter=…&entity=…),
-                  как будто её выбрали в сайдбаре вручную. Ручное проставление
-                  меток здесь убрано — только авто HR + показ старых ручных. */}
-              {readSystemHrTags(card.extra_data).map((hr) => {
-                const label = `HR: ${hr.name}${hr.vacancy_title ? ` · ${hr.vacancy_title}` : ""}`;
-                const chipBase =
-                  "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--hf-bg-panel)] text-[var(--hf-main-900)] border border-[color:var(--hf-main-200)] hf-dark-disabled:bg-[var(--hf-white-alpha-06)] hf-dark-disabled:text-[var(--hf-dark-200)] hf-dark-disabled:border-[color:var(--hf-white-alpha-10)]";
-                // У удалённого кандидата вести в воронку некуда.
-                if (typeof hr.vacancy_id !== "number" || deleted) {
-                  return (
-                    <span
-                      key={`hr-${hr.hr_id}`}
-                      title={
-                        hr.source === "board"
-                          ? "Ведущий HR — назначен на доске «Штат»"
-                          : "Закреплённый HR — проставляется автоматически по воронке"
-                      }
-                      className={chipBase}
-                    >
-                      <Lock className="w-3 h-3 opacity-50" />
-                      {label}
-                    </span>
-                  );
-                }
-                return (
-                  <button
-                    key={`hr-${hr.hr_id}`}
-                    type="button"
-                    title={`Открыть воронку «${hr.vacancy_title || ""}» — рекрутёр ${hr.name}`}
-                    onClick={() =>
-                      // stage=all — чтобы воронка показала ВСЕ этапы и подхватила
-                      // кандидата на любом его этапе (без stage вкладка встаёт на
-                      // первый этап, и кандидат с другого этапа не выбирается).
-                      navigate(
-                        `/my-funnels?v=${hr.vacancy_id}&recruiter=${hr.hr_id}&entity=${card.id}&stage=all`,
-                      )
-                    }
-                    className={clsx(
-                      chipBase,
-                      "cursor-pointer transition-colors hover:border-[color:var(--hf-main-400)] hover:bg-[var(--hf-main-100)] hf-dark-disabled:hover:bg-[var(--hf-white-alpha-10)]",
-                    )}
-                  >
-                    <Lock className="w-3 h-3 opacity-50" />
-                    {label}
-                    <ChevronRight className="w-3 h-3 opacity-60" />
-                  </button>
-                );
-              })}
               {localTags.map((t) => (
                 <span
                   key={t}
@@ -875,7 +840,7 @@ export const InfoTab = memo(function InfoTab({
                   (например, кто его привёл) из общей базы было нельзя — а
                   ставят их чаще всего именно отсюда, когда кандидат ещё ни в
                   одной воронке. Компонент общий с воронкой. */}
-              <TagPicker entityId={card.id} disabled={readonly} tags={deleted?.tags} />
+              <TagPicker key={teamVersion} entityId={card.id} disabled={readonly} tags={deleted?.tags} />
             </div>
           </InfoRow>
         </div>
@@ -966,6 +931,36 @@ export const InfoTab = memo(function InfoTab({
               ? funnelStages
               : undefined
           }
+        />
+      ))}
+
+      {/* Воронки, из которых кандидата убрали: этапы и комментарии остаются
+          в карточке серым блоком только для чтения (тикет Маши 13.11.2026:
+          «отвязать от воронки не должно сносить статусы и содержание этапов»).
+          Копию пишет сервер при «Удалить с воронки» (removed_funnels),
+          вернули заявку из корзины — блок уходит. */}
+      {removedFunnels.map((f) => (
+        <CandidateVacancyCard
+          key={`removed-${f.application_id}`}
+          card={card}
+          applicationId={-f.application_id}
+          vacancyTitle={`${f.vacancy_title || "Воронка"} · убран(а) из воронки${f.removed_by_name ? ` · ${f.removed_by_name}` : ""}${f.removed_at ? `, ${new Date(f.removed_at).toLocaleDateString("ru")}` : ""}`}
+          currentStage={f.stage || "rejected"}
+          notes={[]}
+          events={f.events}
+          readonly
+          dimmed
+          snapshot={false}
+          stageOptions={stagePickerOptions}
+          getStageLabel={getStackStageLabel}
+          onChangeStage={cardChangeStage}
+          onComment={cardActions.comment}
+          onDeleteHistory={cardActions.deleteHistory}
+          onEditHistory={cardActions.editHistory}
+          onPin={cardActions.pin}
+          onDeleteNote={cardActions.deleteNote}
+          onEditNote={cardActions.editNote}
+          onUploadFile={cardActions.uploadFile}
         />
       ))}
 

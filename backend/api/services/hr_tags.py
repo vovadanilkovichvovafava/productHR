@@ -64,25 +64,13 @@ async def compute_hr_tags(db: AsyncSession, entity_id: int) -> list[dict]:
         )
         .distinct()
     )
-    # + СО-РЕКРУТЁРЫ: кандидат в ОБЩЕЙ воронке может быть у нескольких HR сразу.
-    # Каждый co-recruiter активной заявки даёт свою метку «HR: Имя · воронка».
-    co_rows = await db.execute(
-        select(ApplicationCoRecruiter.user_id, User.name, Vacancy.id, Vacancy.title)
-        .select_from(ApplicationCoRecruiter)
-        .join(VacancyApplication, VacancyApplication.id == ApplicationCoRecruiter.application_id)
-        .join(Vacancy, Vacancy.id == VacancyApplication.vacancy_id)
-        .join(User, User.id == ApplicationCoRecruiter.user_id)
-        .where(
-            VacancyApplication.entity_id == entity_id,
-            VacancyApplication.stage.not_in(INACTIVE_STAGES),
-            Vacancy.deleted_at.is_(None),  # удалённая воронка метку не даёт
-        )
-        .distinct()
-    )
+    # Со-рекрутёры с 16.11.2026 — «участники», не HR: метка «HR: …» только у
+    # одного HR кандидата (services/candidate_hr.py, тикет Маши 13.11.2026 —
+    # в карточке было по два HR).
     # Дедуп по (hr_id, vacancy_id) — co-recruiter может совпасть с владельцем;
     # стабильный порядок (hr_id, vacancy_id) нужен для дешёвого diff в sync.
     seen: dict[tuple[int, int], dict] = {}
-    for hr_id, name, vid, vtitle in [*rows.all(), *co_rows.all()]:
+    for hr_id, name, vid, vtitle in rows.all():
         key = (hr_id, vid)
         if key not in seen:
             seen[key] = {"hr_id": hr_id, "name": name, "vacancy_id": vid, "vacancy_title": vtitle}

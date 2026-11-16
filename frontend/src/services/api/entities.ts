@@ -1418,3 +1418,49 @@ export const getPublicCandidatePreview = async (token: string): Promise<PublicCa
   const { data } = await api.get(`/entities/public/candidate-preview/${encodeURIComponent(token)}`);
   return data;
 };
+
+// ── Команда кандидата: HR, сорсер, участники (тикет Маши 13.11.2026) ──
+// Правила — backend services/candidate_hr.py: HR у кандидата один (во всех
+// его воронках); при смене прежний HR становится сорсером, если сорсера нет;
+// добавивший в свою воронку — участник.
+
+export interface EntityTeamPerson {
+  id: number;
+  name: string | null;
+}
+
+export interface EntityTeam {
+  hr: EntityTeamPerson | null;
+  /** Кандидат вне воронок — HR взят с доски «Штат». */
+  hr_from_board: boolean;
+  participants: EntityTeamPerson[];
+  sourcers: Array<{ id: number; name: string; color?: string | null }>;
+  in_funnels: boolean;
+}
+
+export const getEntityTeam = async (entityId: number): Promise<EntityTeam> => {
+  const { data } = await api.get<EntityTeam>(`/entities/${entityId}/team`);
+  return data;
+};
+
+export const setEntityHr = async (
+  entityId: number,
+  userId: number,
+  keepPrevAsParticipant: boolean,
+): Promise<{ changed: boolean; sourcer: string | null; team: EntityTeam }> => {
+  const { data } = await api.post(`/entities/${entityId}/hr`, {
+    user_id: userId,
+    keep_prev_as_participant: keepPrevAsParticipant,
+  });
+  return data;
+};
+
+export const addEntityParticipant = async (entityId: number, userId: number): Promise<EntityTeam> => {
+  const { data } = await api.post(`/entities/${entityId}/participants`, { user_id: userId });
+  return data.team;
+};
+
+export const removeEntityParticipant = async (entityId: number, userId: number): Promise<EntityTeam> => {
+  const { data } = await api.delete(`/entities/${entityId}/participants/${userId}`);
+  return data.team;
+};

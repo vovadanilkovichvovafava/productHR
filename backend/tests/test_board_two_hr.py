@@ -92,19 +92,17 @@ async def test_two_hr_from_funnel(client, db_session, organization, admin_user, 
 
 
 @pytest.mark.asyncio
-async def test_removed_funnel_hr_stays_removed(client, db_session, organization, admin_user, org_owner):
-    """«×» по HR из меток: остальные остаются, снятый не возвращается; сняли
-    последнего — строка без HR, метки его не подставляют обратно."""
-    e = await _mk(db_session, organization, admin_user, {"system_hr_tags": [
-        {"hr_id": 101, "name": "Лиза"}, {"hr_id": 102, "name": "Егор"},
-    ]})
-    await client.patch(f"/api/staff-board/rows/{e.id}", json={"assignee_user_ids": [102]}, headers=_h(admin_user))
+async def test_funnel_hr_is_not_overridden_by_board_list(client, db_session, organization, admin_user, org_owner):
+    """С 16.11.2026 HR у кандидата один и живёт в воронке (services/candidate_hr.py):
+    список, вписанный на доске руками, HR из воронки не перебивает — так доска
+    и карточка расходились (тикет Маши 13.11.2026). Смена HR с доски для
+    человека в воронке — tests/test_hr_rights.py."""
+    e = await _mk(db_session, organization, admin_user, {
+        "system_hr_tags": [{"hr_id": 101, "name": "Лиза"}],
+        "assignee_user_ids": [102],
+    })
     row = await _row(client, admin_user, e.id)
-    assert [a["user_id"] for a in row["assignees"]] == [102]
-
-    await client.patch(f"/api/staff-board/rows/{e.id}", json={"assignee_user_ids": []}, headers=_h(admin_user))
-    row = await _row(client, admin_user, e.id)
-    assert row["assignees"] == []
+    assert [(a["user_id"], a["auto"]) for a in row["assignees"]] == [(101, True)]
 
 
 @pytest.mark.asyncio

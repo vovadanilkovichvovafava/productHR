@@ -265,6 +265,35 @@ async def delete_application_history(
     if not transition:
         raise HTTPException(status_code=404, detail="History entry not found")
 
+    # «Сменился HR: …» — смена HR кандидата (services/candidate_hr.py). Её
+    # корзина отменяет смену: прежний HR, сорсер, участники, доска — если это
+    # последняя смена; иначе просто убирает запись. Этап не трогаем.
+    from ...models.database import Entity
+    from ...services.candidate_hr import undo_hr_change
+
+    entity = await db.get(Entity, application.entity_id)
+    hr_undo = await undo_hr_change(db, entity, transition.id, actor=current_user) if entity else None
+    if hr_undo is not None:
+        if application.pinned_entry_key == f"e:{transition.id}":
+            application.pinned_entry_key = None
+        await db.commit()
+        try:
+            from ...services.hr_tags import sync_for_entity
+            await sync_for_entity(db, application.entity_id)
+        except Exception:
+            logger.exception("HR-tags sync failed after HR undo (non-critical)")
+        logger.info(
+            "HISTORY_DELETE: user=%s app=%s entity=%s запись %s — смена HR (%s)",
+            current_user.id, application.id, application.entity_id, history_id, hr_undo,
+        )
+        return {
+            "success": True,
+            "hr_change": hr_undo,
+            "rolled_back": False,
+            "stage": application.stage.value if application.stage else None,
+            "entity_status": entity.status.value if entity and entity.status else None,
+        }
+
     # Самая свежая запись заявки. id вторым ключом: у импортов и быстрых
     # переводов created_at совпадает до секунды.
     latest = (await db.execute(

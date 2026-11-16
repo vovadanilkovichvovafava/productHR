@@ -28,6 +28,14 @@ from ...services.hr_stages import STAGE_LABELS  # общий справочни�
 
 logger = get_logger("analytics-reports")
 
+
+# Чей кандидат в аналитике — его основной HR: автор заявки, без автора —
+# владелец воронки (то же правило, что метка «HR: …», services/hr_tags.py).
+# До 16.11.2026 отчёты «по рекрутёрам» считали по создателю ВАКАНСИИ, и чужие
+# кандидаты в общей воронке записывались на её владельца (тикет Маши 13.11.2026:
+# «основной HR — тот, кто учитывается в аналитике»).
+_APP_HR = func.coalesce(VacancyApplication.created_by, Vacancy.created_by)
+
 router = APIRouter()
 
 # Stage ordering for funnel
@@ -269,7 +277,7 @@ async def get_time_to_fill(
             VacancyApplication.applied_at,
             VacancyApplication.last_stage_change_at,
             Vacancy.title.label("vacancy_title"),
-            Vacancy.created_by.label("recruiter_id"),
+            _APP_HR.label("recruiter_id"),
             Entity.name.label("candidate_name"),
         )
         .join(Vacancy, VacancyApplication.vacancy_id == Vacancy.id)
@@ -285,7 +293,7 @@ async def get_time_to_fill(
     if date_to_dt:
         hired_query = hired_query.where(VacancyApplication.last_stage_change_at <= date_to_dt)
     if recruiter_id:
-        hired_query = hired_query.where(Vacancy.created_by == recruiter_id)
+        hired_query = hired_query.where(_APP_HR == recruiter_id)
     if department_id:
         hired_query = hired_query.where(Vacancy.department_id == department_id)
 
@@ -354,7 +362,7 @@ async def get_time_to_fill(
             if date_to_dt:
                 trans_q = trans_q.where(StageTransition.created_at <= date_to_dt)
             if recruiter_id:
-                trans_q = trans_q.where(Vacancy.created_by == recruiter_id)
+                trans_q = trans_q.where(_APP_HR == recruiter_id)
             if department_id:
                 trans_q = trans_q.where(Vacancy.department_id == department_id)
 
@@ -406,7 +414,7 @@ async def get_funnel_report(
     if date_to_dt:
         base_filter.append(VacancyApplication.applied_at <= date_to_dt)
     if recruiter_id:
-        base_filter.append(Vacancy.created_by == recruiter_id)
+        base_filter.append(_APP_HR == recruiter_id)
     if department_id:
         base_filter.append(Vacancy.department_id == department_id)
     if vacancy_status == "open":
@@ -546,9 +554,13 @@ async def get_funnel_by_recruiter(
     )
 
     # Get recruiter list. Не-админ видит только себя.
+    # Рекрутёры = основные HR кандидатов (с 16.11.2026, тикет «права HR»), а не
+    # создатели вакансий.
     recruiter_q = (
         select(User.id, User.name)
-        .join(Vacancy, Vacancy.created_by == User.id)
+        .select_from(VacancyApplication)
+        .join(Vacancy, VacancyApplication.vacancy_id == Vacancy.id)
+        .join(User, User.id == _APP_HR)
         .where(Vacancy.org_id == org.id)
         .group_by(User.id, User.name)
     )
@@ -717,7 +729,7 @@ async def get_rejections_report(
     if date_to_dt:
         base_filter.append(VacancyApplication.last_stage_change_at <= date_to_dt)
     if recruiter_id:
-        base_filter.append(Vacancy.created_by == recruiter_id)
+        base_filter.append(_APP_HR == recruiter_id)
     if department_id:
         base_filter.append(Vacancy.department_id == department_id)
     if vacancy_status == "open":
@@ -754,7 +766,7 @@ async def get_rejections_report(
     if date_to_dt:
         by_stage_q = by_stage_q.where(StageTransition.created_at <= date_to_dt)
     if recruiter_id:
-        by_stage_q = by_stage_q.where(Vacancy.created_by == recruiter_id)
+        by_stage_q = by_stage_q.where(_APP_HR == recruiter_id)
     if department_id:
         by_stage_q = by_stage_q.where(Vacancy.department_id == department_id)
     if vacancy_status == "open":
@@ -860,7 +872,7 @@ async def get_sources_report(
     if date_to_dt:
         base_filter.append(VacancyApplication.applied_at <= date_to_dt)
     if recruiter_id:
-        base_filter.append(Vacancy.created_by == recruiter_id)
+        base_filter.append(_APP_HR == recruiter_id)
     if department_id:
         base_filter.append(Vacancy.department_id == department_id)
     if vacancy_status == "open":
@@ -951,7 +963,7 @@ async def get_movement_report(
     if date_to_dt:
         move_q = move_q.where(StageTransition.created_at <= date_to_dt)
     if recruiter_id:
-        move_q = move_q.where(Vacancy.created_by == recruiter_id)
+        move_q = move_q.where(_APP_HR == recruiter_id)
     if department_id:
         move_q = move_q.where(Vacancy.department_id == department_id)
 

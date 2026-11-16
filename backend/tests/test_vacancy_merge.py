@@ -190,10 +190,11 @@ async def test_overlap_keeps_target_stage_and_all_history(client, db_session, ad
     # Общий статус — по оставшейся заявке (Новый), не «Отказ» из удалённой.
     assert ent.status != EntityStatus.rejected
 
-    # Метка Эльвиры по этой вакансии — одна (не две); Пётр — со-рекрутёр
-    # из исходной заявки, у него своя.
+    # Метка Эльвиры по этой вакансии — одна (не две). Пётр — со-рекрутёр из
+    # исходной заявки: с 16.11.2026 это участник, метки «HR: …» у него нет
+    # (HR у кандидата один, services/candidate_hr.py).
     tags = ent.extra_data.get("system_hr_tags") or []
-    assert sorted(t["name"] for t in tags) == ["Пётр", "Эльвира"], tags
+    assert sorted(t["name"] for t in tags) == ["Эльвира"], tags
 
 
 @pytest.mark.asyncio
