@@ -79,7 +79,9 @@ export function CandidateTeamRows({
     [team],
   );
 
-  if (!team || (!team.hr && !team.in_funnels)) return null;
+  // Строка «HR» есть всегда: у человека без воронок (в т.ч. уволенного — его
+  // воронки закрыты) HR живёт на доске «Штат», и менять его можно отсюда же.
+  if (!team) return null;
 
   const addParticipant = async (userId: number) => {
     setAddOpen(false);
