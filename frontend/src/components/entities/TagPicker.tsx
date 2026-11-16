@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, X, Loader2, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { isPracticeMentorTag } from '@/components/entities/candidateDetail/model';
 import {
   getTags,
   createTag,
@@ -271,7 +272,17 @@ export default function TagPicker({
             border: `1px solid color-mix(in srgb, ${tag.color} ${atName ? 35 : 25}%, transparent)`,
           }}
         >
-          {tag.name}
+          {/* Тег-ментор (Егор / Влад) — это «Рук. практики» на «Штате»:
+              подписываем, чтобы было видно, что он и есть ментор (тикет Маши
+              13.11.2026; одно значение у карточки и доски — practice_mentor.py). */}
+          {atName && isPracticeMentorTag(tag.name) ? (
+            <span title="Ментор практики — он же в колонке «Рук. практики» на «Штате»">
+              <span className="font-medium opacity-70">Ментор: </span>
+              {tag.name}
+            </span>
+          ) : (
+            tag.name
+          )}
           {!disabled && (
             <button
               type="button"

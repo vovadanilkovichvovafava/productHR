@@ -648,6 +648,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Board stage sync failed (non-critical): {e}")
 
+    # Ментор практики — только тег у ФИО: старый выбор на доске и перенос
+    # ClickUp переезжают в теги (16.11.2026, services/practice_mentor.py).
+    try:
+        from ..services.practice_mentor import migrate_board_mentors_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await migrate_board_mentors_once(session)
+    except Exception as e:
+        logger.warning(f"Board mentor migration failed (non-critical): {e}")
+
     # Живые заявки у тех, кого уволили до 20.10.2026: увольнение тогда не
     # закрывало воронки (11.11.2026, services/departed_apps_sync.py). Одноразово.
     try:

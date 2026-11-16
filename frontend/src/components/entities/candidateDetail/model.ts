@@ -879,6 +879,12 @@ export const PRACTICE_STATUS = "probation";
  * владельца 21.09.2026). Остальные теги только отображаются. */
 export const PRACTICE_MENTOR_TAGS = ["Егор", "Влад"] as const;
 
+/** Тег у ФИО — ментор практики (в карточке подписан «Ментор: …»). */
+export function isPracticeMentorTag(name: string | null | undefined): boolean {
+  const n = (name || "").trim().toLowerCase();
+  return PRACTICE_MENTOR_TAGS.some((m) => m.toLowerCase() === n);
+}
+
 /** Значение фильтра: имя наставника или «без тега» (нет ни одного из них). */
 export type MentorFilter = (typeof PRACTICE_MENTOR_TAGS)[number] | "none";
 

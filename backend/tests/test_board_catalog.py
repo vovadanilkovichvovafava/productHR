@@ -181,16 +181,19 @@ async def test_manager_and_marks_catalogs(client, db_session, admin_user, organi
     h = _h(admin_user)
     e = Entity(org_id=organization.id, name="Практикант Рук", type=EntityType.candidate,
                status=EntityStatus.probation, created_by=admin_user.id,
-               extra_data={"manager_name": "Влад", "m1_done": "Сентябрь"})
+               extra_data={"m1_done": "Сентябрь"})
     db_session.add(e)
     await db_session.commit()
+    # С 16.11.2026 «Рук. практики» — ментор из тега у ФИО (services/practice_mentor.py).
+    r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"manager": "Влад"}, headers=h)
+    assert r.json()["manager"] == "Влад"
 
     managers = (await client.get("/api/staff-board/catalog/managers", headers=h)).json()
     assert {"name": "Влад", "locked": False, "count": 1} in managers
     managers = (await client.post("/api/staff-board/catalog/managers", json={"name": "Вова"}, headers=h)).json()
     assert "Вова" in [m["name"] for m in managers]
 
-    # Выбор в ячейке главнее тега и сохраняется даже пустым
+    # Выбор на доске — тот же тег, ментор один: Вова сменил Влада, пусто — снял
     r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"manager": "Вова"}, headers=h)
     assert r.json()["manager"] == "Вова"
     r = await client.patch(f"/api/staff-board/rows/{e.id}", json={"manager": None}, headers=h)
@@ -200,8 +203,10 @@ async def test_manager_and_marks_catalogs(client, db_session, admin_user, organi
     r = await client.patch("/api/staff-board/catalog/managers",
                            json={"name": "Влад", "new_name": "Владислав"}, headers=h)
     assert r.status_code == 200
-    await db_session.refresh(e)
-    assert e.extra_data["board_manager"] == "Владислав" and e.extra_data["manager_name"] == "Владислав"
+    tags = (await client.get(f"/api/tags/entities/{e.id}/name-tags", headers=h)).json()
+    assert [t["name"] for t in tags] == ["Владислав"]
+    rows = (await client.get("/api/staff-board/rows", headers=h)).json()
+    assert next(x for x in rows if x["entity_id"] == e.id)["manager"] == "Владислав"
 
     marks = (await client.get("/api/staff-board/catalog/marks", headers=h)).json()
     assert marks[0] == {"name": "✓", "locked": True, "count": 0}

@@ -189,7 +189,7 @@ _K_MANAGER = "manager_name"
 # «Рук-ль», выбранный в окне на доске (11.11.2026). Главнее наставника из тега
 # у ФИО: раньше правка в ячейке писала в manager_name, который тег перекрывал,
 # и выбор «не применялся». Ключ есть, но пустой — «убрали руками».
-_K_MANAGER_PICK = "board_manager"
+_K_MANAGER_PICK = "board_manager"  # с 16.11 не пишется: ментор — тег (practice_mentor.py)
 # «Рук-ль» подставлен из руководителей отдела, а не вписан руками. Такой при
 # смене отдела заменяется руководителями нового; вписанный руками — никогда.
 _K_MANAGER_AUTO = "manager_auto"
@@ -849,24 +849,13 @@ def _dept_visible(dept: BoardDepartment, user_id: int, is_admin: bool) -> bool:
 
 
 async def _load_mentors(
-    db: AsyncSession, entity_ids: List[int]
+    db: AsyncSession, entity_ids: List[int], org_id: int
 ) -> Dict[int, List[str]]:
-    """Наставники практики по тегам у ФИО — одним запросом на всю доску."""
-    if not entity_ids:
-        return {}
-    wanted = {n.lower() for n in MENTOR_TAG_NAMES}
-    rows = (await db.execute(
-        select(entity_name_tag_association.c.entity_id, NameTag.name)
-        .select_from(entity_name_tag_association)
-        .join(NameTag, NameTag.id == entity_name_tag_association.c.tag_id)
-        .where(entity_name_tag_association.c.entity_id.in_(entity_ids))
-        .order_by(NameTag.name)
-    )).all()
-    out: Dict[int, List[str]] = {}
-    for ent_id, name in rows:
-        if (name or "").strip().lower() in wanted:
-            out.setdefault(ent_id, []).append(name.strip())
-    return out
+    """Менторы практики по тегам у ФИО — одним запросом на всю доску
+    (services/practice_mentor.py: Егор, Влад и список «Рук. практики»)."""
+    from ..services.practice_mentor import load_mentors
+
+    return await load_mentors(db, org_id, entity_ids)
 
 
 async def _load_sourcers(
@@ -1081,15 +1070,12 @@ def _row_from_entity(
         telegram=telegram,
         practice_start_date=practice,
         department_start_date=_iso(dept_start),
-        # «Рук-ль» = наставник практики из тегов у ФИО. Нет тега — пусто;
-        # вписанное руками остаётся запасным вариантом.
+        # «Рук. практики» = ментор из тега у ФИО — то же, что в карточке
+        # (services/practice_mentor.py, тикет 13.11.2026). Старое значение из
+        # ClickUp — только запасным показом, если в теги его не перенесли.
         manager=(
-            (str(ex.get(_K_MANAGER_PICK) or "").strip() or None)
-            if _K_MANAGER_PICK in ex
-            else (
-                ", ".join((mentors_by_entity or {}).get(entity.id, []))
-                or _pick(ex, _K_MANAGER, _CF_MANAGER)
-            )
+            ", ".join((mentors_by_entity or {}).get(entity.id, []))
+            or _pick(ex, _K_MANAGER, _CF_MANAGER)
         ),
         w2=w2, m1=m1, m3=m3, y1=y1,
         w2_auto=w2_auto, m1_auto=m1_auto, m3_auto=m3_auto, y1_auto=y1_auto,
@@ -1618,13 +1604,20 @@ async def _item_usage(db: AsyncSession, org_id: int, kind: str) -> Dict[str, int
         )).all()
         return {str(p): int(c) for p, c in rows}
     usage: Dict[str, int] = {}
+    if kind == "managers":
+        # Ментор — тег у ФИО (services/practice_mentor.py): считаем по тегам.
+        rows = (await db.execute(
+            select(NameTag.name, func.count(entity_name_tag_association.c.entity_id))
+            .join(entity_name_tag_association, entity_name_tag_association.c.tag_id == NameTag.id)
+            .where(NameTag.org_id == org_id)
+            .group_by(NameTag.name)
+        )).all()
+        from ..services.practice_mentor import org_mentor_names
+        mentors = {n.lower() for n in await org_mentor_names(db, org_id)}
+        return {str(n).strip(): int(c) for n, c in rows if str(n or "").strip().lower() in mentors}
     for e in await _org_entities_extra(db, org_id):
         ex = _extra(e)
-        if kind == "managers":
-            val = ex.get(_K_MANAGER_PICK) if _K_MANAGER_PICK in ex else _pick(ex, _K_MANAGER, _CF_MANAGER)
-            vals = [str(val).strip()] if val and str(val).strip() else []
-        else:
-            vals = [v for v in (_as_done(ex, k) for k in _K_DONE) if v]
+        vals = [v for v in (_as_done(ex, k) for k in _K_DONE) if v]
         for v in set(vals):
             usage[v] = usage.get(v, 0) + 1
     return usage
@@ -1639,7 +1632,19 @@ async def _rename_usage(db: AsyncSession, org_id: int, kind: str, old: str, new:
         for e in people:
             e.position = new
         return len(people)
-    keys = [_K_MANAGER_PICK, _K_MANAGER] if kind == "managers" else list(_K_DONE.values())
+    if kind == "managers":
+        # Переименовать ментора = переименовать его тег у ФИО (он один на всех).
+        tag = (await db.execute(
+            select(NameTag).where(NameTag.org_id == org_id, NameTag.name == old)
+        )).scalar_one_or_none()
+        if tag is None:
+            return 0
+        tag.name = new
+        return int((await db.execute(
+            select(func.count()).select_from(entity_name_tag_association)
+            .where(entity_name_tag_association.c.tag_id == tag.id)
+        )).scalar() or 0)
+    keys = list(_K_DONE.values())
     changed = 0
     for e in await _org_entities_extra(db, org_id):
         ex = dict(_extra(e))
@@ -1819,7 +1824,7 @@ async def _single_row(
     return _row_from_entity(
         entity, offer, names,
         await _load_sourcers(db, [entity.id]),
-        await _load_mentors(db, [entity.id]),
+        await _load_mentors(db, [entity.id], org_id),
         depts,
         placement=placement,
         person_sandbox=_person_sandboxes(mine, depts).get(entity.id),
@@ -2651,20 +2656,11 @@ async def list_managers(
     if not org:
         raise HTTPException(403, "No organization access")
 
-    rows = (await db.execute(
-        select(Entity.extra_data).where(
-            Entity.org_id == org.id, Entity.extra_data.is_not(None)
-        )
-    )).scalars().all()
+    # С 16.11.2026 «Рук. практики» — ментор из тега у ФИО: список — менторы
+    # организации (services/practice_mentor.py), а не значения из карточек.
+    from ..services.practice_mentor import mentor_names
 
-    seen: set = set()
-    for ex in rows:
-        if not isinstance(ex, dict):
-            continue
-        val = _pick(ex, _K_MANAGER, _CF_MANAGER)
-        if val:
-            seen.add(str(val).strip())
-    return sorted(seen, key=lambda v: v.lower())
+    return sorted(mentor_names(org), key=lambda v: v.lower())
 
 
 @router.get("/rows", response_model=List[BoardRow])
@@ -2748,7 +2744,7 @@ async def list_rows(
         }
 
     sourcers_by_entity = await _load_sourcers(db, ids)
-    mentors_by_entity = await _load_mentors(db, ids)
+    mentors_by_entity = await _load_mentors(db, ids, org.id)
     depts = await _board_depts(db, org.id)
 
     # Назначения: человек в отделе. Одна строка доски = одно назначение,
@@ -3000,10 +2996,19 @@ async def update_row(
         touched_extra = True
     payload.pop("custom", None)
     if "manager" in payload:
-        # Пусто — тоже выбор («убрали»), поэтому ключ остаётся: иначе снова
-        # всплыл бы наставник из тега.
-        ex[_K_MANAGER_PICK] = str(payload["manager"] or "").strip()
+        # Ментор — тег у ФИО, общий с карточкой: выбор на доске ставит его
+        # (другого снимает), пусто — снимает. Своей копии у доски больше нет:
+        # с 11.11 по 16.11 выбор лежал в board_manager и навсегда перебивал
+        # тег из карточки (тикет 13.11.2026, services/practice_mentor.py).
+        from ..services.practice_mentor import LEGACY_KEYS, set_entity_mentor
+
+        mentor = await set_entity_mentor(
+            db, entity, payload["manager"], user_id=current_user.id,
+        )
+        for k in LEGACY_KEYS:
+            ex.pop(k, None)
         touched_extra = True
+        logger.info("BOARD_MENTOR set: entity=%s mentor=%r by user %s", entity.id, mentor or "-", current_user.id)
     for field, key in extra_map.items():
         if field not in payload:
             continue
