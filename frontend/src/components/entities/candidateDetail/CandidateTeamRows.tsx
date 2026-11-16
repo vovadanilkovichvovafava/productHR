@@ -26,12 +26,17 @@ const chip =
 const ghostBtn =
   "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-[var(--hf-main-600)] border border-dashed border-[color:var(--hf-main-300)] hover:text-[var(--hf-main-900)] hover:border-[color:var(--hf-main-500)] hf-dark-disabled:text-[var(--hf-dark-300)]";
 
+// Команда открытых карточек: при повторном открытии строки рисуются сразу,
+// без ожидания запроса (он всё равно уходит и освежает данные).
+const teamCache = new Map<number, EntityTeam>();
+
 export function CandidateTeamRows({
   entityId,
   readonly,
   refreshKey,
   onChanged,
   showMentor,
+  initialHr,
 }: {
   entityId: number;
   readonly?: boolean;
@@ -41,8 +46,32 @@ export function CandidateTeamRows({
   refreshKey?: unknown;
   /** Команда поменялась — карточке перечитать метки и ленту. */
   onChanged?: () => void;
+  /** HR из данных карточки (метка «HR: …») — чтобы строка «HR» была видна
+   *  сразу, вместе с «Сорсером», а не после отдельного запроса. */
+  initialHr?: { id: number; name: string | null } | null;
 }) {
-  const [team, setTeam] = useState<EntityTeam | null>(null);
+  // Строки «HR» и «Ментор» раньше появлялись только после ответа
+  // /entities/{id}/team — позже «Сорсера», и шапка карточки прыгала
+  // (владелец, 16.11.2026). Теперь они рисуются сразу: из кэша прошлого
+  // открытия или из данных карточки, а ответ сервера их уточняет.
+  const placeholder = (): EntityTeam => ({
+    hr: initialHr ? { id: initialHr.id, name: initialHr.name } : null,
+    hr_from_board: false,
+    participants: [],
+    sourcers: [],
+    in_funnels: false,
+    mentor: undefined,
+    mentor_options: [],
+  });
+  const [team, setTeamState] = useState<EntityTeam | null>(() => teamCache.get(entityId) ?? placeholder());
+  const [loaded, setLoaded] = useState(() => teamCache.has(entityId));
+  const setTeam = useCallback(
+    (next: EntityTeam | null) => {
+      if (next) teamCache.set(entityId, next);
+      setTeamState(next);
+    },
+    [entityId],
+  );
   const [users, setUsers] = useState<AssignableUser[]>([]);
   const [changeOpen, setChangeOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -50,13 +79,22 @@ export function CandidateTeamRows({
   const [mentorOpen, setMentorOpen] = useState(false);
   const mentorRef = useRef<HTMLDivElement>(null);
 
+  // Другая карточка — сразу её кэш или заглушка из её данных, а не прежняя.
+  const shownFor = useRef(entityId);
+  if (shownFor.current !== entityId) {
+    shownFor.current = entityId;
+    setTeamState(teamCache.get(entityId) ?? placeholder());
+    setLoaded(teamCache.has(entityId));
+  }
+
   const load = useCallback(async () => {
     try {
       setTeam(await getEntityTeam(entityId));
+      setLoaded(true);
     } catch {
-      setTeam(null);
+      setLoaded(true);
     }
-  }, [entityId]);
+  }, [entityId, setTeam]);
 
   useEffect(() => {
     void load();
@@ -130,10 +168,11 @@ export function CandidateTeamRows({
               {team.hr.name || "—"}
             </span>
           ) : (
-            <span className="text-xs text-[var(--hf-main-500)]">не назначен</span>
+            <span className="text-xs text-[var(--hf-main-500)]">{loaded ? "не назначен" : "…"}</span>
           )}
           {!readonly && (
             <button
+              disabled={!loaded}
               type="button"
               className={ghostBtn}
               onClick={() => {
@@ -146,7 +185,7 @@ export function CandidateTeamRows({
           )}
         </div>
       </InfoRow>
-      {team.in_funnels && (team.participants.length > 0 || !readonly) && (
+      {loaded && team.in_funnels && (team.participants.length > 0 || !readonly) && (
         <InfoRow label="Участники">
           <div className="flex flex-wrap items-center gap-1.5">
             {team.participants.map((p) => (
@@ -205,7 +244,7 @@ export function CandidateTeamRows({
       )}
       {/* Ментор практики — тег у ФИО, он же «Рук. практики» на «Штате» (тикет
           Маши 13.11.2026: «указали ментора в карточке — сразу на борде»). */}
-      {(showMentor || team.mentor) && (team.mentor || !readonly) && (
+      {(showMentor || team.mentor) && (team.mentor || !readonly || !loaded) && (
         <InfoRow label="Ментор">
           <div className="flex flex-wrap items-center gap-1.5">
             {team.mentor && (
@@ -223,7 +262,10 @@ export function CandidateTeamRows({
                 )}
               </span>
             )}
-            {!readonly && (
+            {!loaded && team.mentor === undefined && (
+              <span className="text-xs text-[var(--hf-main-400)]">…</span>
+            )}
+            {!readonly && loaded && (
               <div className="relative" ref={mentorRef}>
                 <button type="button" className={ghostBtn} onClick={() => setMentorOpen((v) => !v)}>
                   {team.mentor ? "Сменить" : "выбрать"}

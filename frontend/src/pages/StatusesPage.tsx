@@ -852,6 +852,31 @@ export default function StatusesPage() {
   }, [fetchRows]);
 
   useEffect(() => { load(); }, [load]);
+  // Доска сама подхватывает правки из других мест — ментора, HR, этап,
+  // поменянные в карточке (тикет Маши 13.11.2026: «при изменении ментора в
+  // карточке информация на борде должна обновляться автоматически»). Раньше
+  // строки читались один раз при открытии: доска, открытая в соседней
+  // вкладке, показывала старое до F5. Теперь — при возвращении на вкладку и
+  // раз в 30 с, пока вкладка видна (ответ — только на последний запрос,
+  // см. fetchRows; доска лёгкая, ~0,7 с на проде).
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      // Печатают в ячейке (дата, телеграм, поиск) — такт пропускаем, чтобы
+      // перерисовка не сбила ввод; следующий будет через 30 с.
+      const a = document.activeElement as HTMLElement | null;
+      if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable)) return;
+      fetchRows().catch(() => {});
+    };
+    const timer = window.setInterval(refresh, 30_000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [fetchRows]);
   useEffect(() => {
     getBoardDepartments().then(setDepartments).catch(() => setDepartments([]));
     for (const kind of ["positions", "managers", "marks"] as CatalogKind[]) {

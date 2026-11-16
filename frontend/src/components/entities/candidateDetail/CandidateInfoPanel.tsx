@@ -15,7 +15,7 @@ import {
 import clsx from "clsx";
 import toast from "react-hot-toast";
 
-import { buildStageContainers, buildStagePickerOptions, readRemovedFunnels } from "@/components/entities/candidateDetail/model";
+import { buildStageContainers, buildStagePickerOptions, readRemovedFunnels, readSystemHrTags } from "@/components/entities/candidateDetail/model";
 import { htmlToPlainText } from "@/components/entities/candidateDetail/timelineParts";
 
 import type { KanbanCard, KanbanColumn } from "@/services/api/candidates";
@@ -810,6 +810,10 @@ export const InfoTab = memo(function InfoTab({
               entityId={card.id}
               readonly={readonly}
               showMentor={["probation", "hired", "transferred", "dismissed", "quit"].includes(status)}
+              initialHr={(() => {
+                const first = readSystemHrTags(card.extra_data)[0];
+                return first ? { id: first.hr_id, name: first.name } : null;
+              })()}
               refreshKey={notesVersion}
               onChanged={() => {
                 setTeamVersion((v) => v + 1);
