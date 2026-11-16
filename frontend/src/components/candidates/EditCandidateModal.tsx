@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import type { ReactNode } from "react";
 
 import { motion } from "framer-motion";
@@ -12,7 +12,7 @@ import { HfLoadingSpinner } from "@/components/ui/HfLoadingSpinner";
 import { SALARY_INPUT_CURRENCIES } from "@/utils/currency";
 import { calculateAge } from "@/utils/date";
 import type { KanbanCard } from "@/services/api/candidates";
-import { updateEntity, getEntityFiles, downloadEntityFile, deleteEntity } from "@/services/api/entities";
+import { updateEntity, getEntity, getEntityFiles, downloadEntityFile, deleteEntity } from "@/services/api/entities";
 import DatePickerFactorial from "@/factorial/components/DatePickerFactorial";
 
 import { backdropClose } from '@/utils/backdropClose';
@@ -80,17 +80,61 @@ export function clearedValue(before: string, now: string): null | undefined {
   return !now.trim() && before.trim() ? null : undefined;
 }
 
-export function EditCandidateModal({
-  card,
-  onClose,
-  onSaved,
-  onDeleted,
-}: {
+type EditCandidateModalProps = {
   card: KanbanCard;
   onClose: () => void;
   onSaved: (updated: Partial<KanbanCard>) => void;
   onDeleted: () => void;
-}) {
+};
+
+/**
+ * Карточка из списка «Все кандидаты» приходит облегчённой (`list_slim`: без
+ * навыков, текста резюме, анкет ClickUp — сервер их не шлёт ради скорости,
+ * 16.11.2026). Форма сохраняет навыки и текст резюме из того, с чем открылась,
+ * поэтому на облегчённой карточке она стёрла бы их. Сначала дочитываем
+ * кандидата целиком, потом показываем форму.
+ */
+export function EditCandidateModal(props: EditCandidateModalProps) {
+  const slim = !!(props.card.extra_data as Record<string, unknown> | undefined)?.list_slim;
+  const [fullExtra, setFullExtra] = useState<KanbanCard["extra_data"] | null>(null);
+  const onCloseRef = useRef(props.onClose);
+  onCloseRef.current = props.onClose;
+  const cardId = props.card.id;
+  useEffect(() => {
+    if (!slim) return;
+    let alive = true;
+    setFullExtra(null);
+    getEntity(cardId)
+      .then((e) => {
+        if (alive) setFullExtra(((e as { extra_data?: Record<string, unknown> }).extra_data || {}) as KanbanCard["extra_data"]);
+      })
+      .catch(() => {
+        if (!alive) return;
+        toast.error("Не удалось загрузить карточку для правки");
+        onCloseRef.current();
+      });
+    return () => {
+      alive = false;
+    };
+  }, [cardId, slim]);
+  if (!slim) return <EditCandidateForm {...props} />;
+  if (!fullExtra) {
+    return createPortal(
+      <div className="hf-confirm-modal-backdrop" style={{ zIndex: 60 }}>
+        <HfLoadingSpinner />
+      </div>,
+      document.body,
+    );
+  }
+  return <EditCandidateForm {...props} card={{ ...props.card, extra_data: fullExtra }} />;
+}
+
+function EditCandidateForm({
+  card,
+  onClose,
+  onSaved,
+  onDeleted,
+}: EditCandidateModalProps) {
   const initialNameParts = card.name.trim().split(/\s+/);
   const [lastName, setLastName] = useState(initialNameParts[0] || "");
   const [firstName, setFirstName] = useState(initialNameParts[1] || "");

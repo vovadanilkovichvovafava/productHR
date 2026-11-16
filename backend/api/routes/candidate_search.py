@@ -860,6 +860,31 @@ BOARD_COLUMNS = KANBAN_STATUSES + [OTHER_STATUS]
 KANBAN_STATUS_LABELS = STATUS_LABELS
 
 
+# Список «Все кандидаты» — без тяжёлых полей карточки (16.11.2026, владелец:
+# «разберись со скоростью списка»). На проде 250 строк весили 2,3 МБ (539 КБ
+# сжатыми), из них 91% — extra_data, а при ~220 КБ/с до рекрутёра это 2,5–3 с
+# на каждую загрузку (и опрос раз в 15 с). Самое тяжёлое — анкеты прохождений
+# ClickUp, текст резюме, описания опыта, навыки — нужно только ОТКРЫТОЙ
+# карточке, а она и так перечитывает кандидата целиком (GET /entities/{id},
+# useOpenedCandidateRefresh). Строка без них — с меткой list_slim: окно
+# «Редактировать» по ней дочитывает полную карточку, иначе сохранило бы
+# пустые навыки поверх настоящих.
+LIST_OMIT_EXTRA = (
+    "participations", "resume_text", "experience_descriptions", "skills",
+    "experience_summary", "education", "languages",
+)
+
+
+def _list_extra(extra):
+    if not isinstance(extra, dict):
+        return extra
+    if not any(k in extra for k in LIST_OMIT_EXTRA):
+        return extra
+    slim = {k: v for k, v in extra.items() if k not in LIST_OMIT_EXTRA}
+    slim["list_slim"] = True
+    return slim
+
+
 class CandidateFunnelInfo(BaseModel):
     """Одна воронка кандидата для списка: название вакансии + его этап в ней."""
     vacancy_title: str
@@ -1228,7 +1253,7 @@ async def get_candidates_kanban(
                 funnels=funnels_map.get(e.id, []),
                 rejection_reason=rejection_map.get(e.id),
                 is_archived=bool(getattr(e, "is_archived", False)),
-                extra_data=filter_extra_for_scope(ed, _notes_scope.get(e.id, scope_ids)) if ed else None,
+                extra_data=_list_extra(filter_extra_for_scope(ed, _notes_scope.get(e.id, scope_ids))) if ed else None,
                 version=getattr(e, "version", None) or 1,
                 headline_tags=headline_map.get(e.id, []),
                 prior_rejection=prior_map.get(e.id),
