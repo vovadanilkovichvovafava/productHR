@@ -619,7 +619,7 @@ export const InfoTab = memo(function InfoTab({
                 метка у одного человека ярлык, у другого — обычная.
                 Перетаскивание порядка убрано: в справочнике порядка нет,
                 список сортируется по имени — как у меток. */}
-            <TagPicker entityId={card.id} variant="headline" disabled={readonly} tags={deleted?.nameTags} />
+            <TagPicker key={`headline-${teamVersion}`} entityId={card.id} variant="headline" disabled={readonly} tags={deleted?.nameTags} />
           </div>
           {(card.position || card.company) && (
             <p className="hf-profile-subtitle">
@@ -809,6 +809,7 @@ export const InfoTab = memo(function InfoTab({
             <CandidateTeamRows
               entityId={card.id}
               readonly={readonly}
+              showMentor={["probation", "hired", "transferred", "dismissed", "quit"].includes(status)}
               refreshKey={notesVersion}
               onChanged={() => {
                 setTeamVersion((v) => v + 1);

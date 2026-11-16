@@ -348,6 +348,9 @@ class BoardRow(BaseModel):
     # подборе, известен и здесь; раньше колонку заполняли заново руками, и она
     # у всех стояла пустая.
     assignee_auto: bool = False
+    # Человек в живой воронке: HR у него один и живёт в воронке, ячейка HR —
+    # выбор одного человека (= «Сменить HR»), снять нельзя (16.11.2026).
+    hr_in_funnel: bool = False
     # Все ведущие HR (до MAX_ASSIGNEES). assignee_* выше — первый из них.
     assignees: List["BoardAssignee"] = []
     # Метки-сорсеры этого человека: кто его привёл. Живут в общем справочнике
@@ -1087,6 +1090,7 @@ def _row_from_entity(
         assignee_user_id=assignee_id,
         assignee_name=assignee_name,
         assignee_auto=assignee_auto,
+        hr_in_funnel=in_funnel,
         assignees=assignees,
         sourcers=(sourcers_by_entity or {}).get(entity.id, []),
         dismissal_date=_iso(_parse_date(_pick(ex, _K_DISMISSAL, _CF_DISMISSAL))),

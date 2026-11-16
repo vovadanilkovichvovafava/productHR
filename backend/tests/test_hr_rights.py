@@ -265,3 +265,21 @@ async def test_conflicts_fix_only_when_hr_still_as_expected(db_session, admin_us
     ent = await db_session.get(Entity, s["eid"], populate_existing=True)
     assert await current_hr_id(db_session, ent) == s["vlada"].id
     assert await F.fix_hr_conflicts_once(db_session) == []  # одноразово
+
+
+@pytest.mark.asyncio
+async def test_card_mentor_is_board_mentor_and_board_row_flags_funnel(client, db_session, admin_user, s):
+    """«Ментор практики» в карточке = «Рук. практики» на «Штате» (тикет 13.11.2026);
+    строка доски человека в воронке помечена hr_in_funnel (ячейка HR — один выбор)."""
+    from api.services.hr_tags import sync_for_entity
+    await sync_for_entity(db_session, s["eid"])
+    r = await client.put(f"/api/entities/{s['eid']}/mentor", json={"name": "Егор"}, headers=_h(admin_user))
+    assert r.status_code == 200, r.text
+    assert r.json()["team"]["mentor"] == "Егор" and "Влад" in r.json()["team"]["mentor_options"]
+    rows = (await client.get("/api/staff-board/rows", headers=_h(admin_user))).json()
+    row = next(x for x in rows if x["entity_id"] == s["eid"])
+    assert row["manager"] == "Егор" and row["hr_in_funnel"] is True
+    r = await client.put(f"/api/entities/{s['eid']}/mentor", json={"name": "Незнакомец"}, headers=_h(admin_user))
+    assert r.status_code == 400
+    r = await client.put(f"/api/entities/{s['eid']}/mentor", json={"name": None}, headers=_h(admin_user))
+    assert r.json()["team"]["mentor"] is None

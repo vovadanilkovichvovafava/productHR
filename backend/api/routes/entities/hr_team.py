@@ -1,6 +1,7 @@
 """Команда кандидата в карточке: HR, сорсер, участники (тикет Маши 13.11.2026).
 
 Правила — services/candidate_hr.py. Здесь только ручки:
+- PUT    /entities/{id}/mentor                    — ментор практики (тег у ФИО);
 - GET    /entities/{id}/team                     — кто работает с кандидатом;
 - POST   /entities/{id}/hr                       — «Сменить HR»;
 - POST   /entities/{id}/participants             — добавить участника;
@@ -27,6 +28,10 @@ class HrChangeIn(BaseModel):
 
 class ParticipantIn(BaseModel):
     user_id: int
+
+
+class MentorIn(BaseModel):
+    name: str | None = None
 
 
 async def _entity(db: AsyncSession, entity_id: int, user: User, *, lock: bool = False) -> Entity:
@@ -134,5 +139,30 @@ async def remove_participant_route(
     await remove_participant(db, entity, user_id, actor=current_user)
     await db.commit()
     request.state.audit_action = "Снял участника с кандидата"
+    request.state.audit_extra = {"entity_id": entity.id}
+    return {"team": await team(db, entity)}
+
+
+@router.put("/{entity_id}/mentor")
+async def set_mentor_route(
+    entity_id: int,
+    data: MentorIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr_segment),
+):
+    """«Ментор практики» в карточке (тикет Маши 13.11.2026): тот же тег у ФИО,
+    что колонка «Рук. практики» на «Штате» (services/practice_mentor.py)."""
+    from ...services.candidate_hr import team
+    from ...services.practice_mentor import org_mentor_names, set_entity_mentor
+
+    entity = await _entity(db, entity_id, current_user, lock=True)
+    name = (data.name or "").strip()
+    if name and name.lower() not in {n.lower() for n in await org_mentor_names(db, entity.org_id)}:
+        raise HTTPException(400, "Такого ментора нет в списке «Рук. практики»")
+    mentor = await set_entity_mentor(db, entity, name or None, user_id=current_user.id)
+    await db.commit()
+    logger.info("BOARD_MENTOR set: entity=%s mentor=%r by user %s (карточка)", entity.id, mentor or "-", current_user.id)
+    request.state.audit_action = "Поставил ментора практики"
     request.state.audit_extra = {"entity_id": entity.id}
     return {"team": await team(db, entity)}

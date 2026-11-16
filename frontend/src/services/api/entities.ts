@@ -1436,6 +1436,9 @@ export interface EntityTeam {
   participants: EntityTeamPerson[];
   sourcers: Array<{ id: number; name: string; color?: string | null }>;
   in_funnels: boolean;
+  /** Ментор практики — тег у ФИО, он же «Рук. практики» на «Штате». */
+  mentor?: string | null;
+  mentor_options?: string[];
 }
 
 export const getEntityTeam = async (entityId: number): Promise<EntityTeam> => {
@@ -1462,5 +1465,10 @@ export const addEntityParticipant = async (entityId: number, userId: number): Pr
 
 export const removeEntityParticipant = async (entityId: number, userId: number): Promise<EntityTeam> => {
   const { data } = await api.delete(`/entities/${entityId}/participants/${userId}`);
+  return data.team;
+};
+
+export const setEntityMentor = async (entityId: number, name: string | null): Promise<EntityTeam> => {
+  const { data } = await api.put(`/entities/${entityId}/mentor`, { name });
   return data.team;
 };

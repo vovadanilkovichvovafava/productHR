@@ -3994,8 +3994,18 @@ function AssigneeCell({
     </span>
   );
 
+  // У человека в воронке HR один и живёт в воронке (права HR, 16.11.2026):
+  // выбор = «Сменить HR» (прежний сам становится сорсером, если сорсера нет),
+  // снять HR совсем нельзя. Галочки «несколько HR» тут сбивали с толку.
+  const single = !!row.hr_in_funnel;
   const toggle = (key: string) => {
     const uid = Number(key);
+    if (single) {
+      menu.close();
+      if (ids.includes(uid)) return;
+      onSave([uid]);
+      return;
+    }
     if (ids.includes(uid)) { onSave(ids.filter((x) => x !== uid)); return; }
     // Предел — как на бэке: говорим сразу, а не ошибкой на сохранении.
     if (ids.length >= MAX_HR) { toast.error(`Не больше ${MAX_HR} HR на человека`); return; }
@@ -4015,7 +4025,11 @@ function AssigneeCell({
         ref={menu.plusRef}
         type="button"
         className="hf-statuses-assignee-open"
-        title={assignees.length ? `HR: ${assignees.map((a) => a.name).join(", ")}` : "Назначить HR"}
+        title={
+          single
+            ? `HR: ${assignees.map((a) => a.name).join(", ")} — один во всех воронках кандидата. Нажмите, чтобы сменить`
+            : assignees.length ? `HR: ${assignees.map((a) => a.name).join(", ")}` : "Назначить HR"
+        }
         aria-label="Выбрать HR"
         onClick={menu.toggle}
       >
@@ -4038,11 +4052,11 @@ function AssigneeCell({
           menuRef={menu.menuRef}
           pos={menu.pos}
           placeholder="Поиск…"
-          groups={[{ label: "Люди", options }]}
+          groups={[{ label: single ? "Сменить HR на" : "Люди", options }]}
           taken={[]}
           selected={ids.map(String)}
           onPick={toggle}
-          onClear={ids.length ? () => onSave([]) : undefined}
+          onClear={!single && ids.length ? () => onSave([]) : undefined}
           clearLabel="— убрать всех"
         />
       )}

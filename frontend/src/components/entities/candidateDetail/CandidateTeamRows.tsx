@@ -8,6 +8,7 @@ import {
   getEntityTeam,
   removeEntityParticipant,
   setEntityHr,
+  setEntityMentor,
   type EntityTeam,
 } from "@/services/api/entities";
 import { getAssignableUsers, type AssignableUser } from "@/services/api/vacancies";
@@ -30,9 +31,12 @@ export function CandidateTeamRows({
   readonly,
   refreshKey,
   onChanged,
+  showMentor,
 }: {
   entityId: number;
   readonly?: boolean;
+  /** Показать «Ментор практики» и без ментора (кандидат на практике и дальше). */
+  showMentor?: boolean;
   /** Меняется, когда карточку надо перечитать (смена этапа, «Забрать»…). */
   refreshKey?: unknown;
   /** Команда поменялась — карточке перечитать метки и ленту. */
@@ -43,6 +47,8 @@ export function CandidateTeamRows({
   const [changeOpen, setChangeOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const addRef = useRef<HTMLDivElement>(null);
+  const [mentorOpen, setMentorOpen] = useState(false);
+  const mentorRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -66,13 +72,14 @@ export function CandidateTeamRows({
   }, [users.length]);
 
   useEffect(() => {
-    if (!addOpen) return;
+    if (!addOpen && !mentorOpen) return;
     const onClick = (e: MouseEvent) => {
       if (addRef.current && !addRef.current.contains(e.target as Node)) setAddOpen(false);
+      if (mentorRef.current && !mentorRef.current.contains(e.target as Node)) setMentorOpen(false);
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
-  }, [addOpen]);
+  }, [addOpen, mentorOpen]);
 
   const taken = useMemo(
     () => new Set([team?.hr?.id, ...(team?.participants || []).map((p) => p.id)].filter(Boolean) as number[]),
@@ -91,6 +98,15 @@ export function CandidateTeamRows({
       onChanged?.();
     } catch (e) {
       toast.error(getErrorDetail(e, "Не удалось добавить участника"));
+    }
+  };
+  const pickMentor = async (name: string | null) => {
+    setMentorOpen(false);
+    try {
+      setTeam(await setEntityMentor(entityId, name));
+      onChanged?.();
+    } catch (e) {
+      toast.error(getErrorDetail(e, "Не удалось поставить ментора"));
     }
   };
   const removeParticipant = async (userId: number) => {
@@ -180,6 +196,52 @@ export function CandidateTeamRows({
                           </button>
                         ))
                     )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </InfoRow>
+      )}
+      {/* Ментор практики — тег у ФИО, он же «Рук. практики» на «Штате» (тикет
+          Маши 13.11.2026: «указали ментора в карточке — сразу на борде»). */}
+      {(showMentor || team.mentor) && (team.mentor || !readonly) && (
+        <InfoRow label="Ментор">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {team.mentor && (
+              <span className={`group ${chip}`} title="Он же в колонке «Рук. практики» на «Штате»">
+                {team.mentor}
+                {!readonly && (
+                  <button
+                    type="button"
+                    title="Снять ментора"
+                    onClick={() => void pickMentor(null)}
+                    className="opacity-60 hover:opacity-100 hover:text-[var(--hf-status-red)]"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+            )}
+            {!readonly && (
+              <div className="relative" ref={mentorRef}>
+                <button type="button" className={ghostBtn} onClick={() => setMentorOpen((v) => !v)}>
+                  {team.mentor ? "Сменить" : "выбрать"}
+                </button>
+                {mentorOpen && (
+                  <div className="absolute left-0 top-full z-30 mt-1 max-h-64 w-48 overflow-auto rounded-xl border border-[color:var(--hf-main-200)] bg-[var(--hf-white)] p-1 shadow-lg hf-dark-disabled:bg-[var(--hf-dark-800)]">
+                    {(team.mentor_options || [])
+                      .filter((n) => n !== team.mentor)
+                      .map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => void pickMentor(n)}
+                          className="block w-full rounded-lg px-3 py-1.5 text-left text-sm hover:bg-[var(--hf-main-100)] hf-dark-disabled:hover:bg-[var(--hf-white-alpha-10)]"
+                        >
+                          {n}
+                        </button>
+                      ))}
                   </div>
                 )}
               </div>

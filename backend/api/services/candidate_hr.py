@@ -376,7 +376,11 @@ async def team(db: AsyncSession, entity: Entity) -> dict:
     parts = await participant_ids(db, apps, hr)
     names = await _user_names(db, [hr, *parts])
     tags = await sourcer_tags(db, entity.id)
+    from .practice_mentor import load_mentors, org_mentor_names
+    mentors = (await load_mentors(db, entity.org_id, [entity.id])).get(entity.id) or []
     return {
+        "mentor": mentors[0] if mentors else None,
+        "mentor_options": await org_mentor_names(db, entity.org_id),
         "hr": {"id": hr, "name": names.get(hr)} if hr else None,
         "hr_from_board": not apps,
         "participants": [{"id": u, "name": names.get(u)} for u in parts],

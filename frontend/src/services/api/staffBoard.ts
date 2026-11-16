@@ -63,6 +63,8 @@ export interface BoardRow {
   assignee_name: string | null;
   /** HR подставлен из воронки, а не выбран руками — показываем блёкло. */
   assignee_auto?: boolean;
+  /** Человек в живой воронке: HR один — ячейка HR = выбор одного («Сменить HR»). */
+  hr_in_funnel?: boolean;
   /** Все ведущие HR (до двух); assignee_* — первый из них. */
   assignees?: { user_id: number; name: string | null; auto: boolean }[];
   /** Метки-сорсеры: кто привёл этого человека. */
