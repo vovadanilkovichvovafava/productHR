@@ -70,12 +70,20 @@ export function isPersonallyActive(v: Vacancy, userId: number | undefined | null
  * ВНИМАНИЕ: правило для САЙДБАРА. Полная страница /vacancies («Перейти к
  * заявкам») показывает админу ВСЕ заявки независимо от назначения.
  */
+function dismissedBy(v: Vacancy): number[] {
+  return ((v.extra_data as Record<string, unknown> | undefined)?.dismissed_by as number[] | undefined) || [];
+}
+
 export function isRequestVisibleTo(
   v: Vacancy,
   userId: number | undefined | null,
   isAdmin: boolean,
 ): boolean {
   if (isAdmin) {
+    // «Не брать в работу» (Мария, 16.11.2026: «у нас 3 HR могут работать над
+    // одной заявкой») — отказавшийся админ заявку в своём списке больше не видит,
+    // у остальных она остаётся. Полная страница «Заявки» показывает её как раньше.
+    if (dismissedBy(v).includes(userId as number)) return false;
     // Админ видит заявку, ПОКА её не взяли в работу (статус ещё pending_review/draft),
     // независимо от того, назначена она кому-то или нет. Как только рекрутёр берёт её
     // в работу (take_into_work: pending_review/draft → open), заявка уходит из сайдбара

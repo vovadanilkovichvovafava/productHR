@@ -38,6 +38,10 @@ describe('isRequestVisibleTo — admin', () => {
   it('hides it once taken personally', () => {
     expect(isRequestVisibleTo(vac({ assigned_to: [4, ME], accepted_by: [4, ME] }), ME, true)).toBe(false);
   });
+  it('hides a request the admin chose not to take («Не брать в работу», 16.11.2026)', () => {
+    expect(isRequestVisibleTo(vac({ status: 'pending_review', dismissed_by: [ME] }), ME, true)).toBe(false);
+    expect(isRequestVisibleTo(vac({ status: 'pending_review', dismissed_by: [4] }), ME, true)).toBe(true);
+  });
   it('does not surface vacancies they only created or that go to «всем рекрутёрам»', () => {
     expect(isRequestVisibleTo(vac({ created_by: ME, assigned_to: [4], accepted_by: [4] }), ME, true)).toBe(false);
     expect(isRequestVisibleTo(vac({ assigned_to_all: true, accepted_by: [4] }), ME, true)).toBe(false);
@@ -48,6 +52,11 @@ describe('isRequestVisibleTo — recruiter', () => {
   it('sees an assigned vacancy until taking it', () => {
     expect(isRequestVisibleTo(vac({ assigned_to: [ME], accepted_by: [4] }), ME, false)).toBe(true);
     expect(isRequestVisibleTo(vac({ assigned_to: [ME], accepted_by: [ME] }), ME, false)).toBe(false);
+  });
+  it('declined request leaves only own list, colleagues keep it', () => {
+    const v = vac({ status: 'pending_review', assigned_to: [ME, 4], dismissed_by: [ME] });
+    expect(isRequestVisibleTo(v, ME, false)).toBe(false);
+    expect(isRequestVisibleTo(v, 4, false)).toBe(true);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
@@ -6,10 +6,10 @@ import { X } from "lucide-react";
 import { sanitizeHtml } from "@/utils/sanitizeHtml";
 import { formatSalary } from "@/utils/currency";
 import { parseServerDate } from "@/utils/date";
-import { hasPersonallyAccepted, isExplicitlyAssigned } from "@/utils/vacancy";
+import { hasPersonallyAccepted } from "@/utils/vacancy";
 import { useAuthStore } from "@/stores/authStore";
 import { useVacancyStore } from "@/stores/vacancyStore";
-import { takeVacancy, declineVacancy } from "@/services/api/vacancies";
+import { takeVacancy, declineVacancy, getAssignableUsers } from "@/services/api/vacancies";
 import type { Vacancy } from "@/types";
 import { backdropClose } from '@/utils/backdropClose';
 
@@ -68,21 +68,39 @@ export function SidebarRequestPreviewModal({
   const { fetchVacancies } = useVacancyStore();
   const [taking, setTaking] = useState(false);
   const [declining, setDeclining] = useState(false);
-  const isModalAdmin =
-    user?.role === "superadmin" ||
-    user?.org_role === "owner" ||
-    user?.org_role === "admin";
-  // «Отказаться» — рекрутёр снимает себя с заявки (backend /decline).
+  // Имена — для строк «В работе у» / «Отказались от заявки»: над одной заявкой могут
+  // работать до трёх HR, и каждому важно видеть, кто уже взял, а кто отказался.
+  const [names, setNames] = useState<Record<number, string>>({});
+  useEffect(() => {
+    let alive = true;
+    getAssignableUsers({ includeOwners: true })
+      .then((list) => {
+        if (!alive) return;
+        const map: Record<number, string> = {};
+        list.forEach((u) => { map[u.id] = u.name; });
+        setNames(map);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  // «Не брать в работу» (Мария, 16.11.2026: «реализуйте возможность не брать
+  // в работу заявку, у нас 3 HR могут работать над одной заявкой»). Снимает
+  // ТОЛЬКО СЕБЯ (backend /decline → dismissed_by): заявка уходит из своего
+  // списка «Заявки», у остальных остаётся. Раньше кнопка была только у
+  // рекрутёров, а админу — лишь если его явно назначили; Мария (админ) не
+  // могла убрать заявку, которую брать не собиралась.
   const handleDecline = async () => {
     if (declining) return;
     setDeclining(true);
     try {
       await declineVacancy(vacancy.id);
       await fetchVacancies();
-      toast.success("Вы отказались от заявки");
+      toast.success(isTakenByMe
+        ? "Вы вышли из заявки — у коллег она осталась"
+        : "Заявка убрана из вашего списка — коллеги её по-прежнему видят");
       onTaken();
     } catch {
-      toast.error("Не удалось отказаться от заявки");
+      toast.error("Не удалось убрать заявку");
     } finally {
       setDeclining(false);
     }
@@ -94,11 +112,25 @@ export function SidebarRequestPreviewModal({
     if (!user) return false;
     return hasPersonallyAccepted(vacancy, user.id);
   }, [user, vacancy]);
-  const acceptedCount = useMemo(() => {
-    const acceptedBy = (vacancy.extra_data as Record<string, unknown> | undefined)
-      ?.accepted_by as number[] | undefined;
-    return acceptedBy?.length || 0;
-  }, [vacancy]);
+  const acceptedBy = useMemo(
+    () => ((vacancy.extra_data as Record<string, unknown> | undefined)?.accepted_by as number[] | undefined) || [],
+    [vacancy],
+  );
+  const dismissedBy = useMemo(
+    () => ((vacancy.extra_data as Record<string, unknown> | undefined)?.dismissed_by as number[] | undefined) || [],
+    [vacancy],
+  );
+  const isDeclinedByMe = !!user && dismissedBy.includes(user.id);
+  // Кто отказался — видят только автор заявки, админы и суперадмин (владелец,
+  // 17.11.2026); коллегам-рекрутёрам эта строка не показывается.
+  const canSeeDecliners =
+    !!user &&
+    (user.role === "superadmin" ||
+      user.org_role === "owner" ||
+      user.org_role === "admin" ||
+      vacancy.created_by === user.id);
+  const nameList = (ids: number[]) =>
+    ids.map((id) => (id === user?.id ? "вы" : names[id] || `#${id}`)).join(", ");
   const requestDate = formatSidebarVacancyDate(
     vacancy.published_at || vacancy.created_at,
   );
@@ -217,11 +249,14 @@ export function SidebarRequestPreviewModal({
                   {requestDate}
                 </RequestPreviewBlock>
               )}
-              {acceptedCount > 0 && (
-                <RequestPreviewBlock title="Заявка в работе">
-                  {acceptedCount === 1
-                    ? "Уже взята в работу 1 рекрутёром"
-                    : `Уже взята в работу (${acceptedCount})`}
+              {acceptedBy.length > 0 && (
+                <RequestPreviewBlock title="В работе у">
+                  {nameList(acceptedBy)}
+                </RequestPreviewBlock>
+              )}
+              {canSeeDecliners && dismissedBy.length > 0 && (
+                <RequestPreviewBlock title="Отказались от заявки">
+                  {nameList(dismissedBy)}
                 </RequestPreviewBlock>
               )}
             </aside>
@@ -244,9 +279,8 @@ export function SidebarRequestPreviewModal({
           <button type="button" onClick={onEdit} className="hf-vacancy-secondary-btn">
             Редактировать
           </button>
-          {/* «Отказаться» — снимает себя с заявки: рекрутёр всегда, админ — если его
-              ЯВНО назначили (раньше админ не мог отказаться вовсе, 2026-09-10). */}
-          {(!isModalAdmin || isExplicitlyAssigned(vacancy, user?.id)) && (
+          {/* «Не брать в работу» — у каждого, кто ещё не отказался (админу тоже). */}
+          {!isDeclinedByMe && (
             <button
               type="button"
               onClick={handleDecline}
@@ -254,7 +288,7 @@ export function SidebarRequestPreviewModal({
               className="hf-vacancy-secondary-btn"
               style={{ color: "var(--hf-status-red)", borderColor: "var(--hf-status-red)" }}
             >
-              {declining ? "Отказ..." : "Отказаться"}
+              {declining ? "Убираю..." : isTakenByMe ? "Выйти из заявки" : "Не брать в работу"}
             </button>
           )}
         </div>
