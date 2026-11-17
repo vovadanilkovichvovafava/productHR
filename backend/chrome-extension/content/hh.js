@@ -551,11 +551,70 @@
   }
   runAndSend();
 
+  // Оригинальный PDF резюме с самого hh.ru/rabota.by (меню «Скачать» → PDF),
+  // под входом рекрутёра (Мария, 16.11.2026: «возможно ли всех в виде скрина»).
+  // Без него сервер собирает ИИ-профиль — другой вид, чем у загруженного файла.
+  // Ссылка из меню, а если меню не открывали — тот же адрес по хешу резюме.
+  // Ничего не вышло — {ok:false}, и всё идёт как раньше (ИИ-профиль).
+  const PDF_MAX_BYTES = 10 * 1024 * 1024;
+
+  function resumeHash() {
+    const fromPath = window.location.pathname.match(/\/resume\/([a-f0-9]{20,})/i);
+    if (fromPath) return fromPath[1];
+    const params = new URLSearchParams(window.location.search);
+    for (const key of ['resume', 'resumeHash', 'resumeId', 'hash']) {
+      const v = params.get(key);
+      if (v && /^[a-f0-9]{20,}$/i.test(v)) return v;
+    }
+    return '';
+  }
+
+  function resumePdfUrl() {
+    const link = [...document.querySelectorAll('a[href*="resume_converter"]')]
+      .map((a) => a.href)
+      .find((h) => /[?&]type=pdf/i.test(h));
+    if (link) return link;
+    const hash = resumeHash();
+    return hash ? `${window.location.origin}/resume_converter/resume.pdf?hash=${hash}&type=pdf` : '';
+  }
+
+  function toBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  }
+
+  async function fetchResumePdf() {
+    const url = resumePdfUrl();
+    if (!url) return { ok: false, reason: 'no-link' };
+    try {
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) return { ok: false, reason: 'http ' + resp.status };
+      const buf = await resp.arrayBuffer();
+      const head = String.fromCharCode.apply(null, new Uint8Array(buf.slice(0, 4)));
+      if (head !== '%PDF') return { ok: false, reason: 'not-pdf' };
+      if (buf.byteLength > PDF_MAX_BYTES) return { ok: false, reason: 'too-big' };
+      return { ok: true, base64: toBase64(buf), size: buf.byteLength };
+    } catch (e) {
+      return { ok: false, reason: String(e && e.message || e) };
+    }
+  }
+
   // Re-parse on demand (popup нажал 'Добавить ещё')
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg && msg.type === 'RE_PARSE') {
       const fresh = runAndSend();
       sendResponse({ success: true, data: fresh });
+    }
+    if (msg && msg.type === 'FETCH_RESUME_PDF') {
+      fetchResumePdf().then((res) => {
+        console.log('[HR-Bot Magic Button] resume pdf:', res.ok ? `${res.size} bytes` : res.reason);
+        sendResponse(res);
+      });
+      return true; // ответ асинхронный
     }
   });
 })();

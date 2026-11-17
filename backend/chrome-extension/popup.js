@@ -673,6 +673,29 @@ async function handleAuthExpired() {
 // сюда возвращается authExpired === true ТОЛЬКО когда обновиться не удалось и
 // сервер подтвердил, что сессия мертва. Сетевой сбой, таймаут или сон воркера
 // сюда не попадают — на них попап больше не разлогинивает.
+// Оригинальный PDF резюме с hh.ru/rabota.by (16.11.2026): во вкладке «Резюме»
+// будет страница как на сайте, а не ИИ-профиль. Не дождались или сайт не
+// отдал — null, сервер сделает ИИ-профиль, как раньше.
+async function fetchOriginalResumePdf(source) {
+  if (source !== 'hh.ru' && source !== 'rabota.by') return null;
+  try {
+    const tabs = await new Promise((r) => chrome.tabs.query({ active: true, currentWindow: true }, r));
+    const tab = tabs && tabs[0];
+    if (!tab || !tab.id) return null;
+    const res = await Promise.race([
+      new Promise((resolve) => {
+        chrome.tabs.sendMessage(tab.id, { type: 'FETCH_RESUME_PDF' }, (resp) => {
+          resolve(chrome.runtime.lastError ? null : resp);
+        });
+      }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 12000)),
+    ]);
+    return res && res.ok ? res.base64 : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function apiRequest(method, path, body, timeoutMs = 80000) {
   const resp = await rawApiRequest(method, path, body, timeoutMs);
   if (resp && resp.authExpired) await handleAuthExpired();
@@ -773,7 +796,9 @@ document.getElementById('addBtn').addEventListener('click', async () => {
   try {
     const manualName = document.getElementById('manualName')?.value?.trim();
     const finalName = (parsedData.name_is_placeholder && manualName) ? manualName : parsedData.full_name;
+    const resumePdf = await fetchOriginalResumePdf(parsedData.source);
     const resp = await apiRequest('POST', '/api/magic-button/parse', {
+      resume_pdf_base64: resumePdf,
       full_name: finalName,
       email: parsedData.email || manualEmail || null,
       phone: parsedData.phone || manualPhone || null,

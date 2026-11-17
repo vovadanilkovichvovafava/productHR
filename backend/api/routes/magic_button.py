@@ -82,6 +82,13 @@ class MagicButtonData(BaseModel):
     vacancy_id: Optional[int] = None  # which funnel to add to
     comment: Optional[str] = None
 
+    # Оригинальный PDF резюме с hh.ru/rabota.by (кнопка «Скачать» → PDF на
+    # самом сайте), base64. Расширение с 2.1.0 берёт его под входом рекрутёра.
+    # Есть — во вкладке «Резюме» будет страница как на сайте, а не ИИ-профиль
+    # (Мария, 16.11.2026: «возможно ли всех в виде скрина»). Нет (старое
+    # расширение, LinkedIn/Хабр, hh не отдал) — ИИ-профиль, как раньше.
+    resume_pdf_base64: Optional[str] = None
+
 class MagicButtonResponse(BaseModel):
     success: bool
     entity_id: int
@@ -538,8 +545,18 @@ async def _do_magic_parse(data, db, current_user, background_tasks: BackgroundTa
         "summary": data.summary,
         "photo_url": data.photo_url,
     }
-    background_tasks.add_task(
-        _generate_resume_files, entity_id, org_id, user_id, candidate_data
+    original_pdf = _decode_original_pdf(data.resume_pdf_base64, entity_id)
+    if original_pdf:
+        background_tasks.add_task(
+            _attach_original_resume_pdf, entity_id, org_id, user_id, original_pdf, data.source,
+        )
+    else:
+        background_tasks.add_task(
+            _generate_resume_files, entity_id, org_id, user_id, candidate_data
+        )
+    logger.info(
+        "MAGIC_RESUME: entity=%s source=%s resume=%s",
+        entity_id, data.source, "original_pdf" if original_pdf else "ai_profile",
     )
 
     return MagicButtonResponse(
@@ -607,6 +624,112 @@ async def _download_candidate_photo_eager(
             logger.info(f"Eager photo saved for entity {entity_id}: {len(photo_bytes)} bytes, {ct}")
     except Exception as e:
         logger.warning(f"Eager photo download crashed for entity {entity_id}: {type(e).__name__}: {e}")
+
+
+ORIGINAL_PDF_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _decode_original_pdf(b64: Optional[str], entity_id: int) -> Optional[bytes]:
+    """PDF резюме с сайта, присланный расширением. Не PDF / слишком большой /
+    битый base64 — None (тогда делаем ИИ-профиль, как раньше)."""
+    if not b64:
+        return None
+    import base64
+    import binascii
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (binascii.Error, ValueError):
+        logger.warning("MAGIC_RESUME: entity=%s original pdf is not base64", entity_id)
+        return None
+    if not raw.startswith(b"%PDF") or len(raw) > ORIGINAL_PDF_MAX_BYTES:
+        logger.warning(
+            "MAGIC_RESUME: entity=%s original pdf rejected (%s bytes, head=%r)",
+            entity_id, len(raw), raw[:8],
+        )
+        return None
+    return raw
+
+
+async def _attach_original_resume_pdf(
+    entity_id: int, org_id: int, user_id: int, pdf_bytes: bytes, source: str,
+):
+    """Фоном: оригинальный PDF с сайта → вкладка «Резюме» тем же путём, что и
+    ручная загрузка файла резюме (страницы картинками, текст для дублей, фото,
+    если его ещё нет). ИИ при этом не вызывается."""
+    from ..database import AsyncSessionLocal
+    from ..services.resume_text_extract import store_resume_text
+    from .entities.files import ENTITY_FILES_DIR, convert_pdf_to_images, extract_photo_from_pdf
+
+    site = (source or "сайта").strip()
+    file_name = f"Резюме с {site}.pdf"
+    try:
+        async with AsyncSessionLocal() as db:
+            entity = await db.get(Entity, entity_id)
+            if entity is None:
+                return
+            files_dir = ENTITY_FILES_DIR / str(entity_id)
+            files_dir.mkdir(parents=True, exist_ok=True)
+            pdf_path = files_dir / f"{uuid.uuid4().hex}.pdf"
+            try:
+                pdf_path.write_bytes(pdf_bytes)
+            except Exception:  # noqa: BLE001 — диск не главный, байты в базе
+                pass
+            pdf_file = EntityFile(
+                entity_id=entity_id, org_id=org_id, file_type=EntityFileType.resume,
+                file_name=file_name, file_path=str(pdf_path), file_size=len(pdf_bytes),
+                mime_type="application/pdf", description=f"Резюме с {site} (оригинал)",
+                uploaded_by=user_id, file_data=pdf_bytes,
+            )
+            db.add(pdf_file)
+            await db.commit()
+            await db.refresh(pdf_file)
+
+            try:
+                await store_resume_text(db, entity, pdf_bytes, file_name, pdf_file.id)
+                await db.commit()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("MAGIC_RESUME: text extract failed for entity %s: %s", entity_id, e)
+
+            has_photo = (await db.execute(
+                select(EntityFile.id).where(
+                    EntityFile.entity_id == entity_id,
+                    EntityFile.file_type == EntityFileType.other,
+                    EntityFile.mime_type.startswith("image/"),
+                ).limit(1)
+            )).scalar() is not None
+            if not has_photo:
+                try:
+                    photo = extract_photo_from_pdf(pdf_bytes)
+                    if photo:
+                        pbytes, pext = photo
+                        db.add(EntityFile(
+                            entity_id=entity_id, org_id=org_id, file_type=EntityFileType.other,
+                            file_name=f"Фото_из_резюме.{pext}", file_path="", file_size=len(pbytes),
+                            mime_type="image/jpeg" if pext in ("jpg", "jpeg") else f"image/{pext}",
+                            description="Фото из резюме (PDF)", uploaded_by=user_id, file_data=pbytes,
+                        ))
+                        await db.commit()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("MAGIC_RESUME: photo extract failed for entity %s: %s", entity_id, e)
+
+            pages = await convert_pdf_to_images(
+                pdf_path=pdf_path if pdf_path.exists() else _tmp_pdf(pdf_bytes),
+                entity_id=entity_id, org_id=org_id, uploaded_by=user_id, db=db,
+            )
+            logger.info(
+                "MAGIC_RESUME: original pdf saved for entity %s (%s bytes, %s pages)",
+                entity_id, len(pdf_bytes), len(pages),
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("MAGIC_RESUME: original pdf failed for entity %s: %s", entity_id, e)
+
+
+def _tmp_pdf(pdf_bytes: bytes) -> Path:
+    import tempfile
+    f = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    f.write(pdf_bytes)
+    f.close()
+    return Path(f.name)
 
 
 async def _generate_resume_files(

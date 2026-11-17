@@ -30,6 +30,7 @@ def no_background(monkeypatch):
         return None
     monkeypatch.setattr(magic_button, "_generate_resume_files", noop)
     monkeypatch.setattr(magic_button, "_download_candidate_photo_eager", noop)
+    monkeypatch.setattr(magic_button, "_attach_original_resume_pdf", noop)
 
 
 @pytest.fixture
@@ -144,3 +145,33 @@ async def test_extension_version(client, admin_user):
     r = await client.get("/api/extension/version", headers=_h(admin_user))
     assert r.status_code == 200
     assert r.json()["version"].count(".") == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pdf, expected", [
+    (b"%PDF-1.4 hh resume", "original"),   # оригинал с сайта — без ИИ
+    (b"<html>login</html>", "ai"),         # hh вернул страницу входа — ИИ-профиль
+    (None, "ai"),                          # старое расширение — как раньше
+])
+async def test_original_hh_pdf_replaces_ai_profile(client, admin_user, org_owner, monkeypatch, pdf, expected):
+    """Мария, 16.11.2026: резюме из расширения — «скрином» сайта, а не ИИ-анализом."""
+    import base64
+    calls = []
+
+    async def ai(*a, **k):
+        calls.append("ai")
+
+    async def original(entity_id, org_id, user_id, pdf_bytes, source):
+        calls.append(("original", pdf_bytes, source))
+
+    monkeypatch.setattr(magic_button, "_generate_resume_files", ai)
+    monkeypatch.setattr(magic_button, "_attach_original_resume_pdf", original)
+    body = _payload(full_name="Оригинал Резюме")
+    if pdf is not None:
+        body["resume_pdf_base64"] = base64.b64encode(pdf).decode()
+    r = await client.post("/api/magic-button/parse", headers=_h(admin_user), json=body)
+    assert r.status_code == 200, r.text
+    if expected == "original":
+        assert calls == [("original", pdf, "hh.ru")]
+    else:
+        assert calls == ["ai"]

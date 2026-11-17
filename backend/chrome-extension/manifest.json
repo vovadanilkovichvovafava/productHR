@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Enceladus Magic Button",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Добавляйте кандидатов в Enceladus одним кликом",
   "permissions": ["activeTab", "storage", "scripting", "cookies", "alarms"],
   "host_permissions": [
