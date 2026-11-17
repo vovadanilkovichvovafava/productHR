@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -198,20 +198,73 @@ async def test_missing_data_asks_hr_once(handoff, messenger, db_session, organiz
     await _link(handoff)
     await handoff.tick()
     no_nick = await _person(db_session, organization, admin_user, "Без Ника", tg=None)
-    await _person(db_session, organization, admin_user, "Без Даты", tg="no_date", practice=None)
     await handoff.tick()
     await handoff.tick()
-    notices = messenger.to(FALLBACK)
-    assert len(notices) == 2
-    assert "Без Ника: в карточке нет Telegram и телефона" in notices[0]  # ника нет — имя без ссылки
-    # ФИО — ссылка на Telegram кандидата, уведомление уходит HTML-разметкой
-    assert notices[1].startswith('<a href="https://t.me/no_date">Без Даты</a> на практике, но не указана дата')
+    [notice] = messenger.to(FALLBACK)
+    assert "Без Ника: в карточке нет Telegram и телефона" in notice  # ника нет — имя без ссылки
     assert all(m.html for m in messenger.sent if m.chat_id == FALLBACK)
 
     no_nick.telegram_usernames = ["found_nick"]
     await db_session.commit()
     await handoff.tick()
     assert "Telegram: @found_nick" in messenger.to(ACC_ONE)[0]
+
+
+async def test_practice_without_date_gets_next_workday(handoff, messenger, clock, db_session, organization,
+                                                       admin_user):
+    """Владимир 17.11.2026: практика почти всегда в этот день или на следующий. Статус без даты
+    не ждёт — бот ставит следующий рабочий день в карточку («Штат» его видит) и передаёт."""
+    await _link(handoff)
+    await handoff.tick()
+    clock.now = datetime(2026, 11, 6, 9, 0)  # пятница, 12:00 МСК → понедельник
+    person = await _person(db_session, organization, admin_user, "Без Даты", tg="no_date", practice=None)
+    await handoff.tick()
+    assert "Старт практики: 09.11.2026 10:00" in messenger.to(ACC_ONE)[0]
+    await db_session.refresh(person)
+    assert person.extra_data["practice_start_date"] == "2026-11-09"
+    [confirm] = messenger.to(FALLBACK)
+    assert confirm.startswith('<a href="https://t.me/no_date">Без Даты</a> передан(а) HR-профилю: практика с '
+                              "09.11.2026 10:00.")
+    assert "поставлена следующим рабочим днём" in confirm
+
+
+async def test_long_waiting_without_date_is_not_guessed(handoff, messenger, clock, db_session, organization,
+                                                        admin_user):
+    """Давно стоит на «Практике» без даты — «завтра» почти наверняка неверно: ждём дату от HR."""
+    await _link(handoff)
+    await handoff.tick()
+    person = await _person(db_session, organization, admin_user, "Давно", tg=None, practice=None)
+    await handoff.tick()  # нет Telegram — ждёт
+    clock.now += timedelta(days=2)
+    person.telegram_usernames = ["long_wait"]
+    await db_session.commit()
+    await handoff.tick()
+    assert messenger.to(ACC_ONE) == []
+    assert "не указана дата выхода на практику" in messenger.visible(FALLBACK)[0]
+    await db_session.refresh(person)
+    assert "practice_start_date" not in person.extra_data
+
+
+async def test_practice_date_moved_is_sent_again(handoff, messenger, clock, db_session, organization, admin_user):
+    """HR поправил дату, пока практика не началась, — HR-профиль получает новую дату."""
+    await _link(handoff)
+    await handoff.tick()
+    person = await _person(db_session, organization, admin_user, "Иван Петров")  # практика 05.11
+    await handoff.tick()
+    person.extra_data = {**person.extra_data, "practice_start_date": "2026-11-06"}
+    await db_session.commit()
+    await handoff.tick()
+    await handoff.tick()
+    first, second = messenger.to(ACC_ONE)
+    assert "Старт практики: 05.11.2026 10:00" in first and "Старт практики: 06.11.2026 10:00" in second
+    assert messenger.to(FALLBACK)[-1] == ('<a href="https://t.me/ivan_p">Иван Петров</a>: дата практики изменена '
+                                          "(05.11.2026 → 06.11.2026 10:00), HR-профилю передано.")
+
+    clock.now = datetime(2026, 11, 9, 9, 0)  # практика уже идёт — правка задним числом не шлётся
+    person.extra_data = {**person.extra_data, "practice_start_date": "2026-11-05"}
+    await db_session.commit()
+    await handoff.tick()
+    assert len(messenger.to(ACC_ONE)) == 2
 
 
 async def test_hr_notice_replaced_when_data_added(handoff, messenger, db_session, organization, admin_user):
@@ -227,15 +280,11 @@ async def test_hr_notice_replaced_when_data_added(handoff, messenger, db_session
     person.telegram_usernames = ["third"]
     await db_session.commit()
     await handoff.tick()
-    [notice] = messenger.visible(FALLBACK)  # прежнее удалено, осталось одно — про дату
-    assert "не указана дата выхода на практику" in notice
-
-    person.extra_data = {**person.extra_data, "practice_start_date": "2026-11-06"}
-    await db_session.commit()
-    await handoff.tick()
+    # «допишите» удалено, вместо него — «передан»; даты не было — бот поставил завтра (04.11)
     assert messenger.visible(FALLBACK) == [
-        '<a href="https://t.me/third">Третий Тест</a> передан(а) HR-профилю: практика с 06.11.2026 10:00. '
-        "Он напишет кандидату первым."
+        '<a href="https://t.me/third">Третий Тест</a> передан(а) HR-профилю: практика с 04.11.2026 10:00. '
+        "Он напишет кандидату первым. Дата выхода на практику не стояла — поставлена следующим рабочим "
+        "днём на «Штате». Если практика в другой день, поправьте дату: HR-профиль получит новую."
     ]
     assert "Telegram: @third" in messenger.to(ACC_ONE)[0]
     async with handoff.sessions() as s:

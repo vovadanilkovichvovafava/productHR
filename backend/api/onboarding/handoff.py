@@ -58,6 +58,9 @@ RETRY_AFTER = timedelta(minutes=10)
 # напоминает о звонке». (ключ, день от первого рабочего, флаг в onboarding_handoffs)
 HR_REMINDERS = (("day1", 0, "hr_day1_done"), ("week", 5, "hr_week_done"))
 REMINDER_STALE = timedelta(days=1)  # перевели задним числом — старое напоминание не шлём
+# Дату практики бот ставит сам, только если статус поставили недавно: кто давно стоит на
+# «Практике» без даты, тому «завтра» почти наверняка неверно — ждём дату от HR, как раньше
+AUTO_DATE_WINDOW = timedelta(days=1)
 PRACTICE = EntityStatus.probation       # «Практика»
 TRANSFER = EntityStatus.transferred     # «Перешёл в отдел»
 TRACKED = (PRACTICE, TRANSFER)
@@ -310,7 +313,41 @@ class HandoffService:
             elif (status == TRANSFER and row.transfer_sent_at and self.settings.handoff_stages
                   and row.next_at is not None and row.stage_index < len(STAGES)):
                 sent += await self._send_event(row, entity, "stage")
+            elif status == PRACTICE and row.practice_sent_at and self._practice_moved(row, entity):
+                sent += await self._send_event(row, entity, "practice")
         return sent
+
+    # ----------------------------------------------------------- дата практики
+    # Владимир 17.11.2026: «ставит его в практику — там всегда почти через день или в этот
+    # день». Статус без даты больше не ждёт: бот сам ставит следующий рабочий день на «Штате»
+    # (Ильнар: «завтра, дату в карточку»). HR поправил дату, пока практика не началась, —
+    # HR-профиль получает событие practice ещё раз, уже с новой датой.
+
+    def _local_today(self) -> date:
+        return sch.utc_to_local(self.clock(), self.settings.default_tz).date()
+
+    def _practice_moved(self, row: Handoff, entity: Entity) -> bool:
+        current = _parse_date(_pick(entity.extra_data or {}, PRACTICE_START_KEYS))
+        return bool(current and row.practice_date and current != row.practice_date
+                    and current >= self._local_today())
+
+    async def _fill_practice_date(self, entity: Entity) -> tuple[date, bool]:
+        """(дата, поставлена ли ботом): следующий рабочий день — в карточку, его видит «Штат»."""
+        day = self._local_today() + timedelta(days=1)
+        if self.settings.skip_weekends:
+            day = sch.next_workday(day)
+        async with self.sessions() as s:
+            fresh = await s.get(Entity, entity.id)
+            extra = dict(fresh.extra_data or {})
+            current = _parse_date(_pick(extra, PRACTICE_START_KEYS))
+            if current:  # HR успел поставить, пока шёл проход
+                return current, False
+            extra[PRACTICE_START_KEYS[0]] = day.isoformat()
+            fresh.extra_data = extra
+            await s.commit()
+        entity.extra_data = extra
+        logger.info("ONBOARDING handoff practice date auto entity=%s date=%s", entity.id, day.isoformat())
+        return day, True
 
     # ------------------------------------------------------------------ события
 
@@ -319,8 +356,13 @@ class HandoffService:
         practice_date = _parse_date(_pick(extra, PRACTICE_START_KEYS))
         first_day = _parse_date(_pick(extra, DEPT_START_KEYS))
         reason = None if self._contact(entity) else "no_telegram"
+        auto_date = False
+        moved_from = row.practice_date if kind == "practice" and row.practice_sent_at else None
         if not reason and kind == "practice" and not practice_date:
-            reason = "no_practice_date"
+            if self.clock() - (row.updated_at or self.clock()) <= AUTO_DATE_WINDOW:
+                practice_date, auto_date = await self._fill_practice_date(entity)
+            else:
+                reason = "no_practice_date"
         if not reason and kind in ("transfer", "stage") and not first_day:
             reason = "no_first_day"
         if reason:
@@ -379,7 +421,14 @@ class HandoffService:
             # HR видит, что передача прошла (Ильнар 06.11.2026: «бот тихо принимает»). Было
             # «допишите …» — оно удаляется, «передан» приходит в тот же чат.
             chat_id = await self._drop_notice(row) if row.notice_message_id else None
-            await self._confirm_hr(entity, self._confirm_text(entity, event), chat_id)
+            text = self._confirm_text(entity, event)
+            if moved_from:
+                text = (f"{self._name_html(entity)}: дата практики изменена "
+                        f"({moved_from.strftime('%d.%m.%Y')} → {event['practice_start']}), HR-профилю передано.")
+            elif auto_date:
+                text += (" Дата выхода на практику не стояла — поставлена следующим рабочим днём на "
+                         "«Штате». Если практика в другой день, поправьте дату: HR-профиль получит новую.")
+            await self._confirm_hr(entity, text, chat_id)
         return 1
 
     async def _hr_reminders(self) -> int:
