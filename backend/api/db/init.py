@@ -668,6 +668,17 @@ async def init_database():
     except Exception as e:
         logger.warning(f"HR conflicts fix failed (non-critical): {e}")
 
+    # Нулевой символ в extra_data карточки роняет поиск у всех (17.11.2026,
+    # services/nul_chars.py). На каждом старте: дёшево, а такие строки могли
+    # прийти из старого кода или прямой записи в базу.
+    try:
+        from ..services.nul_chars import clean_entities_nul
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await clean_entities_nul(session)
+    except Exception as e:
+        logger.warning(f"NUL cleanup failed (non-critical): {e}")
+
     # Строки «Сменился HR» из лент карточек — смена HR больше не пишется в
     # ленту (Маша, 17.11.2026; services/hr_feed_cleanup.py). Одноразово.
     try:

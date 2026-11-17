@@ -96,10 +96,14 @@ def _entity_search_name(target: "Entity") -> str:
 
 
 def _on_insert(mapper, connection, target):
+    from .nul_chars import strip_entity_nul
+    strip_entity_nul(target)  # нулевой символ в extra_data роняет поиск у всех
     target.search_name = _entity_search_name(target)
 
 
 def _on_update(mapper, connection, target):
+    from .nul_chars import strip_entity_nul
+    strip_entity_nul(target)
     new_val = _entity_search_name(target)
     if target.search_name != new_val:
         target.search_name = new_val
