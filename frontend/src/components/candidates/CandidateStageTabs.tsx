@@ -1,14 +1,14 @@
-import { Fragment, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { ChevronDown, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import clsx from "clsx";
 import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 import { HuntflowOptionsIcon } from "@/components/hr/HuntflowControls";
 import type { KanbanColumn } from "@/services/api/candidates";
 import { boardColumnOf } from "@/constants/hrStages";
 
-// Полоса этапов «Все кандидаты»: «Все», вкладки этапов со счётчиками, свёрнутые
-// группы пустых этапов, стрелки прокрутки и кнопка настроек списка
+// Полоса этапов «Все кандидаты»: «Все», вкладки этапов со счётчиками (пустые
+// не показываются — 16.11.2026), стрелки прокрутки и кнопка настроек списка
 // (вынесено из AllCandidatesPage, 20.10.2026).
 
 const HUNTFLOW_STAGE_LAYOUT_TRANSITION = {
@@ -32,49 +32,15 @@ export function limitBoardColumnsToStatuses(
   return kept.length ? kept : columns;
 }
 
-type TopStageNavItem =
-  | { type: "stage"; column: KanbanColumn }
-  | { type: "empty-group"; id: string; columns: KanbanColumn[]; count: number };
-
-// Подряд идущие пустые этапы сворачиваются в одну кнопку «N этапов без кандидатов».
-// Колонку «Отозван» не прячем: кандидат, которого не видно в «Все кандидаты», для
-// рекрутёра равен пропавшему (владелец 18.09.2026).
-function buildNavItems(columns: KanbanColumn[]): TopStageNavItem[] {
-  const items: TopStageNavItem[] = [];
-  let emptyRun: KanbanColumn[] = [];
-  const flushEmptyRun = () => {
-    if (!emptyRun.length) return;
-    items.push({
-      type: "empty-group",
-      id: emptyRun.map((column) => column.status).join("-"),
-      columns: [...emptyRun],
-      count: emptyRun.length,
-    });
-    emptyRun = [];
-  };
-  columns.forEach((column) => {
-    const count = column.count ?? column.cards.length;
-    if (count === 0) {
-      emptyRun.push(column);
-      return;
-    }
-    flushEmptyRun();
-    items.push({ type: "stage", column });
-  });
-  flushEmptyRun();
-  return items;
-}
-
-function getEmptyStageGroupLabel(count: number) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  const noun =
-    mod10 === 1 && mod100 !== 11
-      ? "этап"
-      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
-        ? "этапа"
-        : "этапов";
-  return `${count} ${noun} без кандидатов`;
+/**
+ * Пустые этапы в полосе НЕ показываются (Мария, 16.11.2026, «трек АТС»: «не
+ * совсем понятны статусы… не хочется визуально лишней информации»). Раньше
+ * подряд идущие пустые сворачивались в кнопку «N этапов без кандидатов» —
+ * её читали как ещё один этап. Открытая вкладка остаётся на месте, даже если
+ * в ней никого не осталось: иначе человек терял бы, где стоит.
+ */
+export function visibleStageColumns(columns: KanbanColumn[], activeTab: string): KanbanColumn[] {
+  return columns.filter((c) => (c.count ?? c.cards.length) > 0 || c.status === activeTab);
 }
 
 export function CandidateStageTabs({
@@ -112,10 +78,7 @@ export function CandidateStageTabs({
     scrollLeft: scrollTopStagesLeft,
     scrollRight: scrollTopStagesRight,
   } = useHorizontalScroll<HTMLDivElement>({ step: 520 });
-  const [expandedEmptyStageGroups, setExpandedEmptyStageGroups] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const topStageNavItems = useMemo(() => buildNavItems(columns), [columns]);
+  const stageColumns = useMemo(() => visibleStageColumns(columns, activeTab), [columns, activeTab]);
   const totalCandidateCount = totalCount;
 
   return (
@@ -172,64 +135,7 @@ export function CandidateStageTabs({
               )}
             </motion.button>
 
-            {topStageNavItems.map((item) => {
-              if (item.type === "empty-group") {
-                const isExpanded = expandedEmptyStageGroups.has(item.id);
-                return (
-                  <Fragment key={`empty-${item.id}`}>
-                    <motion.button
-                      layout="position"
-                      transition={{ layout: HUNTFLOW_STAGE_LAYOUT_TRANSITION }}
-                      type="button"
-                      className={clsx(
-                        "hf-top-stage-empty-group",
-                        isExpanded && "hf-top-stage-empty-group-expanded",
-                      )}
-                      aria-expanded={isExpanded}
-                      title={isExpanded ? "Свернуть пустые этапы" : "Показать пустые этапы"}
-                      onClick={() => {
-                        setExpandedEmptyStageGroups((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(item.id)) next.delete(item.id);
-                          else next.add(item.id);
-                          return next;
-                        });
-                      }}
-                    >
-                      <span>{getEmptyStageGroupLabel(item.count)}</span>
-                      <ChevronDown className="hf-top-stage-empty-group-icon" />
-                    </motion.button>
-                    {isExpanded && item.columns.map((col) => {
-                      const isActive = activeTab === col.status;
-                      return (
-                        <motion.button
-                          key={col.status}
-                          layout="position"
-                          transition={{ layout: HUNTFLOW_STAGE_LAYOUT_TRANSITION }}
-                          type="button"
-                          onClick={() => onSelectTab(col.status)}
-                          className={clsx(
-                            "hf-top-stage-item hf-top-stage-empty-stage",
-                            isActive
-                              ? "hf-top-stage-item-active"
-                              : "hf-top-stage-item-idle",
-                          )}
-                        >
-                          {col.label}
-                          <span className="hf-top-stage-badge hf-top-stage-badge-muted">
-                            {String(col.count)}
-                          </span>
-                          {isActive && (
-                            <span className="hf-top-stage-underline" />
-                          )}
-                        </motion.button>
-                      );
-                    })}
-                  </Fragment>
-                );
-              }
-
-              const col = item.column;
+            {stageColumns.map((col) => {
               const isActive = activeTab === col.status;
               const stageLabel = col.label;
               return (

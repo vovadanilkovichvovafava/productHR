@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { limitBoardColumnsToStatuses } from "../CandidateStageTabs";
+import { limitBoardColumnsToStatuses, visibleStageColumns } from "../CandidateStageTabs";
 import type { KanbanColumn } from "@/services/api/candidates";
 
 // «Все кандидаты» у человека со скоупом по этапам (09.11.2026): вкладками —
@@ -28,5 +28,15 @@ describe("limitBoardColumnsToStatuses", () => {
 
   it("«Мы уволили» — своя вкладка (10.11.2026)", () => {
     expect(limitBoardColumnsToStatuses(board, ["dismissed"]).map((c) => c.status)).toEqual(["dismissed"]);
+  });
+});
+
+describe('visibleStageColumns — пустые этапы не показываются (Мария, 16.11.2026)', () => {
+  const cols = [col('new', 3), col('screening', 0), col('practice', 0), col('hired', 2)];
+  it('прячет этапы без кандидатов', () => {
+    expect(visibleStageColumns(cols, 'all').map((c) => c.status)).toEqual(['new', 'hired']);
+  });
+  it('открытую вкладку оставляет, даже если она опустела', () => {
+    expect(visibleStageColumns(cols, 'practice').map((c) => c.status)).toEqual(['new', 'practice', 'hired']);
   });
 });
