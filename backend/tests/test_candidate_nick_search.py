@@ -32,7 +32,8 @@ def test_nick_search_conditions_valid_nick():
     conds = nick_search_conditions("@shblsn")
     # 3-е условие — ник из шапки резюме (extra_data.resume_contacts): в поля
     # карточки его часто не переносят, см. test_nick_search_fallback.py.
-    assert len(conds) == 3
+    # 4-е — комментарии из окна смены этапа (stage_transitions, 17.11.2026).
+    assert len(conds) == 4
 
 
 def test_nick_search_conditions_bare_at():
@@ -45,7 +46,8 @@ def test_nick_search_conditions_empty():
 
 def test_notes_search_conditions_valid_query():
     conds = notes_search_conditions("shblsn")
-    assert len(conds) == 1
+    # заметки карточки + комментарии к переводам этапа (17.11.2026)
+    assert len(conds) == 2
 
 
 def test_notes_search_conditions_empty():

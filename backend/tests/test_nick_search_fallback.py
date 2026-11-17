@@ -79,7 +79,7 @@ def _pg_trgm_known(monkeypatch):
 def test_nick_conditions_cover_resume_contacts():
     conds = nick_search_conditions("@shaffer_art")
     # telegram_usernames + комментарии + контакты из текста резюме.
-    assert len(conds) == 3
+    assert len(conds) == 4  # + комментарии к переводам этапа (17.11.2026)
     sql = " ".join(_sql(c) for c in conds)
     assert "telegram_usernames" in sql
     assert "notes" in sql
@@ -158,3 +158,13 @@ async def test_empty_query_changes_nothing():
     query, fallback = await apply_text_search(db, base, "   ")
     assert fallback is False
     assert _where(query) == _where(base)
+
+
+def test_nick_and_text_search_cover_stage_change_comments():
+    """Ник, вписанный в окне смены этапа («Новый — @lot1236»), лежит в истории
+    воронки (stage_transitions.comment), а не в заметках карточки — и поиск его
+    не находил (Support ATS, 17.11.2026)."""
+    nick = " ".join(_sql(c) for c in nick_search_conditions("@lot1236"))
+    assert "stage_transitions" in nick and "%lot1236%" in nick
+    broad = " ".join(_sql(c) for c in broad_search_conditions("lot1236"))
+    assert "stage_transitions" in broad

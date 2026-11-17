@@ -18,7 +18,7 @@ from typing import Optional, List
 from sqlalchemy import cast, event, func, or_, and_, select, text, String
 from sqlalchemy.sql.elements import ColumnElement
 
-from ..models.database import Entity
+from ..models.database import Entity, StageTransition
 from .similarity import (
     generate_name_variants, _name_word_variants, fold_yo,
     transliterate_ru_to_en, transliterate_en_to_ru, TRANSLIT_RU_EN_PASSPORT,
@@ -333,6 +333,7 @@ def nick_search_conditions(q: str) -> List:
     return [
         cast(Entity.telegram_usernames, String).ilike(f"%{tg}%"),
         cast(Entity.extra_data["notes"], String).ilike(f"%{tg}%"),
+        _transition_comment_condition(tg),
         # Ник из ШАПКИ резюме: в поля карточки его часто не переносят (а если
         # переносят — бывает обрезанным), и по «@полный_ник» карточка не находилась.
         cast(Entity.extra_data["resume_contacts"]["telegrams"], String).ilike(f"%{tg}%"),
@@ -400,7 +401,20 @@ def notes_search_conditions(q: str) -> List:
     q = (q or "").strip()
     if not q:
         return []
-    return [cast(Entity.extra_data["notes"], String).ilike(f"%{q}%")]
+    return [
+        cast(Entity.extra_data["notes"], String).ilike(f"%{q}%"),
+        _transition_comment_condition(q),
+    ]
+
+
+def _transition_comment_condition(q: str):
+    """Комментарий, написанный в окне смены этапа, лежит не в заметках карточки,
+    а в истории воронки (stage_transitions.comment). Рекрутёры вписывают туда ник
+    при добавлении («Новый — @lot1236») вместо поля Telegram, и поиск его не
+    находил (Support ATS, 17.11.2026: «поиск по тг не работает будто»)."""
+    return Entity.id.in_(
+        select(StageTransition.entity_id).where(StageTransition.comment.ilike(f"%{q}%"))
+    )
 
 
 # Регистрируем автосинк при импорте модуля (роуты поиска импортируют его на
