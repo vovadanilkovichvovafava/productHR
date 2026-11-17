@@ -178,12 +178,13 @@ async def test_take_transfer_leaves_trace_and_notifies(client, db_session, admin
     s = setup
     body = await _take(client, admin_user, s, s["petr"])
     assert body["take_outcome"] == "transferred" and body["taken_from"] == s["maria"].id
-    last = (await db_session.execute(
-        select(StageTransition).where(StageTransition.application_id == s["app"].id)
-        .order_by(StageTransition.id.desc())
-    )).scalars().first()
-    assert last.comment == "Сменился HR: теперь Пётр, раньше Мария. Мария — сорсер"
-    assert last.from_stage == last.to_stage == "probation"  # этап не двигали
+    # Смена HR в ленту не пишется (Маша, 17.11.2026) — она в строке «HR».
+    rows = (await db_session.execute(
+        select(StageTransition.comment).where(StageTransition.application_id == s["app"].id)
+    )).scalars().all()
+    assert not any((c or "").startswith("Сменился") for c in rows)
+    team = (await client.get(f"/api/entities/{s['e'].id}/team", headers=_h(admin_user))).json()
+    assert team["hr_history"][0]["new"] == "Пётр" and team["hr_history"][0]["prev"] == "Мария"
     for uid, title in ((s["maria"].id, "Кандидата забрали"), (s["petr"].id, "Вам передали кандидата")):
         n = (await db_session.execute(select(Notification).where(
             Notification.user_id == uid, Notification.type == "candidate_taken"))).scalars().all()

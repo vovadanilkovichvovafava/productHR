@@ -2,6 +2,7 @@
 
 Правила — services/candidate_hr.py. Здесь только ручки:
 - PUT    /entities/{id}/mentor                    — ментор практики (тег у ФИО);
+- POST   /entities/{id}/hr/undo                   — отменить последнюю смену HR;
 - GET    /entities/{id}/team                     — кто работает с кандидатом;
 - POST   /entities/{id}/hr                       — «Сменить HR»;
 - POST   /entities/{id}/participants             — добавить участника;
@@ -164,5 +165,27 @@ async def set_mentor_route(
     await db.commit()
     logger.info("BOARD_MENTOR set: entity=%s mentor=%r by user %s (карточка)", entity.id, mentor or "-", current_user.id)
     request.state.audit_action = "Поставил ментора практики"
+    request.state.audit_extra = {"entity_id": entity.id}
+    return {"team": await team(db, entity)}
+
+
+@router.post("/{entity_id}/hr/undo")
+async def undo_hr_route(
+    entity_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr_segment),
+):
+    """«Отменить последнюю смену» в строке «HR» карточки (17.11.2026: смены HR
+    больше не пишутся в ленту — Маша: лента для истории взаимодействия)."""
+    from ...services.candidate_hr import team, undo_last_hr_change
+
+    entity = await _entity(db, entity_id, current_user, lock=True)
+    problem = await undo_last_hr_change(db, entity, actor=current_user)
+    if problem:
+        raise HTTPException(409, problem)
+    await db.commit()
+    await _sync_tags(db, entity.id)
+    request.state.audit_action = "Отменил смену HR кандидата"
     request.state.audit_extra = {"entity_id": entity.id}
     return {"team": await team(db, entity)}

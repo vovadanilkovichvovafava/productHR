@@ -156,9 +156,11 @@ async def change_hr(
     via: str = "change",
 ) -> HrChange:
     """Сделать человека HR кандидата во всех живых воронках. Прежний HR — в
-    сорсеры, если сорсера нет; по желанию — в участники. В ленту каждой
-    воронки — «Сменился HR: теперь X, раньше Y», запись об отмене — в
-    extra_data.hr_changes. Не коммитит."""
+    сорсеры, если сорсера нет; по желанию — в участники. Запись о смене (для
+    истории в строке «HR» и отмены) — в extra_data.hr_changes. В ЛЕНТУ карточки
+    смена не пишется (Маша, 17.11.2026: «это поле нужно, чтобы видеть историю
+    взаимодействия с кандидатом — комментарии, ОС, фидбек, — а не кто его вёл»).
+    Не коммитит."""
     apps = await active_applications(db, entity.id, lock=True)
     prev = await current_hr_id(db, entity, apps)
     owners_before = {a.id: a.created_by for a in apps}
@@ -217,19 +219,7 @@ async def change_hr(
         ex["assignee_user_id"] = new_hr_id
         ex["board_hr_tags"] = [{"hr_id": new_hr_id, "name": new_name}]
 
-    comment = f"Сменился HR: теперь {new_name}" + (f", раньше {prev_name}" if prev_name else "")
-    if result.sourcer_name:
-        comment += f". {result.sourcer_name} — сорсер"
     transition_ids: list[int] = []
-    for app in apps:
-        tr = StageTransition(
-            application_id=app.id, entity_id=entity.id,
-            from_stage=app.stage.value, to_stage=app.stage.value,
-            changed_by=actor.id, comment=comment,
-        )
-        db.add(tr)
-        await db.flush()
-        transition_ids.append(tr.id)
     vacancy_titles = []
     if apps:
         vacancy_titles = [t for t, in (await db.execute(
@@ -252,14 +242,6 @@ async def change_hr(
         "entity_owner_moved": entity_owner_moved,
         "board_prev": board_prev,
     }
-    if not apps:
-        # Кандидат вне воронок: след — запись в ленте карточки (отмены нет).
-        notes = list(ex.get("notes") or [])
-        notes.append({
-            "id": uuid.uuid4().hex, "text": comment, "date": datetime.utcnow().isoformat() + "+00:00",
-            "author_id": actor.id, "author_name": actor.name,
-        })
-        ex["notes"] = notes
     ex[HR_CHANGES_KEY] = [*list(ex.get(HR_CHANGES_KEY) or [])[-(HR_CHANGES_KEEP - 1):], record]
     entity.extra_data = ex
     flag_modified(entity, "extra_data")
@@ -291,7 +273,7 @@ async def undo_hr_change(db: AsyncSession, entity: Entity, transition_id: int, *
     history = list(ex.get(HR_CHANGES_KEY) or [])
     is_last = bool(history) and history[-1].get("id") == rec.get("id")
     apps = await active_applications(db, entity.id, lock=True)
-    still_current = all(a.created_by == rec.get("new") for a in apps if str(a.id) in (rec.get("owners_before") or {}))
+    still_current = _still_current(rec, apps, entity)
     tr_ids = list(rec.get("transitions") or [])
     if not (is_last and still_current):
         await db.execute(delete(StageTransition).where(StageTransition.id == transition_id))
@@ -301,6 +283,13 @@ async def undo_hr_change(db: AsyncSession, entity: Entity, transition_id: int, *
         flag_modified(entity, "extra_data")
         return "deleted"
 
+    await _revert(db, entity, rec, apps, ex, history, actor)
+    return "undone"
+
+
+async def _revert(db, entity, rec, apps, ex, history, actor) -> None:
+    """Вернуть всё, что сделала смена rec (она последняя в history)."""
+    tr_ids = list(rec.get("transitions") or [])
     owners = {int(k): v for k, v in (rec.get("owners_before") or {}).items()}
     for app in apps:
         if app.id in owners:
@@ -333,7 +322,29 @@ async def undo_hr_change(db: AsyncSession, entity: Entity, transition_id: int, *
         "HR_CHANGE_UNDO: entity=%s back to=%s (was %s) by=%s",
         entity.id, rec.get("prev"), rec.get("new"), actor.id,
     )
-    return "undone"
+
+
+async def undo_last_hr_change(db: AsyncSession, entity: Entity, *, actor: User) -> Optional[str]:
+    """«Отменить последнюю смену» в строке «HR». None — отменено; иначе текст,
+    почему нельзя (смен нет / HR с тех пор поменяли в воронке). Не коммитит."""
+    ex = dict(entity.extra_data) if isinstance(entity.extra_data, dict) else {}
+    history = list(ex.get(HR_CHANGES_KEY) or [])
+    if not history:
+        return "Смен HR у кандидата не было"
+    rec = history[-1]
+    apps = await active_applications(db, entity.id, lock=True)
+    if not _still_current(rec, apps, entity):
+        return "HR с тех пор поменяли — отменить последнюю смену уже нельзя"
+    await _revert(db, entity, rec, apps, ex, history, actor)
+    return None
+
+
+def _still_current(rec: dict, apps: list, entity: Entity) -> bool:
+    owners = rec.get("owners_before") or {}
+    if owners:
+        return all(a.created_by == rec.get("new") for a in apps if str(a.id) in owners)
+    # Без воронок HR живёт на доске.
+    return _board_hr_ids(entity)[:1] == [rec.get("new")]
 
 
 async def add_participant(db: AsyncSession, entity: Entity, user_id: int, *, actor: User) -> list[int]:
@@ -376,6 +387,19 @@ async def team(db: AsyncSession, entity: Entity) -> dict:
     parts = await participant_ids(db, apps, hr)
     names = await _user_names(db, [hr, *parts])
     tags = await sourcer_tags(db, entity.id)
+    ex = entity.extra_data if isinstance(entity.extra_data, dict) else {}
+    changes = list(ex.get(HR_CHANGES_KEY) or [])
+    who = await _user_names(db, [x for r in changes for x in (r.get("prev"), r.get("new"), r.get("by"))])
+    history = [
+        {
+            "at": r.get("at"),
+            "prev": who.get(r.get("prev")) if r.get("prev") else None,
+            "new": who.get(r.get("new")),
+            "by": who.get(r.get("by")) if r.get("by") else None,
+        }
+        for r in reversed(changes[-10:])
+    ]
+    can_undo = bool(changes) and _still_current(changes[-1], apps, entity)
     from .practice_mentor import load_mentors, org_mentor_names
     mentors = (await load_mentors(db, entity.org_id, [entity.id])).get(entity.id) or []
     return {
@@ -386,4 +410,8 @@ async def team(db: AsyncSession, entity: Entity) -> dict:
         "participants": [{"id": u, "name": names.get(u)} for u in parts],
         "sourcers": [{"id": t.id, "name": t.name, "color": t.color} for t in tags],
         "in_funnels": bool(apps),
+        # Смены HR — не в ленте, а здесь: строка «HR» показывает историю и
+        # «Отменить последнюю смену» (17.11.2026).
+        "hr_history": history,
+        "can_undo_hr": can_undo,
     }

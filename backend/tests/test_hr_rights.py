@@ -95,27 +95,26 @@ async def test_take_makes_one_hr_prev_becomes_sourcer_and_undo(client, db_sessio
     ent = await db_session.get(Entity, s["eid"], populate_existing=True)
     assert [t["name"] for t in ent.extra_data["system_hr_tags"]] == ["Влада"]
 
-    # История собеседования не тронута, этап тот же; смена — отдельной строкой.
+    # История собеседования не тронута; смена HR в ЛЕНТУ не пишется (Маша,
+    # 17.11.2026: лента — для взаимодействия с кандидатом), она — в строке «HR».
     hist = (await db_session.execute(
         select(StageTransition).where(StageTransition.application_id == s["app_id"]).order_by(StageTransition.id)
     )).scalars().all()
-    assert hist[0].comment == "Перформер, вовлечённая"
-    assert hist[-1].comment == "Сменился HR: теперь Влада, раньше Эльвира. Эльвира — сорсер"
-    assert hist[-1].from_stage == hist[-1].to_stage == "probation"
+    assert [h.comment for h in hist] == ["Перформер, вовлечённая"]
+    assert team["hr_history"][0]["new"] == "Влада" and team["hr_history"][0]["prev"] == "Эльвира"
+    assert team["can_undo_hr"] is True
 
-    # Корзина у строки «Сменился HR» — отмена: HR Эльвира, сорсера нет.
-    r = await client.delete(f"/api/vacancies/applications/{s['app_id']}/history/{hist[-1].id}", headers=_h(s["vlada"]))
+    # «Отменить последнюю смену» в строке «HR»: HR Эльвира, сорсера нет.
+    r = await client.post(f"/api/entities/{s['eid']}/hr/undo", headers=_h(s["vlada"]))
     assert r.status_code == 200, r.text
-    assert r.json()["hr_change"] == "undone" and r.json()["stage"] == "probation"
     team = await _team(client, admin_user, s["eid"])
     assert team["hr"]["name"] == "Эльвира" and team["sourcers"] == []
     assert await _owners(db_session, s["eid"]) == [s["elv"].id]
     ent = await db_session.get(Entity, s["eid"], populate_existing=True)
     assert ent.created_by == s["elv"].id
-    left = (await db_session.execute(
-        select(StageTransition.comment).where(StageTransition.application_id == s["app_id"])
-    )).scalars().all()
-    assert left == ["Перформер, вовлечённая"]
+    assert team["hr_history"] == [] and team["can_undo_hr"] is False
+    r = await client.post(f"/api/entities/{s['eid']}/hr/undo", headers=_h(s["vlada"]))
+    assert r.status_code == 409  # больше нечего отменять
 
 
 @pytest.mark.asyncio
@@ -283,3 +282,32 @@ async def test_card_mentor_is_board_mentor_and_board_row_flags_funnel(client, db
     assert r.status_code == 400
     r = await client.put(f"/api/entities/{s['eid']}/mentor", json={"name": None}, headers=_h(admin_user))
     assert r.json()["team"]["mentor"] is None
+
+
+@pytest.mark.asyncio
+async def test_feed_cleanup_removes_hr_rows_keeps_history(db_session, admin_user, s):
+    """Разовая чистка: строки «Сменился HR», записанные 16.11, уходят из ленты,
+    запись hr_changes (история и отмена) остаётся."""
+    from api.models.database import DataMigrationMark  # noqa: F401
+    from api.services.hr_feed_cleanup import remove_hr_change_rows_once
+
+    tr = StageTransition(application_id=s["app_id"], entity_id=s["eid"], from_stage="probation",
+                         to_stage="probation", changed_by=admin_user.id,
+                         comment="Сменился HR: теперь Влада, раньше Эльвира. Эльвира — сорсер")
+    db_session.add(tr)
+    await db_session.flush()
+    ent = await db_session.get(Entity, s["eid"])
+    ent.extra_data = {"hr_changes": [{"id": "x", "prev": s["elv"].id, "new": s["vlada"].id,
+                                      "owners_before": {}, "transitions": [tr.id]}],
+                      "notes": [{"id": "n1", "text": "Сменился HR: теперь Влада"}, {"id": "n2", "text": "собес ок"}]}
+    await db_session.commit()
+
+    assert await remove_hr_change_rows_once(db_session) == 2
+    left = (await db_session.execute(
+        select(StageTransition.comment).where(StageTransition.application_id == s["app_id"])
+    )).scalars().all()
+    assert left == ["Перформер, вовлечённая"]
+    ent = await db_session.get(Entity, s["eid"], populate_existing=True)
+    assert [n["id"] for n in ent.extra_data["notes"]] == ["n2"]
+    assert ent.extra_data["hr_changes"][0]["transitions"] == []
+    assert await remove_hr_change_rows_once(db_session) == 0

@@ -1439,6 +1439,9 @@ export interface EntityTeam {
   /** Ментор практики — тег у ФИО, он же «Рук. практики» на «Штате». */
   mentor?: string | null;
   mentor_options?: string[];
+  /** Смены HR, свежие сверху (в ленту не пишутся — Маша, 17.11.2026). */
+  hr_history?: Array<{ at: string | null; prev: string | null; new: string | null; by: string | null }>;
+  can_undo_hr?: boolean;
 }
 
 export const getEntityTeam = async (entityId: number): Promise<EntityTeam> => {
@@ -1470,5 +1473,10 @@ export const removeEntityParticipant = async (entityId: number, userId: number):
 
 export const setEntityMentor = async (entityId: number, name: string | null): Promise<EntityTeam> => {
   const { data } = await api.put(`/entities/${entityId}/mentor`, { name });
+  return data.team;
+};
+
+export const undoEntityHr = async (entityId: number): Promise<EntityTeam> => {
+  const { data } = await api.post(`/entities/${entityId}/hr/undo`);
   return data.team;
 };

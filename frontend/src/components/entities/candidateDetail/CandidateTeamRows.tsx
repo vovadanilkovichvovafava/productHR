@@ -9,6 +9,7 @@ import {
   removeEntityParticipant,
   setEntityHr,
   setEntityMentor,
+  undoEntityHr,
   type EntityTeam,
 } from "@/services/api/entities";
 import { getAssignableUsers, type AssignableUser } from "@/services/api/vacancies";
@@ -78,6 +79,8 @@ export function CandidateTeamRows({
   const addRef = useRef<HTMLDivElement>(null);
   const [mentorOpen, setMentorOpen] = useState(false);
   const mentorRef = useRef<HTMLDivElement>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
 
   // Другая карточка — сразу её кэш или заглушка из её данных, а не прежняя.
   const shownFor = useRef(entityId);
@@ -110,14 +113,15 @@ export function CandidateTeamRows({
   }, [users.length]);
 
   useEffect(() => {
-    if (!addOpen && !mentorOpen) return;
+    if (!addOpen && !mentorOpen && !historyOpen) return;
     const onClick = (e: MouseEvent) => {
       if (addRef.current && !addRef.current.contains(e.target as Node)) setAddOpen(false);
       if (mentorRef.current && !mentorRef.current.contains(e.target as Node)) setMentorOpen(false);
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) setHistoryOpen(false);
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
-  }, [addOpen, mentorOpen]);
+  }, [addOpen, mentorOpen, historyOpen]);
 
   const taken = useMemo(
     () => new Set([team?.hr?.id, ...(team?.participants || []).map((p) => p.id)].filter(Boolean) as number[]),
@@ -136,6 +140,16 @@ export function CandidateTeamRows({
       onChanged?.();
     } catch (e) {
       toast.error(getErrorDetail(e, "Не удалось добавить участника"));
+    }
+  };
+  const undoHr = async () => {
+    setHistoryOpen(false);
+    try {
+      setTeam(await undoEntityHr(entityId));
+      toast.success("Смена HR отменена");
+      onChanged?.();
+    } catch (e) {
+      toast.error(getErrorDetail(e, "Не удалось отменить смену HR"));
     }
   };
   const pickMentor = async (name: string | null) => {
@@ -182,6 +196,41 @@ export function CandidateTeamRows({
             >
               Сменить
             </button>
+          )}
+          {/* История смен HR — здесь, а не в ленте: лента для взаимодействия с
+              кандидатом (Маша, 17.11.2026). Отмена — только последней смены. */}
+          {loaded && (team.hr_history?.length ?? 0) > 0 && (
+            <div className="relative" ref={historyRef}>
+              <button type="button" className={ghostBtn} onClick={() => setHistoryOpen((v) => !v)}>
+                История
+              </button>
+              {historyOpen && (
+                <div className="absolute left-0 top-full z-30 mt-1 w-72 rounded-xl border border-[color:var(--hf-main-200)] bg-[var(--hf-white)] p-2 shadow-lg hf-dark-disabled:bg-[var(--hf-dark-800)]">
+                  <div className="grid gap-1.5">
+                    {(team.hr_history || []).map((h, i) => (
+                      <div key={i} className="text-xs leading-snug">
+                        <span className="text-[var(--hf-main-500)]">
+                          {h.at ? new Date(h.at.endsWith("Z") || h.at.includes("+") ? h.at : `${h.at}Z`).toLocaleString("ru", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
+                          {h.by ? ` · ${h.by}` : ""}
+                        </span>
+                        <div className="text-[var(--hf-main-900)] hf-dark-disabled:text-[var(--hf-dark-200)]">
+                          {h.prev ? `${h.prev} → ${h.new || "—"}` : `HR: ${h.new || "—"}`}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {!readonly && team.can_undo_hr && (
+                    <button
+                      type="button"
+                      onClick={() => void undoHr()}
+                      className="mt-2 w-full rounded-lg border border-[color:var(--hf-main-200)] px-2 py-1 text-xs font-medium hover:bg-[var(--hf-main-100)] hf-dark-disabled:hover:bg-[var(--hf-white-alpha-10)]"
+                    >
+                      Отменить последнюю смену
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </InfoRow>

@@ -668,6 +668,16 @@ async def init_database():
     except Exception as e:
         logger.warning(f"HR conflicts fix failed (non-critical): {e}")
 
+    # Строки «Сменился HR» из лент карточек — смена HR больше не пишется в
+    # ленту (Маша, 17.11.2026; services/hr_feed_cleanup.py). Одноразово.
+    try:
+        from ..services.hr_feed_cleanup import remove_hr_change_rows_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await remove_hr_change_rows_once(session)
+    except Exception as e:
+        logger.warning(f"HR feed cleanup failed (non-critical): {e}")
+
     # Живые заявки у тех, кого уволили до 20.10.2026: увольнение тогда не
     # закрывало воронки (11.11.2026, services/departed_apps_sync.py). Одноразово.
     try:
