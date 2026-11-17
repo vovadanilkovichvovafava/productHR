@@ -61,6 +61,13 @@ async def list_vacancies(
     if _scope_ids:
         query = query.where(vacancy_scope_filter(_scope_ids))
 
+    # «Скрыта от коллег» (17.11.2026, services/private_vacancy.py): чужим
+    # рекрутёрам такая вакансия не попадает ни в один список.
+    from ...services.private_vacancy import hidden_vacancy_ids
+    _hidden = await hidden_vacancy_ids(db, current_user, org.id if org else None)
+    if _hidden:
+        query = query.where(Vacancy.id.notin_(_hidden))
+
     # Мягкое удаление: по умолчанию удалённые скрыты; фильтр «Удалённые» — только они.
     if deleted:
         query = query.where(Vacancy.deleted_at.isnot(None))

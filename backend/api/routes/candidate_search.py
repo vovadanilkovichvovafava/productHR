@@ -1106,6 +1106,10 @@ async def get_candidates_kanban(
 
     if entity_ids:
         try:
+            # «Скрыта от коллег» (17.11.2026): чужая скрытая воронка не светится
+            # в строке списка ни чипом этапа, ни названием.
+            from api.services.private_vacancy import hidden_vacancy_ids
+            _hidden_vac = await hidden_vacancy_ids(db, current_user, org_id)
             va_result = await db.execute(
                 select(
                     VacancyApplication.entity_id,
@@ -1126,6 +1130,7 @@ async def get_candidates_kanban(
                     # Со скоупом по этапам — только заявки на разрешённых этапах.
                     *([application_scope_filter(scope_ids)]
                       if application_scope_filter(scope_ids) is not None else []),
+                    *([Vacancy.id.notin_(_hidden_vac)] if _hidden_vac else []),
                 )
             )
             from .vacancies.common import INACTIVE_STAGES as _INACTIVE

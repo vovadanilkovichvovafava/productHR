@@ -106,7 +106,9 @@ async def test_member_gets_403_on_hr_reads(client, people, url):
 @pytest.mark.parametrize("who", ["owner", "admin", "hr", "observer"])
 async def test_hr_roles_still_read(client, db_session, organization, people, who):
     e = await _candidate(db_session, organization, people["owner"])
-    v = await _vacancy(db_session, organization, people["owner"])
+    # «Видна коллегам»: скрытую чужую вакансию рекрутёр с 17.11.2026 не видит
+    # (tests/test_private_vacancy.py) — здесь проверяем только доступ ролей.
+    v = await _vacancy(db_session, organization, people["owner"], visible_to_all=True)
     u = people[who]
     urls = [
         "/api/candidates/recruiters",

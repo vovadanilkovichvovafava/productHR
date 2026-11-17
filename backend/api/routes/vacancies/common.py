@@ -211,6 +211,12 @@ async def can_access_vacancy(vacancy: Vacancy, user: User, org: Organization, db
     if org is None or getattr(vacancy, 'org_id', None) != org.id:
         return False
 
+    # «Скрыта от коллег» (17.11.2026): видна только своим — до общего правила
+    # «воронки открыты всему HR-сегменту» (services/private_vacancy.py).
+    from ...services.private_vacancy import can_see_vacancy
+    if not await can_see_vacancy(db, vacancy, user):
+        return False
+
     # Full database access (owner, или member с has_full_access — теперь в СВОЕЙ орг).
     if await has_full_database_access(user, org, db):
         return True
@@ -422,6 +428,7 @@ async def check_vacancy_access(
     # 404, и по разнице перебором номеров было видно, какие вакансии есть.
     # Наблюдатель и рекрутёры своей организации этим не затронуты.
     await _ensure_path_in_org(request, current_user, org.id, db)
+    await _ensure_path_not_hidden(request, current_user, db)
 
     # Скоуп по воронкам — здесь, одним горлышком на все ручки вакансий: раньше
     # он стоял только на чтении, и человек со скоупом (например, наблюдатель,
@@ -459,6 +466,23 @@ async def _ensure_path_in_org(request: Request, user: User, org_id: int, db: Asy
         return  # нет такой — ответит сама ручка (404)
     vacancy_org = (await db.execute(select(Vacancy.org_id).where(Vacancy.id == vacancy_id))).scalar()
     if vacancy_org is not None and vacancy_org != org_id:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+
+
+async def _ensure_path_not_hidden(request: Request, user: User, db: AsyncSession) -> None:
+    """«Скрыта от коллег»: чужому рекрутёру вакансия и её заявки — «не найдено»
+    (17.11.2026). 404, а не 403: сам факт существования — тоже информация."""
+    params = request.path_params or {}
+    if "vacancy_id" not in params and "application_id" not in params:
+        return
+    vacancy_id = await _path_vacancy_id(params, db)
+    if vacancy_id is None:
+        return
+    vacancy = await db.get(Vacancy, vacancy_id)
+    if vacancy is None:
+        return
+    from ...services.private_vacancy import can_see_vacancy
+    if not await can_see_vacancy(db, vacancy, user):
         raise HTTPException(status_code=404, detail="Vacancy not found")
 
 

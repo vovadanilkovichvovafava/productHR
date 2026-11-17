@@ -190,6 +190,11 @@ async def get_entity_activity(
     _scope_ids = await get_scope_vacancy_ids(current_user, db)
     if _scope_ids:
         apps = [a for a in apps if application_in_scope(a, _scope_ids)]
+    # «Скрыта от коллег» (17.11.2026): блок скрытой воронки видят только свои.
+    from ...services.private_vacancy import hidden_vacancy_ids
+    _hidden = await hidden_vacancy_ids(db, current_user, org.id)
+    if _hidden:
+        apps = [a for a in apps if a.vacancy_id not in _hidden]
     if not apps:
         return []
 
