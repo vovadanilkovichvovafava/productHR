@@ -26,6 +26,8 @@ from ...services.entity_card import (
     accessible_chat_call_conditions, entity_base_dict, entity_broadcast_payload,
 )
 
+from ...services.private_vacancy import hidden_vacancy_ids as _hidden_vacancies
+
 router = APIRouter()
 
 # Ключи extra_data, которыми владеет ТОЛЬКО сервер (свои эндпоинты/сервисы). Клиент
@@ -314,6 +316,8 @@ async def list_entities(
     # Комментарии каждой карточки — по её видимым воронкам (скоуп по этапам).
     from ...services.vacancy_scope import notes_scope_by_entity
     _notes_scope = await notes_scope_by_entity([e.id for e in entities], _scope_ids, db)
+    from ...services.private_vacancy import hidden_vacancy_ids as _hidden_of
+    _hidden_vac = await _hidden_of(db, current_user, entities[0].org_id) if entities else set()
 
     # Build response using pre-fetched data
     response = []
@@ -325,6 +329,7 @@ async def list_entities(
             entity,
             department_name=dept_names.get(entity.department_id) if entity.department_id else None,
             scope_ids=_notes_scope.get(entity.id, _scope_ids),
+            hidden_vacancy_ids=_hidden_vac,
         )
         row.update({
             "owner_name": owner_names.get(entity.created_by, "Unknown"),
@@ -438,6 +443,7 @@ async def create_entity(
         scope_ids=await notes_scope_for_entity(
             entity.id, await get_scope_vacancy_ids(current_user, db), db,
         ),
+        hidden_vacancy_ids=await _hidden_vacancies(db, current_user, entity.org_id),
     )
     response_data.update({
         "chats_count": 0,
@@ -614,6 +620,7 @@ async def get_entity(
     card = entity_base_dict(
         entity, department_name=department_name,
         scope_ids=await notes_scope_for_entity(entity.id, _scope_ids, db),
+        hidden_vacancy_ids=await _hidden_vacancies(db, current_user, entity.org_id),
     )
     return {
         **card,
@@ -837,6 +844,7 @@ async def update_entity(
         scope_ids=await notes_scope_for_entity(
             entity.id, await get_scope_vacancy_ids(current_user, db), db,
         ),
+        hidden_vacancy_ids=await _hidden_vacancies(db, current_user, entity.org_id),
     )
 
     # Invalidate scoring cache if relevant fields changed

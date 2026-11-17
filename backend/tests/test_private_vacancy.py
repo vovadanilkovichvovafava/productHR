@@ -104,3 +104,23 @@ async def test_own_candidates_keep_hidden_vacancy_visible(client, db_session, se
                                       stage_order=2, created_by=regular_user.id, applied_at=datetime.utcnow()))
     await db_session.commit()
     assert (await client.get(f"/api/vacancies/{hidden.id}", headers=_h(regular_user))).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_hr_label_of_hidden_vacancy_not_shown_to_outsider(client, db_session, setup, regular_user, second_user):
+    """Метка «HR: Имя · Вакансия» тоже выдаёт название скрытой воронки."""
+    from api.services.hr_tags import sync_for_entity
+    hidden, _, e = setup
+    await sync_for_entity(db_session, e.id)
+    await db_session.commit()
+
+    def titles(extra):
+        return {t.get("vacancy_title") for t in (extra or {}).get("system_hr_tags") or []}
+
+    own = (await client.get(f"/api/entities/{e.id}", headers=_h(second_user))).json()
+    assert "Скрытая Петра" in titles(own["extra_data"])
+    other = (await client.get(f"/api/entities/{e.id}", headers=_h(regular_user))).json()
+    assert "Скрытая Петра" not in titles(other["extra_data"])
+    board = (await client.get("/api/candidates/kanban", headers=_h(regular_user))).json()
+    card = next(c for col in board["columns"] for c in col["cards"] if c["id"] == e.id)
+    assert "Скрытая Петра" not in titles(card.get("extra_data"))

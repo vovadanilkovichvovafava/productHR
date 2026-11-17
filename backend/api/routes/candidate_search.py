@@ -1104,12 +1104,12 @@ async def get_candidates_kanban(
         except Exception as exc:
             logger.warning(f"Photo file fallback query failed (non-critical): {exc}")
 
+    # «Скрыта от коллег» (17.11.2026): чужая скрытая воронка не светится в
+    # строке списка ни чипом этапа, ни названием, ни меткой «HR: … · Вакансия».
+    from api.services.private_vacancy import hidden_vacancy_ids, strip_hidden
+    _hidden_vac = await hidden_vacancy_ids(db, current_user, org_id)
     if entity_ids:
         try:
-            # «Скрыта от коллег» (17.11.2026): чужая скрытая воронка не светится
-            # в строке списка ни чипом этапа, ни названием.
-            from api.services.private_vacancy import hidden_vacancy_ids
-            _hidden_vac = await hidden_vacancy_ids(db, current_user, org_id)
             va_result = await db.execute(
                 select(
                     VacancyApplication.entity_id,
@@ -1258,7 +1258,9 @@ async def get_candidates_kanban(
                 funnels=funnels_map.get(e.id, []),
                 rejection_reason=rejection_map.get(e.id),
                 is_archived=bool(getattr(e, "is_archived", False)),
-                extra_data=_list_extra(filter_extra_for_scope(ed, _notes_scope.get(e.id, scope_ids))) if ed else None,
+                extra_data=_list_extra(strip_hidden(
+                    filter_extra_for_scope(ed, _notes_scope.get(e.id, scope_ids)), _hidden_vac,
+                )) if ed else None,
                 version=getattr(e, "version", None) or 1,
                 headline_tags=headline_map.get(e.id, []),
                 prior_rejection=prior_map.get(e.id),

@@ -28,8 +28,13 @@ def entity_base_dict(
     *,
     department_name: Optional[str],
     scope_ids: Optional[Iterable[int]] = None,
+    hidden_vacancy_ids: Iterable[int] = (),
 ) -> Dict[str, Any]:
-    """Поля карточки, общие для всех ответов. extra_data — уже со скоупом."""
+    """Поля карточки, общие для всех ответов. extra_data — уже со скоупом.
+
+    hidden_vacancy_ids — «Скрыта от коллег» (services/private_vacancy.py): их
+    метки «HR: Имя · Вакансия» и комментарии этому человеку не отдаём."""
+    from .private_vacancy import strip_hidden
     from .vacancy_scope import filter_extra_for_scope
 
     return {
@@ -46,7 +51,9 @@ def entity_base_dict(
         "company": entity.company,
         "position": entity.position,
         "tags": entity.tags or [],
-        "extra_data": filter_extra_for_scope(entity.extra_data or {}, scope_ids) or {},
+        "extra_data": strip_hidden(
+            filter_extra_for_scope(entity.extra_data or {}, scope_ids) or {}, hidden_vacancy_ids,
+        ) or {},
         "created_by": entity.created_by,
         "department_id": entity.department_id,
         "department_name": department_name,

@@ -94,3 +94,25 @@ async def can_see_vacancy(db: AsyncSession, vacancy, user: User) -> bool:
     if _is_participant(vacancy, user.id, ()):
         return True
     return vacancy.id in await _own_vacancy_ids(db, user.id)
+
+
+def strip_hidden(extra, hidden_ids) -> dict | None:
+    """Убрать из extra_data карточки следы скрытых от человека воронок: метки
+    «HR: Имя · Вакансия» (system_hr_tags) и комментарии, привязанные к воронке."""
+    if not hidden_ids or not isinstance(extra, dict):
+        return extra
+    hidden = {int(v) for v in hidden_ids}
+
+    def _keep(item) -> bool:
+        if not isinstance(item, dict) or item.get("vacancy_id") is None:
+            return True
+        try:
+            return int(item["vacancy_id"]) not in hidden
+        except (TypeError, ValueError):
+            return True
+
+    out = dict(extra)
+    for key in ("system_hr_tags", "notes"):
+        if isinstance(out.get(key), list):
+            out[key] = [x for x in out[key] if _keep(x)]
+    return out
