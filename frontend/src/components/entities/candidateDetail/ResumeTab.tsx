@@ -916,18 +916,13 @@ const ResumeTab = memo(function ResumeTab({
             title={pdf.file_name}
             className="w-full min-h-[760px] rounded-lg border border-[color:var(--hf-white-alpha-06)] bg-white"
           />
-          <div className="flex items-center justify-between gap-2 px-1 text-xs text-[var(--hf-dark-500)]">
-            <span className="truncate">
-              {pdf.file_name} · {(pdf.file_size / 1024).toFixed(0)} КБ
-              {pdf.created_at ? ` · загружено ${formatDateFull(pdf.created_at)}` : ""}
-            </span>
-            <button
-              onClick={() => handleDownload(pdf)}
-              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--hf-accent-bg-20)] text-[var(--hf-accent)] rounded-lg hover:bg-[var(--hf-accent-bg-30)] transition-colors"
-            >
-              <Download className="w-3.5 h-3.5" /> Скачать
-            </button>
-          </div>
+          {/* Кнопка скачивания — одна, «Скачать PDF» над файлом (тикет Маши
+              16.11.2026: «нужна одна кнопка выгрузки, непонятно, кто за что
+              отвечает» — нижняя «Скачать» делала то же самое). */}
+          <p className="truncate px-1 text-xs text-[var(--hf-dark-500)]">
+            {pdf.file_name} · {(pdf.file_size / 1024).toFixed(0)} КБ
+            {pdf.created_at ? ` · загружено ${formatDateFull(pdf.created_at)}` : ""}
+          </p>
         </div>
       ) : (
         <div className="bg-[var(--hf-white-alpha-02)] border border-[color:var(--hf-white-alpha-06)] rounded-lg p-8 text-center text-[var(--hf-dark-500)] text-sm">
