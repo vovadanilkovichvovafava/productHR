@@ -689,6 +689,17 @@ async def init_database():
     except Exception as e:
         logger.warning(f"HR feed cleanup failed (non-critical): {e}")
 
+    # Задвоенные «Мы уволили» в лентах — до 18.11.2026 увольнение из карточки
+    # писало и перевод заявки, и запись-комментарий
+    # (services/departure_note_dedup.py). Одноразово.
+    try:
+        from ..services.departure_note_dedup import dedup_departure_notes_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await dedup_departure_notes_once(session)
+    except Exception as e:
+        logger.warning(f"Departure note dedup failed (non-critical): {e}")
+
     # Живые заявки у тех, кого уволили до 20.10.2026: увольнение тогда не
     # закрывало воронки (11.11.2026, services/departed_apps_sync.py). Одноразово.
     try:
