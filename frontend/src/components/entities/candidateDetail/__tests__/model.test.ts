@@ -55,6 +55,12 @@ describe("isRejectedStage", () => {
     expect(isRejectedStage("fired")).toBe(true);
     expect(isRejectedStage("archived")).toBe(true);
   });
+  it("«Мы уволили» / «Сам уволился» / «Отозван» — серые, как отказ (18.11.2026)", () => {
+    expect(isRejectedStage("dismissed")).toBe(true);
+    expect(isRejectedStage("quit")).toBe(true);
+    expect(isRejectedStage("withdrawn")).toBe(true);
+    expect(isRejectedStage("transferred")).toBe(false);
+  });
   it("false for active stages", () => {
     expect(isRejectedStage("applied")).toBe(false);
     expect(isRejectedStage("interview")).toBe(false);
