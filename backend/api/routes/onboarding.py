@@ -30,6 +30,7 @@ from ..onboarding.models import (
 )
 from ..onboarding.runtime import enabled, get_service
 from ..onboarding.surveys import SURVEYS
+from ..onboarding.wallet_check import wallet_problem
 from ..services.auth import get_current_user, get_user_org, get_user_org_role
 from ..services.similarity import first_real_telegram
 from ..services.vacancy_scope import ensure_entity_visible
@@ -602,6 +603,11 @@ async def inbound(request: Request, db: AsyncSession = Depends(get_db)):
         raise HTTPException(422, exc.errors(include_url=False, include_context=False, include_input=False))
     if data.wallet is None and not data.answers:
         raise HTTPException(422, "Нужен wallet или answers")
+    problem = wallet_problem(data.wallet) if data.wallet is not None else None
+    if problem:
+        # Ничего не сохраняем (и ответы тоже): HR-профиль переспрашивает кандидата и шлёт заново
+        logger.info("ONBOARDING inbound wallet_invalid entity=%s", data.id)
+        raise HTTPException(422, {"code": "wallet_invalid", "message": problem})
 
     handoff = await db.scalar(
         select(Handoff).where(Handoff.entity_id == data.id, Handoff.status != "baseline")

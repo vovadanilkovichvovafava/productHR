@@ -1824,6 +1824,10 @@ invitations,org_units}.py`, `entities/hire.py`. Ревью нашло захва
   ответы в `onboarding_handoff_answers` (тот же опрос+вопрос — перезапись). Привязка к
   карточке, не к `OnboardingCase` — при передаче карточки бота нет. Кошельки — в общем
   `/api/onboarding/wallets` для бухгалтерии, ответы — `GET /api/onboarding/entities/{id}/answers`.
+  **Битый адрес не сохраняется** (тест 17.11.2026: HR-профиль принял TRON-адрес на 3 символа
+  короче): `onboarding/wallet_check.py` ловит TRON (34 знака + base58check) и EVM (0x + 40 hex);
+  адрес неизвестного вида (TON и др.) проходит. Ошибка — 422 `{"code": "wallet_invalid",
+  "message": …}`, ответы из того же запроса тоже не пишутся. Маркер `ONBOARDING inbound wallet_invalid`.
 - **Аккаунты по этапам** (админ 10.11.2026: «два на практику; онбординг и испытательный»; две
   переменные): `ONBOARDING_HANDOFF_PREBOARDING_ACCOUNTS` — практика, нагрузка делится, человек
   закрепляется (`account_id`); пусто — общий `ONBOARDING_HANDOFF_ACCOUNTS`.

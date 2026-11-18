@@ -758,6 +758,44 @@ async def test_inbound_rejects_bad_secret_and_unknown_id(client, handoff, inboun
     assert (await client.post("/api/onboarding/inbound", content=body, headers=headers)).status_code == 422
 
 
+GOOD_TRON = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+
+
+def test_wallet_problem_catches_broken_addresses():
+    from api.onboarding.wallet_check import wallet_problem
+
+    # нормальные и неизвестного вида — пропускаем
+    assert wallet_problem(f"TRON (TRC20) {GOOD_TRON}") is None
+    assert wallet_problem("TRC20: TReturned") is None
+    assert wallet_problem("ERC20 0x" + "a1" * 20) is None
+    assert wallet_problem("TON UQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG") is None
+    # тест 17.11.2026: адрес на 3 символа короче
+    assert "31 знаков" in wallet_problem(f"мой кошелёк {GOOD_TRON[:31]} сеть trc20")
+    # опечатка в одном символе — длина верная, контрольная сумма нет
+    assert "контрольная сумма" in wallet_problem(GOOD_TRON[:-1] + "T")
+    assert "39" in wallet_problem("BEP20 0x" + "a" * 39)
+
+
+async def test_inbound_rejects_broken_wallet_and_saves_nothing(client, handoff, inbound_on, db_session, org_owner,
+                                                               admin_token, organization, admin_user):
+    entity = await _handed_over(handoff, db_session, organization, admin_user)
+    body, headers = _signed({
+        "id": entity.id, "wallet": GOOD_TRON[:31],
+        "answers": [{"survey": "script", "question": "Ответ на скрипт", "answer": "Прочитал"}],
+    })
+    r = await client.post("/api/onboarding/inbound", content=body, headers=headers)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["code"] == "wallet_invalid"
+    assert "скопировать" in r.json()["detail"]["message"]
+
+    data = (await client.get(f"/api/onboarding/entities/{entity.id}/answers",
+                             headers=auth_headers(admin_token))).json()
+    assert data["has_wallet"] is False and data["answers"] == []
+
+    body, headers = _signed({"id": entity.id, "wallet": f"TRC20 {GOOD_TRON}"})
+    assert (await client.post("/api/onboarding/inbound", content=body, headers=headers)).status_code == 200
+
+
 async def test_inbound_off_without_secret(client, monkeypatch):
     monkeypatch.setattr("api.config.settings.onboarding_inbound_secret", "")
     r = await client.post("/api/onboarding/inbound", json={"id": 1, "wallet": "x"},
