@@ -1,6 +1,7 @@
 import { parseServerDate } from "@/utils/date";
 import type { ActivityEvent } from "@/services/api/entities";
 import type { ContainerNote } from "./model";
+import { DEPARTED_LABELS } from "@/constants/hrStages";
 
 // Лента карточки воронки (CandidateVacancyCard): какие строки и в каком порядке
 // — вынесено из карточки (20.10.2026) чистыми функциями, под тестами
@@ -63,6 +64,26 @@ export interface TimelineSource {
   resolveNoteVacancyLabel?: (vacancyId?: number | null) => string | null;
 }
 
+/**
+ * Увольнение («Мы уволили» / «Сам уволился») закрывает заявки «Отказом» с
+ * комментарием «Мы уволили — причина» (services/stage_change.depart_entity,
+ * доска «Штат»). В ленте это ОДНА строка «Мы уволили — причина», а не
+ * «Отказ — Мы уволили — причина» (Мария, 18.11.2026: «получила 2 статуса»).
+ */
+export function departedTitle(
+  toStage: string | null | undefined,
+  comment: string | null | undefined,
+): { title: string; body?: string } | null {
+  if (toStage !== "rejected" || !comment) return null;
+  for (const label of Object.values(DEPARTED_LABELS)) {
+    if (comment === label) return { title: label };
+    if (comment.startsWith(`${label} — `)) {
+      return { title: label, body: comment.slice(label.length + 3).trim() || undefined };
+    }
+  }
+  return null;
+}
+
 export function buildTimelineRows({
   notes, events, snapshot, getStageLabel, addedAt, createdAt, recruiterName, resolveNoteVacancyLabel,
 }: TimelineSource): TimelineRow[] {
@@ -106,7 +127,8 @@ export function buildTimelineRows({
 
   const eventRows = (!snapshot && Array.isArray(events) ? events : []).map(
     (ev) => {
-      const to = getStageLabel(ev.to_stage);
+      const departed = departedTitle(ev.to_stage, ev.comment);
+      const to = departed?.title ?? getStageLabel(ev.to_stage);
       const from = ev.from_stage ? getStageLabel(ev.from_stage) : null;
       return {
         date: ev.created_at || undefined,
@@ -116,7 +138,7 @@ export function buildTimelineRows({
         // спасает, когда соседнюю запись удалили и не понять, откуда пришёл.
         title: to,
         fromLabel: from || undefined,
-        body: ev.comment || undefined,
+        body: departed ? departed.body : ev.comment || undefined,
         author: ev.changed_by_name || undefined,
         historyId: ev.id as number | undefined,
         reactionKey: `e:${ev.id}`,

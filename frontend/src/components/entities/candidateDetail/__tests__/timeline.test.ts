@@ -92,3 +92,22 @@ describe("pinTimelineRow", () => {
     expect(pinTimelineRow(rows, "zzz")).toBe(rows);
   });
 });
+
+describe("увольнение — одна строка «Мы уволили — причина» (Мария, 18.11.2026)", () => {
+  const ev = (comment: string | null, to = "rejected") =>
+    ({ id: 7, to_stage: to, from_stage: "probation", comment, created_at: "2026-11-18T13:12:00" }) as unknown as ActivityEvent;
+
+  it("«Отказ» с комментарием «Мы уволили — …» показывается как «Мы уволили», причина — текстом", () => {
+    const [row] = buildTimelineRows({ ...base, events: [ev("Мы уволили — темп храмает")] });
+    expect(row).toMatchObject({ title: "Мы уволили", body: "темп храмает", fromLabel: "Практика", historyId: 7 });
+  });
+
+  it("без причины — только статус; «Сам уволился» тоже", () => {
+    expect(buildTimelineRows({ ...base, events: [ev("Сам уволился")] })[0]).toMatchObject({ title: "Сам уволился", body: undefined });
+  });
+
+  it("обычный отказ и упоминание в середине текста не трогаем", () => {
+    expect(buildTimelineRows({ ...base, events: [ev("не вышел, мы уволили бы")] })[0]).toMatchObject({ title: "rejected", body: "не вышел, мы уволили бы" });
+    expect(buildTimelineRows({ ...base, events: [ev("Мы уволили — x", "probation")] })[0]).toMatchObject({ title: "Практика" });
+  });
+});

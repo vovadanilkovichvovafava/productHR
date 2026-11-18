@@ -407,9 +407,21 @@ async def depart_entity(
         db, entity, new_status, changed_by=changed_by,
         comment=f"{label} — {text}" if text else label,
     )
-    note = await change_status_without_application(
-        db, entity, new_status, changed_by=changed_by, comment=comment, stage_label=label,
-    )
+    note = None
+    if moves:
+        # Одно действие — одна строка в ленте (Мария, 18.11.2026: «поменяла
+        # статус на „мы уволили“, а в итоге получила 2 статуса»). Перевод заявки
+        # в «Отказ» с комментарием «Мы уволили — причина» и есть эта строка, её
+        # корзина откатывает и заявку, и статус. Отдельную запись-комментарий
+        # пишем, только если воронок не было — так же делает доска «Штат».
+        entity.status = new_status
+        entity.updated_at = datetime.utcnow()
+        if entity.is_archived:
+            entity.is_archived = False
+    else:
+        note = await change_status_without_application(
+            db, entity, new_status, changed_by=changed_by, comment=comment, stage_label=label,
+        )
     # После закрытия заявок: их «Отказ» записал в карточку «Мы уволили — …»,
     # а на доске должна стоять сама причина.
     remember_departure_reason(entity, comment)
