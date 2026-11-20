@@ -429,12 +429,16 @@ class HandoffService:
             # «допишите …» — оно удаляется, «передан» приходит в тот же чат.
             chat_id = await self._drop_notice(row) if row.notice_message_id else None
             text = self._confirm_text(entity, event)
+            # Прод 20.11.2026: в режиме бота HR-профиля нет — «HR-профилю передано» вводило в заблуждение.
+            to_bot = self.settings.handoff_to_bot
             if moved_from:
+                done = "напоминания бота перенесены" if to_bot else "HR-профилю передано"
                 text = (f"{self._name_html(entity)}: дата практики изменена "
-                        f"({moved_from.strftime('%d.%m.%Y')} → {event['practice_start']}), HR-профилю передано.")
+                        f"({moved_from.strftime('%d.%m.%Y')} → {event['practice_start']}), {done}.")
             elif auto_date:
+                who = "бот перенесёт напоминания" if to_bot else "HR-профиль получит новую"
                 text += (" Дата выхода на практику не стояла — поставлена следующим рабочим днём на "
-                         "«Штате». Если практика в другой день, поправьте дату: HR-профиль получит новую.")
+                         f"«Штате». Если практика в другой день, поправьте дату: {who}.")
             await self._confirm_hr(entity, text, chat_id)
         return 1
 

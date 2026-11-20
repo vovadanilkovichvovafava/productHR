@@ -137,6 +137,19 @@ async def test_practice_date_moved_reschedules(setup, db_session, organization, 
             select(BotJob).where(BotJob.case_id == case.id, BotJob.status == "pending", BotJob.kind == "report_check")))
     assert looms == ["2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26"]
     assert "invite_check" not in await _jobs(setup, case.id, "cancelled")
+    # прод 20.11.2026: в режиме бота HR-профиля нет — не «HR-профилю передано»
+    moved = setup.messenger.to(HR_TG)[-1]
+    assert "дата практики изменена" in moved and "напоминания бота перенесены" in moved
+    assert "HR-профил" not in moved
+
+
+async def test_practice_without_date_text_in_bot_mode(setup, db_session, organization, admin_user):
+    """Прод 20.11.2026: «поправьте дату: HR-профиль получит новую» — в режиме бота профиля нет."""
+    await _person(db_session, organization, admin_user, "Без Даты", practice=None)
+    await setup.handoff.tick()
+    [note] = setup.messenger.to(HR_TG)
+    assert "поставлена следующим рабочим днём" in note and "бот перенесёт напоминания" in note
+    assert "HR-профил" not in note
 
 
 def json_day(job):
