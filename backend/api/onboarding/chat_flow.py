@@ -119,8 +119,9 @@ class ChatFlowMixin:
         log.info("ONBOARDING chat bound case=%s chat=%s %s", case_id, chat_id, "dept" if dept else "practice")
         ctx = self._ctx(case)
         if dept:
-            text, buttons = texts.DEPT_WELCOME.format(**ctx, mention=self._mention(case),
-                                                      first_day=_ddmm(case.department_start_date)), None
+            text = texts.dept_welcome(self._mention(case), case.department or "", _ddmm(case.department_start_date),
+                                      _ddmm(case.probation_end_date), case.lead_name or "")
+            buttons = None
         else:
             text, buttons = texts.WORK_CHAT_HELLO.format(**ctx, mention=self._mention(case)), texts.START_BUTTON
             if case.status == CaseStatus.practice_running.value:
@@ -314,7 +315,8 @@ class ChatFlowMixin:
         first_day = _ddmm(case.department_start_date)
         if case.lead_tg_id:
             try:
-                await self.messenger.send(case.lead_tg_id, texts.LEAD_NEW_HIRE.format(**ctx, first_day=first_day))
+                await self.messenger.send(case.lead_tg_id, texts.LEAD_NEW_HIRE.format(
+                    **ctx, first_day=first_day, probation_end_full=_ddmm(case.probation_end_date)))
             except SendError as exc:
                 await self._signal(case, "send_failed", what="лиду о новом сотруднике", error=str(exc))
         else:

@@ -334,3 +334,62 @@ async def test_telegram_glue_group_text_lead_and_url_buttons(env, monkeypatch):
     markup = bot.send_message.await_args.kwargs["reply_markup"]
     assert markup.inline_keyboard[0][0].url == "https://t.me/b?start=obs_p1"
     assert markup.inline_keyboard[1][0].callback_data == "pstart"
+
+
+# ------------------------------------------------------------------ найдено на проде 20.11.2026
+
+
+def test_texts_without_mentor_and_lead():
+    from api.onboarding import texts
+
+    rules = texts.practice_start({"practice_lead": "", "hrd": "", "platform_invite_url": ""})
+    assert "руководителем практики руководитель" not in rules and "Контакты" not in rules
+    assert "Это чат для связи с руководителем практики." in rules
+    with_lead = texts.practice_start({"practice_lead": "Егор", "hrd": "Настя", "platform_invite_url": ""})
+    assert "Контакты: руководитель практики Егор (направление и фидбек), HRD Настя (орг. вопросы)." in with_lead
+    welcome = texts.dept_welcome("@ivan", "HR team", "20.11.2026", "20.02.2027", "")
+    assert "лид —" not in welcome and "до 20.02.2027." in welcome
+    assert "Твой лид — Марк." in texts.dept_welcome("@ivan", "SEO", "20.11.2026", "20.02.2027", "Марк")
+
+
+async def test_candidate_unreachable_hr_told_once(env):
+    """Не нажимал «Старт», бота нет в его чате — поздравление некуда; HR узнаёт один раз."""
+    case = await _practice(env)
+    await _transfer(env)
+    env.clock.now = datetime(2026, 11, 24, 7, 1)  # первый день в отделе: приветствие 10:00
+    await env.bot.run_due_jobs()
+    async with env.sessions() as s:
+        told = list(await s.scalars(select(Signal).where(Signal.case_id == case.id, Signal.kind == "no_contact")))
+    assert len(told) == 1 and "Добавь бота в рабочий чат" in told[0].text
+
+
+async def test_bot_mode_no_duplicate_hr_first_day(async_engine, db_session, organization, admin_user):
+    from api.onboarding.handoff import HandoffService
+    from api.onboarding.models import Handoff
+
+    admin_user.telegram_id = HR_TG
+    await db_session.commit()
+    sessions = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    messenger, clock = FakeMessenger(), Clock(datetime(2026, 11, 18, 6, 0))
+    settings = Settings(handoff_to_bot=True, bot_username="Staffwise_bot")
+    bot = OnboardingService(sessions, messenger, settings, None, clock)
+
+    async def sink():
+        return bot
+
+    handoff = HandoffService(sessions, messenger, settings, clock, bot_sink=sink)
+    await handoff.tick()  # baseline по пустой базе
+    entity = Entity(org_id=organization.id, created_by=admin_user.id, name="Петров Иван", type=EntityType.candidate,
+                    status=EntityStatus.transferred, telegram_usernames=["ivan_p"], created_at=datetime.utcnow(),
+                    extra_data={"department_transfer_date": "2026-11-18", "practice_start_date": "2026-11-17"})
+    db_session.add(entity)
+    await db_session.commit()
+    await handoff.tick()
+    async with sessions() as s:
+        row = await s.scalar(select(Handoff).where(Handoff.entity_id == entity.id))
+    assert row.transfer_sent_at is not None  # переход ушёл боту
+    clock.now = datetime(2026, 11, 18, 7, 30)  # 10:30 МСК, первый день — передача шла бы с «day1»
+    for _ in range(3):
+        await handoff.tick()
+    first_day = [t for t in messenger.texts(HR_TG) if "Спроси лида: установлена ли связь" in t]
+    assert first_day == []  # в режиме бота «первый рабочий день» шлёт только бот, без дубля

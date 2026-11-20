@@ -696,6 +696,14 @@ class OnboardingService(ChatFlowMixin):
                 error = exc
         if error is not None:  # ТЗ, вопрос 3: HR должна видеть ошибку, а не тихий сбой
             await self._signal(case, "send_failed", what=what, error=str(error))
+        else:
+            # Прод 20.11.2026: кандидат не нажимал «Старт» и бота нет в его чате — писать некуда.
+            # Молча терять поздравление нельзя: один раз говорим HR, куда добавить бота.
+            async with self.sessions() as s:
+                told = await s.scalar(select(Signal.id).where(Signal.case_id == case.id,
+                                                              Signal.kind == "no_contact").limit(1))
+            if told is None:
+                await self._signal(case, "no_contact")
         return False
 
     async def _signal(self, case: OnboardingCase, kind: str, **extra: str) -> None:

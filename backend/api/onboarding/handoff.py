@@ -224,7 +224,10 @@ class HandoffService:
         await self._baseline_once()
         await self._pick_up()
         sent = await self._process()
-        await self._hr_reminders()
+        if not self.settings.handoff_to_bot:
+            # Свой бот сам шлёт HR напоминания первого дня и недели (onboarding_jobs) — прод
+            # 20.11.2026: в режиме бота «первый рабочий день» приходило HR дважды
+            await self._hr_reminders()
         return sent
 
     # ------------------------------------------------------------- этапы прохода
