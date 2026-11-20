@@ -13,7 +13,7 @@ from api.models.database import BoardDepartment, Entity, EntityStatus, EntityTyp
 from api.onboarding.config import Settings
 from api.onboarding.messenger import SendError
 from api.onboarding.models import BotJob, CaseStatus, DepartmentLead, OnboardingCase, Signal
-from api.onboarding.service import OnboardingService
+from api.onboarding.service import OnboardingService, first_name_of
 from api.services.auth import hash_password
 
 HR_TG, MENTOR_TG, LEAD_TG, CANDIDATE_TG, STRANGER_TG = 7001, 7002, 7003, 7100, 7999
@@ -393,3 +393,77 @@ async def test_bot_mode_no_duplicate_hr_first_day(async_engine, db_session, orga
         await handoff.tick()
     first_day = [t for t in messenger.texts(HR_TG) if "Спроси лида: установлена ли связь" in t]
     assert first_day == []  # в режиме бота «первый рабочий день» шлёт только бот, без дубля
+
+
+async def test_title_picks_most_matching_name(env):
+    """Прод 20.11.2026: общее слово у двух кандидатов — выбираем того, у кого совпало больше слов."""
+    first = await _practice(env, 1, name="Тестбот Повтор", tg="a1")
+    await _practice(env, 2, name="Тестбот Безчата", tg="a2")
+    assert await env.bot.handle_bot_added(WORK_CHAT, HR_TG, "Практика Тестбот Повтор")
+    assert (await _fresh(env, first.id)).work_chat_id == WORK_CHAT
+    assert not any(m.buttons and m.buttons[0][0][1].startswith("pchat:") for m in env.messenger.to(WORK_CHAT))
+
+
+async def test_legacy_evening_report_silent_in_onboarding_chat(env, monkeypatch):
+    """Прод 20.11.2026: на #вечерний_отчёт в чате практики отвечал и старый «вечерний отчёт»."""
+    from unittest.mock import AsyncMock
+
+    import api.bot as bot_module
+    from api.onboarding import runtime
+
+    await _practice(env)
+    await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
+    runtime.set_service(env.bot)
+    try:
+        summarize = AsyncMock()
+        monkeypatch.setattr("api.services.evening_report.summarize_report", summarize)
+        message = SimpleNamespace(chat=SimpleNamespace(id=WORK_CHAT), reply=AsyncMock(),
+                                  from_user=SimpleNamespace(id=CANDIDATE_TG))
+        handled = await bot_module._handle_evening_report(
+            None, message, "text", "#вечерний_отчёт сделал парсер и разобрал задачу", env.org.id)
+        assert handled is True
+        message.reply.assert_not_called()
+        summarize.assert_not_called()
+    finally:
+        runtime.set_service(None)
+
+
+async def test_start_in_bound_chat_goes_to_its_candidate(env):
+    """Прод 20.11.2026: у двух карточек один ник — «Старт» в чате первой засчитывался второй."""
+    first = await _practice(env, 1, name="Тестбот Повтор", tg="same_nick")
+    second = await _practice(env, 2, name="Тестбот Безчата", tg="same_nick")
+    assert (await env.bot.bind_chat(WORK_CHAT, first.id, HR_TG)).startswith("Готово")
+    assert await env.bot.handle_practice_start(WORK_CHAT, CANDIDATE_TG, "same_nick") is None
+    assert (await _fresh(env, first.id)).candidate_tg_id == CANDIDATE_TG
+    assert (await _fresh(env, second.id)).candidate_tg_id is None
+    assert (await _fresh(env, second.id)).work_chat_id is None
+
+
+def test_first_name_form_order():
+    assert first_name_of("Тестбот Повтор") == "Повтор"
+    assert first_name_of("Захаров Илья") == "Илья"
+    assert first_name_of("Владимир Шинкаренко") == "Владимир"
+    assert first_name_of("Яковлева Злата") == "Злата"
+
+
+async def test_no_wallet_request_in_bot_mode(async_engine, db_session, admin_user, organization, org_owner):
+    from cryptography.fernet import Fernet
+
+    from api.onboarding.crypto import WalletCipher
+
+    sessions = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    messenger, clock = FakeMessenger(), Clock(datetime(2026, 11, 18, 9, 0))
+    bot = OnboardingService(sessions, messenger, Settings(handoff_to_bot=True, bot_username="b", practice_days=4),
+                            WalletCipher(Fernet.generate_key().decode()), clock)
+    env = SimpleNamespace(bot=bot, org=organization, user=admin_user, db=db_session, entities={},
+                          sessions=sessions)
+    case = await _practice(env)
+    async with sessions() as s:
+        fresh = await s.get(OnboardingCase, case.id)
+        fresh.candidate_tg_id = CANDIDATE_TG
+        await s.commit()
+    await _transfer(env)
+    clock.now = datetime(2026, 11, 24, 7, 1)
+    await bot.run_due_jobs()
+    welcome = [t for t in messenger.texts(CANDIDATE_TG) if "добро пожаловать в команду" in t]
+    assert welcome and "кошел" not in welcome[0] and "  " not in welcome[0]

@@ -82,7 +82,11 @@ class ChatFlowMixin:
         if not options:
             return False
         if len(options) > 1 and title:
-            by_title = [c for c in options if _name_in_title(c, title)]
+            # Прод 20.11.2026: «Практика Тестбот Повтор» при кандидатах «Тестбот Повтор» и «Тестбот
+            # Безчата» — общее слово есть у обоих, решает число совпавших слов
+            scores = {c.id: _title_score(c, title) for c in options}
+            best = max(scores.values())
+            by_title = [c for c in options if best and scores[c.id] == best]
             if len(by_title) == 1:
                 options = by_title
         if len(options) == 1:
@@ -163,14 +167,18 @@ class ChatFlowMixin:
     async def handle_practice_start(self, chat_id: int, user_id: int, username: str | None) -> str | None:
         """Кандидат нажал «Старт» в рабочем чате → правила и инвайт (ТЗ 3.1). Возвращает текст алерта."""
         async with self.sessions() as s:
-            case = await self._practice_case(s, user_id, username)
-            if case is None:
-                # Ник в карточке с ошибкой или его нет: «Старт» в привязанном чате нажал не сотрудник,
-                # а кандидата бот ещё не знает — это он.
-                bound = await self._case_for_chat(s, chat_id)
-                if (bound is not None and bound.status in PRACTICE_STATUSES and bound.candidate_tg_id is None
-                        and not await self._is_staff(s, user_id)):
-                    case = bound
+            bound = await self._case_for_chat(s, chat_id)
+            if bound is not None:
+                # Чат уже привязан — «Старт» относится к его кандидату. Прод 20.11.2026: у двух карточек
+                # один ник, и «Старт» в чате одной засчитывался другой (более новой).
+                case = None
+                if bound.status in PRACTICE_STATUSES:
+                    if _is_candidate(bound, user_id, username):
+                        case = bound
+                    elif bound.candidate_tg_id is None and not await self._is_staff(s, user_id):
+                        case = bound  # ник в карточке с ошибкой: нажал не сотрудник — это кандидат
+            else:
+                case = await self._practice_case(s, user_id, username)
             if case is None:
                 return texts.START_NOT_CANDIDATE
             if case.status != CaseStatus.practice_assigned.value:
@@ -552,9 +560,10 @@ def _is_candidate(case: OnboardingCase, user_id: int, username: str | None) -> b
     return bool(username) and _norm(username) == case.candidate_tg_username
 
 
-def _name_in_title(case: OnboardingCase, title: str) -> bool:
+def _title_score(case: OnboardingCase, title: str) -> int:
+    """Сколько слов ФИО кандидата есть в названии чата."""
     low = title.lower()
-    return any(len(w) > 2 and w.lower() in low for w in (case.full_name or "").split())
+    return sum(1 for w in (case.full_name or "").split() if len(w) > 2 and w.lower() in low)
 
 
 def _ddmm(day: date | None) -> str:

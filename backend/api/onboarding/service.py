@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta, timezone
@@ -60,8 +61,9 @@ _SURNAME_ENDINGS = ("ова", "ева", "ина", "ына", "ская", "цка�
 
 
 def first_name_of(full_name: str) -> str:
-    """Имя для обращения из ФИО карточки. В АТС порядок «Фамилия Имя Отчество», но бывает и
-    «Имя Фамилия»: из двух слов берём то, что не похоже на фамилию."""
+    """Имя для обращения из ФИО карточки. Форма АТС пишет «Фамилия Имя Отчество», но руками
+    вписывают и «Имя Фамилия». Из двух слов — второе (порядок формы), если только оно не похоже
+    на фамилию, а первое — нет (прод 20.11.2026: «Тестбот Повтор» звали «Тестбот»)."""
     words = (full_name or "").split()
     if not words:
         return ""
@@ -69,8 +71,9 @@ def first_name_of(full_name: str) -> str:
         return words[1]
     if len(words) == 2:
         first, second = words
-        if first.lower().endswith(_SURNAME_ENDINGS) and not second.lower().endswith(_SURNAME_ENDINGS):
-            return second
+        if second.lower().endswith(_SURNAME_ENDINGS) and not first.lower().endswith(_SURNAME_ENDINGS):
+            return first
+        return second
     return words[0]
 
 
@@ -603,7 +606,8 @@ class OnboardingService(ChatFlowMixin):
         if case.status not in DEPARTMENT_STATUSES:
             return
         async with self.sessions() as s:
-            no_wallet = (self.cipher is not None
+            # Мит 19.11.2026: «про кошелёк вообще не будем» — в режиме бота по статусу не просим
+            no_wallet = (self.cipher is not None and not self.settings.handoff_to_bot
                          and await s.scalar(select(Wallet.id).where(Wallet.case_id == case.id)) is None)
             if no_wallet:
                 fresh = await s.get(OnboardingCase, case.id)
@@ -678,6 +682,7 @@ class OnboardingService(ChatFlowMixin):
     # ------------------------------------------------- отправка и сигналы
 
     async def _send_candidate(self, case: OnboardingCase, text: str, buttons: Buttons | None, what: str) -> bool:
+        text = re.sub(r" {2,}", " ", text)  # пустой лид/руководитель в шаблоне — без двойных пробелов
         error: SendError | None = None
         if case.candidate_tg_id is not None:
             try:

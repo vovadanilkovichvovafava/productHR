@@ -3958,6 +3958,9 @@ async def _handle_evening_report(session, message, content_type: str, tagged_tex
         return False
     if not ev.has_report_tag(tagged_text or ""):
         return False
+    if await onboarding_tg.is_onboarding_chat(message.chat.id):
+        return True  # чат практики/отдела: отчёт уже принял бот онбординга — без второй выжимки
+
 
     body = ev.strip_tag(tagged_text or "")
     if len(body) < 15:

@@ -160,6 +160,21 @@ async def on_group_message(message: Message) -> None:
         logger.exception("ONBOARDING group message")
 
 
+async def is_onboarding_chat(chat_id: int) -> bool:
+    """Чат практики или отдела, который ведёт бот онбординга. Там вечерний отчёт принимает он, а не
+    старый «вечерний отчёт» сотрудников (services/evening_report.py) — прод 20.11.2026: на один
+    #вечерний_отчёт кандидат получал два ответа. Ошибки — False, чтобы не мешать сбору переписки."""
+    try:
+        service = await get_service()
+        if service is None:
+            return False
+        async with service.sessions() as s:
+            return await service._case_for_chat(s, chat_id) is not None
+    except Exception:
+        logger.exception("ONBOARDING is_onboarding_chat")
+        return False
+
+
 async def on_bot_added(chat_id: int, adder_tg_id: int | None, title: str = "") -> None:
     try:
         service = await get_service()
