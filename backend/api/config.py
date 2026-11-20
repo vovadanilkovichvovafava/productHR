@@ -66,7 +66,8 @@ class Settings(BaseSettings):
     # Запасной чат для сигналов HR (id группы), если личка HR недоступна; 0 — нет
     onboarding_hr_fallback_chat_id: int = Field(default=0, alias="ONBOARDING_HR_FALLBACK_CHAT_ID")
     onboarding_default_tz: str = Field(default="Europe/Moscow", alias="ONBOARDING_DEFAULT_TZ")
-    onboarding_practice_days: int = Field(default=7, alias="ONBOARDING_PRACTICE_DAYS")
+    # Мит 19.11.2026 (Маша, Владимир): практика длится максимум 4 дня
+    onboarding_practice_days: int = Field(default=4, alias="ONBOARDING_PRACTICE_DAYS")
     # Благодарность не прошедшим практику от бота (ТЗ 7.3 — пока не решено)
     onboarding_send_thanks_on_fail: bool = Field(default=False, alias="ONBOARDING_SEND_THANKS_ON_FAIL")
     # Не писать в выходные и вне 10:00–18:00 (кроме времени, которое ТЗ задаёт явно: Loom 20:00)
@@ -85,6 +86,19 @@ class Settings(BaseSettings):
     onboarding_handoff_webhook_secret: str = Field(default="", alias="ONBOARDING_HANDOFF_WEBHOOK_SECRET")
     # Пометки этапов (неделя, месяцы) — их система ведёт расписание сама, поэтому выключено
     onboarding_handoff_stages: bool = Field(default=False, alias="ONBOARDING_HANDOFF_STAGES")
+    # Мит 19.11.2026: ИИ-агентов на HR-аккаунтах отложили — события по статусу АТС получает НАШ
+    # бот (api/onboarding/service.py): практика, переход в отдел, стоп. Включено — аккаунты и
+    # вебхук выше не используются. Ключ кошельков в этом режиме не нужен.
+    onboarding_handoff_to_bot: bool = Field(default=False, alias="ONBOARDING_HANDOFF_TO_BOT")
+    # Вечерний отчёт в рабочем чате практики (мит 19.11.2026): не прислал к этому часу —
+    # напоминание в чат, ещё через ONBOARDING_REPORT_GRACE_MINUTES — тег ментора
+    onboarding_report_hour: int = Field(default=18, alias="ONBOARDING_REPORT_HOUR")
+    onboarding_report_grace_minutes: int = Field(default=60, alias="ONBOARDING_REPORT_GRACE_MINUTES")
+    # Общий чат HR (id группы, бот в ней): все события бота — практика, переходы, отчёты,
+    # блокеры, смены HR, запросы лидов. 0 — нет
+    onboarding_hr_events_chat_id: int = Field(default=0, alias="ONBOARDING_HR_EVENTS_CHAT_ID")
+    # Адрес productHR для ссылок на карточку в сообщениях бота
+    onboarding_app_url: str = Field(default="https://staffwise.club", alias="ONBOARDING_APP_URL")
     # Для первого сообщения практики: время старта (в productHR хранится только дата) и HRD
     onboarding_practice_start_time: str = Field(default="10:00", alias="ONBOARDING_PRACTICE_START_TIME")
     onboarding_hrd: str = Field(default="", alias="ONBOARDING_HRD")

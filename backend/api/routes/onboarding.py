@@ -347,7 +347,7 @@ async def read_wallet(
     if wallet is None:
         raise HTTPException(404, "Кандидат ещё не прислал кошелёк")
     logger.info("PII_ACCESS onboarding_wallet case=%s entity=%s by=%s", case.id, case.entity_id, current_user.id)
-    return {"wallet": service.cipher.decrypt(wallet.ciphertext), "saved_at": wallet.created_at}
+    return {"wallet": _cipher_or_503().decrypt(wallet.ciphertext), "saved_at": wallet.created_at}
 
 
 @router.get("/wallets")

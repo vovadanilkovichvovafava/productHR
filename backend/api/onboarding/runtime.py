@@ -1,6 +1,7 @@
 """Один OnboardingService на процесс и воркер расписания.
 
-Модуль выключен (get_service() → None), если нет TELEGRAM_BOT_TOKEN или ONBOARDING_WALLET_KEY.
+Модуль выключен (get_service() → None), если нет TELEGRAM_BOT_TOKEN или нет ни
+ONBOARDING_WALLET_KEY, ни ONBOARDING_HANDOFF_TO_BOT (события по статусу без кошельков, мит 19.11.2026).
 """
 
 import asyncio
@@ -21,14 +22,16 @@ _lock = asyncio.Lock()
 def enabled() -> bool:
     from api.config import settings
 
-    return bool(settings.telegram_bot_token and settings.onboarding_wallet_key)
+    return bool(settings.telegram_bot_token
+                and (settings.onboarding_wallet_key or settings.onboarding_handoff_to_bot))
 
 
 def handoff_enabled() -> bool:
     from api.config import settings
 
     return bool(
-        settings.onboarding_handoff_webhook_url.strip()
+        (settings.telegram_bot_token and settings.onboarding_handoff_to_bot)
+        or settings.onboarding_handoff_webhook_url.strip()
         or (settings.telegram_bot_token and any(v.strip() for v in (
             settings.onboarding_handoff_accounts, settings.onboarding_handoff_preboarding_accounts,
             settings.onboarding_handoff_onboarding_accounts)))
@@ -55,7 +58,8 @@ async def get_handoff():
                 from .telegram import AiogramMessenger
 
                 messenger = AiogramMessenger(get_bot())
-            _handoff = HandoffService(AsyncSessionLocal, messenger, Settings.from_app(), utcnow)
+            _handoff = HandoffService(AsyncSessionLocal, messenger, Settings.from_app(), utcnow,
+                                      bot_sink=get_service)
     return _handoff
 
 
@@ -81,9 +85,8 @@ async def get_service() -> Optional[OnboardingService]:
             if not settings.bot_username:
                 me = await bot.me()
                 settings = Settings.from_app(bot_username=me.username or "")
-            _service = OnboardingService(
-                AsyncSessionLocal, AiogramMessenger(bot), settings, WalletCipher(settings.wallet_enc_key)
-            )
+            cipher = WalletCipher(settings.wallet_enc_key) if settings.wallet_enc_key else None
+            _service = OnboardingService(AsyncSessionLocal, AiogramMessenger(bot), settings, cipher)
     return _service
 
 
@@ -96,7 +99,8 @@ def set_service(service: Optional[OnboardingService]) -> None:
 async def run_worker(interval_seconds: float = 30) -> None:
     """Раз в interval_seconds выполняет созревшие задачи (повторы, Loom, опросы, напоминания)."""
     if not enabled() and not handoff_enabled():
-        logger.info("ONBOARDING выключен: нет TELEGRAM_BOT_TOKEN или ONBOARDING_WALLET_KEY / ONBOARDING_HANDOFF_ACCOUNTS")
+        logger.info("ONBOARDING выключен: нет TELEGRAM_BOT_TOKEN или ONBOARDING_WALLET_KEY / "
+                    "ONBOARDING_HANDOFF_TO_BOT / ONBOARDING_HANDOFF_ACCOUNTS")
         return
     logger.info("ONBOARDING воркер запущен (бот: %s, передача аккаунтам: %s)", enabled(), handoff_enabled())
     while True:
@@ -106,6 +110,7 @@ async def run_worker(interval_seconds: float = 30) -> None:
                 done = await service.run_due_jobs()
                 if done:
                     logger.info("ONBOARDING jobs done=%s", done)
+                await service.ping_hr_changes()  # смена HR у кандидата — в Telegram (мит 19.11.2026)
         except asyncio.CancelledError:
             raise
         except Exception:

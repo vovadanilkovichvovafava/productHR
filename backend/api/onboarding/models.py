@@ -59,6 +59,8 @@ class OnboardingCase(Base):
     script_answer_at = Column(DateTime, nullable=True)
     work_chat_id = Column(BigInteger, nullable=True)
     practice_started_at = Column(DateTime, nullable=True)
+    # Чат отдела, куда лид добавил бота после перехода (мит 19.11.2026)
+    dept_chat_id = Column(BigInteger, nullable=True)
 
     department = Column(String(200), nullable=True)
     lead_name = Column(String(200), nullable=True)
@@ -76,6 +78,25 @@ class OnboardingCase(Base):
     survey_step = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=_utcnow)
+
+
+class DepartmentLead(Base):
+    """Лид отдела в Telegram (мит 19.11.2026, Владимир): лид пишет боту /lead и выбирает отдел,
+    владелец/админ HR подтверждает кнопкой. По отделу из «Штата» бот находит, кому писать о
+    новом сотруднике. status: pending / confirmed / rejected / replaced."""
+
+    __tablename__ = "onboarding_department_leads"
+
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    department = Column(String(200), nullable=False, index=True)
+    tg_id = Column(BigInteger, nullable=False, index=True)
+    username = Column(String(64), nullable=True)
+    full_name = Column(String(200), nullable=True)
+    status = Column(String(16), default="pending", nullable=False)
+    decided_by_tg = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    decided_at = Column(DateTime, nullable=True)
 
 
 class BotJob(Base):

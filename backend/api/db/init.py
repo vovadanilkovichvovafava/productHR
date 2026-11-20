@@ -227,6 +227,9 @@ async def init_database():
          "staff_board_departments.visibility"),
         ("ALTER TABLE staff_board_departments ADD COLUMN IF NOT EXISTS visible_to JSON DEFAULT '[]'",
          "staff_board_departments.visible_to"),
+        # Чат отдела у карточки бота (мит 19.11.2026)
+        ("ALTER TABLE onboarding_cases ADD COLUMN IF NOT EXISTS dept_chat_id BIGINT",
+         "onboarding_cases.dept_chat_id"),
         # Передача HR-аккаунтам (api/onboarding/handoff.py): события практика/перевод/стоп,
         # 03.11.2026. Таблица могла появиться в предыдущей версии без этих колонок.
         ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS practice_date DATE",

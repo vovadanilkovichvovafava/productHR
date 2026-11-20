@@ -13,11 +13,13 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError
+from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from . import texts
 from .messenger import Buttons, SendError
 from .runtime import get_handoff, get_service
+from .chat_flow import SURVEY_LINK_PREFIX
 from .service import TOKEN_PREFIX
 
 logger = logging.getLogger("hr-analyzer.onboarding")
@@ -30,9 +32,12 @@ class AiogramMessenger:
     async def send(self, chat_id: int, text: str, buttons: Buttons | None = None, html: bool = False) -> int:
         markup = None
         if buttons:
-            markup = InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in buttons]
-            )
+            # Ссылка (опрос в личке из рабочего чата) — url-кнопка, остальное — callback
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=t, url=d) if d.startswith("https://") else
+                 InlineKeyboardButton(text=t, callback_data=d) for t, d in row]
+                for row in buttons
+            ])
         try:
             message = await self.bot.send_message(chat_id, text, reply_markup=markup, disable_web_page_preview=True,
                                                   parse_mode="HTML" if html else None)
@@ -51,7 +56,7 @@ class AiogramMessenger:
 
 
 def is_onboarding_token(payload: str) -> bool:
-    return payload.startswith(TOKEN_PREFIX)
+    return payload.startswith((TOKEN_PREFIX, SURVEY_LINK_PREFIX))
 
 
 async def on_start(message: Message, payload: str) -> None:
@@ -60,7 +65,11 @@ async def on_start(message: Message, payload: str) -> None:
     if service is None or message.from_user is None:
         await message.answer(texts.START_UNKNOWN)
         return
-    if not await service.handle_start(message.from_user.id, payload):
+    if payload.startswith(SURVEY_LINK_PREFIX):  # «Пройти опрос» из рабочего чата
+        ok = await service.handle_survey_link(message.from_user.id, payload)
+    else:
+        ok = await service.handle_start(message.from_user.id, payload)
+    if not ok:
         await message.answer(texts.START_UNKNOWN)
 
 
@@ -121,30 +130,40 @@ async def on_private_text(message: Message) -> bool:
 
 
 async def on_group_message(message: Message) -> None:
-    """Новые участники группы: кандидат пришёл в рабочий чат → приветствие с «Старт».
+    """Группа: кандидат пришёл в рабочий чат → приветствие с «Старт»; текст — вечерний отчёт
+    (#вечерний_отчёт) и #блокер. Текст бот видит, только если в BotFather выключен режим
+    приватности (/setprivacy → Disable) или он админ чата.
 
     Зовётся первой строкой сбора переписки, поэтому ничего не бросает: сбой здесь
     не должен стоить сообщения в базе.
     """
     members = getattr(message, "new_chat_members", None)
-    if not members:
-        return
     try:
         service = await get_service()
         if service is None:
             return
-        me = await service.messenger.bot.me()
-        joined = [(u.id, u.username) for u in members if u.id != me.id and not u.is_bot]
-        if joined:
-            await service.handle_members_joined(message.chat.id, joined)
+        if members:
+            me = await service.messenger.bot.me()
+            joined = [(u.id, u.username) for u in members if u.id != me.id and not u.is_bot]
+            if joined:
+                await service.handle_members_joined(message.chat.id, joined)
+            return
+        user = getattr(message, "from_user", None)
+        text = getattr(message, "text", None) or getattr(message, "caption", None)
+        if user is None or user.is_bot or not text:
+            return
+        reply = await service.handle_group_text(message.chat.id, user.id, user.username,
+                                                user.full_name or user.username or str(user.id), text)
+        if reply:
+            await message.reply(reply)
     except Exception:
-        logger.exception("ONBOARDING new members")
+        logger.exception("ONBOARDING group message")
 
 
-async def on_bot_added(chat_id: int, adder_tg_id: int | None) -> None:
+async def on_bot_added(chat_id: int, adder_tg_id: int | None, title: str = "") -> None:
     try:
         service = await get_service()
-        if service is not None and await service.handle_bot_added(chat_id, adder_tg_id):
+        if service is not None and await service.handle_bot_added(chat_id, adder_tg_id, title or ""):
             logger.info("ONBOARDING work chat welcome chat=%s adder=%s", chat_id, adder_tg_id)
     except Exception:
         logger.exception("ONBOARDING bot added chat=%s", chat_id)
@@ -214,6 +233,64 @@ async def practice_start(callback: CallbackQuery) -> None:
     else:
         await _drop_buttons(callback)
         await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pchat:"))
+async def pick_chat_case(callback: CallbackQuery) -> None:
+    """«Для кого этот чат?» — сотрудник выбрал кандидата."""
+    service = await get_service()
+    case_id = callback.data.removeprefix("pchat:")
+    if service is None or not case_id.isdigit() or not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+    reply = await service.bind_chat(callback.message.chat.id, int(case_id), callback.from_user.id)
+    if reply.startswith("Готово"):
+        await _drop_buttons(callback)
+        await callback.answer(reply)
+    else:
+        await callback.answer(reply, show_alert=True)
+
+
+@router.message(Command("lead", "lid"), F.chat.type == "private")
+async def lead_command(message: Message) -> None:
+    """Лид отдела: выбирает свой отдел, владелец/админ HR подтверждает (мит 19.11.2026)."""
+    service = await get_service()
+    if service is None:
+        return
+    departments = await service.lead_departments()
+    if not departments:
+        await message.answer(texts.LEAD_NO_DEPARTMENTS)
+        return
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=d.name, callback_data=f"leaddept:{d.id}")] for d in departments[:40]
+    ])
+    await message.answer(texts.LEAD_PICK_DEPARTMENT, reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith("leaddept:"))
+async def lead_department(callback: CallbackQuery) -> None:
+    service = await get_service()
+    dept_id = callback.data.removeprefix("leaddept:")
+    if service is None or not dept_id.isdigit():
+        await callback.answer()
+        return
+    user = callback.from_user
+    reply = await service.request_lead(user.id, user.username, user.full_name or "", int(dept_id))
+    await _drop_buttons(callback)
+    await _reply(callback, reply)
+
+
+@router.callback_query(F.data.startswith(("leadok:", "leadno:")))
+async def lead_decision(callback: CallbackQuery) -> None:
+    service = await get_service()
+    action, _, lead_id = callback.data.partition(":")
+    if service is None or not lead_id.isdigit():
+        await callback.answer()
+        return
+    reply = await service.decide_lead(int(lead_id), callback.from_user.id, action == "leadok")
+    if reply not in (texts.LEAD_NOT_ADMIN,):
+        await _drop_buttons(callback)
+    await _reply(callback, reply)
 
 
 @router.callback_query(F.data.startswith("loom:"))

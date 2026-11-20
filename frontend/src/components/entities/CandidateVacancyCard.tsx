@@ -19,6 +19,17 @@ import toast from "react-hot-toast";
 import { HuntflowComposer } from "@/components/hr/HuntflowComposer";
 import { HuntflowRichInput } from "@/components/hr/HuntflowRichInput";
 import { RejectionReasonSelect } from "@/components/entities/RejectionReasonSelect";
+import { StageTransitionFields } from "@/components/entities/StageTransitionFields";
+import { getErrorDetail } from "@/utils";
+import { setEntityMentor } from "@/services/api/entities";
+import { addBoardPlacement, updateBoardRow } from "@/services/api/staffBoard";
+import {
+  applyTransitionFields,
+  isTransitionStage,
+  transitionDefaults,
+  transitionReady,
+  type TransitionFields,
+} from "@/utils/stageTransition";
 import { DEPARTED_STATUSES, buildRejectionComment, rejectionReady } from "@/constants/hrStages";
 import { HuntflowActionChip as ActionChip } from "@/components/hr/HuntflowControls";
 
@@ -410,7 +421,22 @@ function CandidateVacancyCard({
   // списка нет, причина — сам комментарий. Её же требует сервер.
   const departPick = DEPARTED_STATUSES.has(pendingStage) && !stageAlreadyCurrent;
   const departBlocked = departPick && !rejectionReady(null, stageChangeComment);
-  const reasonBlocked = rejectBlocked || departBlocked;
+  // «Практика» / «Перешёл в отдел» — дата выхода в окне, сразу подставленная
+  // (мит 19.11.2026): по ней бот планирует практику и онбординг.
+  const transitionPick = isTransitionStage(pendingStage) && !stageAlreadyCurrent;
+  const [transitionFields, setTransitionFields] = useState<TransitionFields | null>(null);
+  useEffect(() => {
+    setTransitionFields(
+      showStageDD && transitionPick && isTransitionStage(pendingStage)
+        ? transitionDefaults(pendingStage, card.extra_data, new Date())
+        : null,
+    );
+    // card.extra_data намеренно не в зависимостях: фоновое обновление списка не
+    // должно сбрасывать дату, которую HR уже поправил в открытом окне.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showStageDD, transitionPick, pendingStage]);
+  const transitionBlocked = transitionPick && !transitionReady(transitionFields);
+  const reasonBlocked = rejectBlocked || departBlocked || transitionBlocked;
   // Сменили этап в окне или закрыли окно — выбранная причина не переносится.
   useEffect(() => {
     if (!rejectPick) setRejectionReason(null);
@@ -611,6 +637,14 @@ function CandidateVacancyCard({
                       onChange={setRejectionReason}
                     />
                   )}
+                  {transitionPick && transitionFields && isTransitionStage(pendingStage) && (
+                    <StageTransitionFields
+                      entityId={card.id}
+                      stage={pendingStage}
+                      value={transitionFields}
+                      onChange={setTransitionFields}
+                    />
+                  )}
                   <div className="hf-stage-picker-editor">
                     <HuntflowRichInput
                       value={stageChangeComment}
@@ -638,7 +672,9 @@ function CandidateVacancyCard({
                           ? "Выберите причину отказа или напишите комментарий"
                           : departBlocked
                             ? "Напишите причину увольнения"
-                            : undefined
+                            : transitionBlocked
+                              ? "Укажите дату выхода"
+                              : undefined
                       }
                       onClick={async () => {
                         if (savingStageChange || stageAlreadyCurrent || reasonBlocked) return;
@@ -660,6 +696,21 @@ function CandidateVacancyCard({
                           const text = rejectPick
                             ? buildRejectionComment(rejectionReason, stageChangeComment)
                             : stageChangeComment.trim();
+                          if (needsStageChange && transitionPick && transitionFields
+                              && isTransitionStage(pendingStage)) {
+                            // Дата/ментор/отдел — ДО смены статуса: бот берёт дату
+                            // практики в момент перевода (иначе поставил бы «завтра»).
+                            try {
+                              await applyTransitionFields(card.id, pendingStage, transitionFields, {
+                                updateRow: updateBoardRow,
+                                setMentor: setEntityMentor,
+                                addPlacement: (id, dept) => addBoardPlacement(id, dept),
+                              });
+                            } catch (e) {
+                              toast.error(getErrorDetail(e, "Не удалось сохранить дату — этап не сменён."));
+                              return;
+                            }
+                          }
                           if (needsStageChange) {
                             // Комментарий уходит ВМЕСТЕ с переводом и живёт в
                             // самой записи истории. Раньше он сохранялся
@@ -709,6 +760,9 @@ function CandidateVacancyCard({
                       <span className="hf-reject-reason-hint">
                         Напишите причину увольнения
                       </span>
+                    )}
+                    {transitionBlocked && (
+                      <span className="hf-reject-reason-hint">Укажите дату выхода</span>
                     )}
                   </div>
                 </div>

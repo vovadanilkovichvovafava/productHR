@@ -202,7 +202,8 @@ async def on_bot_added(event: ChatMemberUpdated):
         logger.error(f"❌ Error adding chat: {type(e).__name__}: {e}")
 
     # HR завёл рабочий чат практики и добавил бота раньше кандидата — кнопка «Старт»
-    await onboarding_tg.on_bot_added(event.chat.id, event.from_user.id if event.from_user else None)
+    await onboarding_tg.on_bot_added(event.chat.id, event.from_user.id if event.from_user else None,
+                                     event.chat.title or "")
 
 
 @dp.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_MEMBER >> IS_NOT_MEMBER))

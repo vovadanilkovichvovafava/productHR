@@ -29,7 +29,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -178,12 +178,16 @@ class HandoffService:
         settings: Settings,
         clock: Callable[[], datetime],
         poster: Callable[[str, bytes, dict], Awaitable[None]] = _http_post,
+        bot_sink: Optional[Callable[[], Awaitable[Any]]] = None,
     ):
         self.sessions = sessions
         self.messenger = messenger
         self.settings = settings
         self.clock = clock
         self.poster = poster
+        # Мит 19.11.2026: при handoff_to_bot события получает наш бот — OnboardingService
+        # (runtime.get_service). Функция, а не сервис: он поднимается лениво.
+        self.bot_sink = bot_sink
 
     @property
     def via_webhook(self) -> bool:
@@ -214,7 +218,7 @@ class HandoffService:
 
     async def tick(self) -> int:
         """Один проход воркера. Возвращает, сколько событий передано."""
-        if not (self.via_webhook or self.settings.all_handoff_accounts):
+        if not (self.settings.handoff_to_bot or self.via_webhook or self.settings.all_handoff_accounts):
             return 0
         await self._sync_id_accounts()
         await self._baseline_once()
@@ -543,6 +547,8 @@ class HandoffService:
                        targets: list[tuple[str, Optional[HandoffAccount]]]):
         """[(ключ, аккаунт)] доставленных ([] при вебхуке) или False — не доставлено, повтор позже.
         Аккаунты, которым событие уже ушло (`delivered`), при повторе пропускаются."""
+        if self.settings.handoff_to_bot:
+            return await self._deliver_to_bot(row, entity, event)
         if self.via_webhook:
             body = json.dumps({**event, "sent_at": self.clock().isoformat() + "Z"}, ensure_ascii=False).encode()
             headers = {"Content-Type": "application/json", "X-Onboarding-Event": event["event"]}
@@ -579,6 +585,22 @@ class HandoffService:
             done.add(mark)
             got.append((key, account))
         return got
+
+    async def _deliver_to_bot(self, row: Handoff, entity: Entity, event: dict):
+        """Событие — нашему боту: он заводит/двигает/закрывает карточку практики и онбординга."""
+        service = await self.bot_sink() if self.bot_sink else None
+        if service is None:
+            logger.warning("ONBOARDING handoff to_bot: бот выключен (нет TELEGRAM_BOT_TOKEN) entity=%s", entity.id)
+            await self._postpone(row, "no_bot")
+            return False
+        try:
+            await service.apply_handoff_event(event, org_id=entity.org_id, created_by=entity.created_by,
+                                              hr_tg_id=await self._hr_tg_id(entity))
+        except Exception:
+            logger.exception("ONBOARDING handoff to_bot failed entity=%s", entity.id)
+            await self._postpone(row, "send_failed")
+            return False
+        return []
 
     @staticmethod
     def _pin(fresh: Handoff, got: list[tuple[str, HandoffAccount]]) -> None:
@@ -701,6 +723,8 @@ class HandoffService:
     def _confirm_text(self, entity: Entity, event: dict) -> str:
         name = self._name_html(entity)
         kind = event["event"]
+        if self.settings.handoff_to_bot:
+            return self._bot_confirm_text(name, event)
         if kind == "practice":
             return f"{name} передан(а) HR-профилю: практика с {event['practice_start']}. Он напишет кандидату первым."
         if kind == "transfer":
@@ -709,6 +733,29 @@ class HandoffService:
                      f"испытательный срок до {event['probation_end']}"]
             return f"{name} передан(а) HR-профилю: " + ", ".join(parts) + "."
         return f"{name}: HR-профилю передан стоп — {html.escape(event.get('reason') or '')}."
+
+    def _bot_confirm_text(self, name: str, event: dict) -> str:
+        """Что HR узнаёт, когда событие получил наш бот (а не HR-аккаунт)."""
+        bot = f"@{self.settings.bot_username}" if self.settings.bot_username else "бота"
+        kind = event["event"]
+        if kind == "practice":
+            return (f"{name}: практика с {event['practice_start']}. В день старта создай рабочий чат, "
+                    f"добавь туда кандидата и {bot} — бот поздравит кандидата со стартом и будет "
+                    "напоминать про вечерний Loom.")
+        if kind == "transfer":
+            parts = [f"переход в отдел {html.escape(event['department'])}" if event.get("department")
+                     else "переход в отдел", f"первый рабочий день {event['first_day']}",
+                     f"испытательный срок до {event['probation_end']}"]
+            return f"{name}: " + ", ".join(parts) + ". Опросы и напоминания онбординга бот запланировал."
+        return f"{name}: бот остановил напоминания — {html.escape(event.get('reason') or '')}."
+
+    async def _hr_tg_id(self, entity: Entity) -> Optional[int]:
+        """Telegram HR, который завёл карточку (сигналы бота идут ему лично)."""
+        if not entity.created_by:
+            return None
+        async with self.sessions() as s:
+            user = await s.get(User, entity.created_by)
+        return user.telegram_id if user and user.telegram_id else None
 
     async def _hr_targets(self, entity: Entity) -> list[int]:
         """Кому из HR писать: тот, кто завёл карточку, иначе запасной чат."""
@@ -723,7 +770,16 @@ class HandoffService:
         return targets
 
     async def _confirm_hr(self, entity: Entity, text: str, chat_id: Optional[int] = None) -> None:
+        events = self.settings.hr_events_chat_id
+        if events and self.settings.handoff_to_bot:
+            # Общий чат HR (мит 19.11.2026: «все уведомления в общем чате, Влада — твой кандидат…»)
+            try:
+                await self.messenger.send(events, text, html=True)
+            except SendError as exc:
+                logger.warning("ONBOARDING handoff events chat %s failed: %s", events, exc)
         for target in ([chat_id] if chat_id else await self._hr_targets(entity)):
+            if target == events:
+                return
             try:
                 await self.messenger.send(target, text, html=True)
                 return

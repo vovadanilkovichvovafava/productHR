@@ -30,6 +30,11 @@ class Settings:
     handoff_webhook_url: str = ""
     handoff_webhook_secret: str = ""
     handoff_stages: bool = False
+    handoff_to_bot: bool = False  # события по статусу — нашему боту, а не HR-аккаунтам
+    report_hour: int = 18
+    report_grace_minutes: int = 60
+    hr_events_chat_id: Optional[int] = None
+    app_url: str = "https://staffwise.club"
     practice_start_time: str = "10:00"
     hrd: str = ""
 
@@ -64,6 +69,11 @@ class Settings:
             handoff_webhook_url=app.onboarding_handoff_webhook_url.strip(),
             handoff_webhook_secret=app.onboarding_handoff_webhook_secret,
             handoff_stages=app.onboarding_handoff_stages,
+            handoff_to_bot=app.onboarding_handoff_to_bot,
+            report_hour=app.onboarding_report_hour,
+            report_grace_minutes=app.onboarding_report_grace_minutes,
+            hr_events_chat_id=app.onboarding_hr_events_chat_id or None,
+            app_url=app.onboarding_app_url.rstrip("/"),
             practice_start_time=app.onboarding_practice_start_time,
             hrd=app.onboarding_hrd,
         )

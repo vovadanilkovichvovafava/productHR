@@ -12088,3 +12088,29 @@ a.hf-forms-name:hover { text-decoration: underline; }
 /* «из SANDBOX» — в той же строке, что отдел, чтобы строка не росла. */
 .hf-statuses-page .hf-statuses-dept-stack { flex-direction: row; align-items: center; gap: 6px; min-width: 0; }
 .hf-statuses-page .hf-statuses-dept-from { font-size: 12px; color: #87909e; }
+
+/* Дата выхода, ментор, отдел в окне смены этапа — «Практика» / «Перешёл в
+   отдел» (мит 19.11.2026). Поля — как «Причина отказа». */
+.hf-stage-transition {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.hf-stage-transition-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hf-stage-transition-label {
+  color: var(--hf-main-500);
+  font-size: var(--hf-fs-xxs);
+}
+
+.hf-stage-transition-input {
+  appearance: auto;
+  cursor: pointer;
+}

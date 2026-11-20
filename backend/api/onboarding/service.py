@@ -17,10 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from . import schedule as sch
 from . import texts
+from .chat_flow import ChatFlowMixin
 from .config import Settings
 from .crypto import WalletCipher
 from .messenger import Buttons, Messenger, SendError
 from .models import (
+    ACTIVE_STATUSES,
     DEPARTMENT_STATUSES,
     PRACTICE_STATUSES,
     BotJob,
@@ -35,6 +37,9 @@ from .surveys import SURVEYS
 log = logging.getLogger(__name__)
 
 PREBOARDING_JOBS = {
+    "report_check",
+    "report_escalate",
+    "hr_practice_start",
     "invite_check",
     "first_retry",
     "first_no_answer",
@@ -46,19 +51,40 @@ PREBOARDING_JOBS = {
 DONE_MARK = -1  # SurveyResponse.question для отметки «опрос пройден»
 # Префикс ссылки кандидата: /start с ним — наш, без него — привязка аккаунта сотрудника (api/bot.py)
 TOKEN_PREFIX = "ob_"
+# Карточка из статуса АТС (мит 19.11.2026): кандидат не открывал ссылку бота, в личку бот ему
+# писать не может — задачи «открыл ли ссылку» и «завтра старт» не ставим. Остальное — в рабочем чате.
+DM_ONLY_JOBS = {"invite_check", "day_before"}
+# Окончания фамилий: «Шинкаренко Владимир» и «Владимир Шинкаренко» — имя то, что не фамилия
+_SURNAME_ENDINGS = ("ова", "ева", "ина", "ына", "ская", "цкая", "ов", "ев", "ёв", "ин", "ын", "ский",
+                    "цкий", "енко", "ко", "ук", "юк", "ич", "ян", "дзе", "швили", "их", "ых")
+
+
+def first_name_of(full_name: str) -> str:
+    """Имя для обращения из ФИО карточки. В АТС порядок «Фамилия Имя Отчество», но бывает и
+    «Имя Фамилия»: из двух слов берём то, что не похоже на фамилию."""
+    words = (full_name or "").split()
+    if not words:
+        return ""
+    if len(words) >= 3:
+        return words[1]
+    if len(words) == 2:
+        first, second = words
+        if first.lower().endswith(_SURNAME_ENDINGS) and not second.lower().endswith(_SURNAME_ENDINGS):
+            return second
+    return words[0]
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-class OnboardingService:
+class OnboardingService(ChatFlowMixin):
     def __init__(
         self,
         sessions: async_sessionmaker[AsyncSession],
         messenger: Messenger,
         settings: Settings,
-        cipher: WalletCipher,
+        cipher: WalletCipher | None,
         clock: Callable[[], datetime] = utcnow,
     ):
         self.sessions = sessions
@@ -83,8 +109,10 @@ class OnboardingService:
         entity_id: int | None = None,
         org_id: int | None = None,
         created_by: int | None = None,
+        from_status: bool = False,
     ) -> OnboardingCase:
-        """Статус «практика назначена» (ТЗ 3.1). practice_start без tzinfo — местное время кандидата."""
+        """Статус «практика назначена» (ТЗ 3.1). practice_start без tzinfo — местное время кандидата.
+        from_status — карточку завёл статус АТС, а не HR ссылкой: без задач для лички (DM_ONLY_JOBS)."""
         tz = tz or self.settings.default_tz
         start_utc = sch.local_to_utc(practice_start, tz)
         now = self.clock()
@@ -99,9 +127,7 @@ class OnboardingService:
             candidate_tg_username=_norm_username(candidate_tg_username),
             link_token=TOKEN_PREFIX + secrets.token_urlsafe(16),
             practice_start_at=start_utc,
-            practice_last_day=sch.practice_last_day(
-                sch.utc_to_local(start_utc, tz).date(), self.settings.practice_days
-            ),
+            practice_last_day=self._last_day(sch.utc_to_local(start_utc, tz), from_status),
             practice_lead=practice_lead,
             hrd=hrd,
             hr_tg_id=hr_tg_id,
@@ -109,8 +135,103 @@ class OnboardingService:
         async with self.sessions() as s:
             s.add(case)
             await s.flush()
-            self._add_jobs(s, case.id, sch.preboarding_jobs(now, start_utc, tz, self.settings.practice_days, self.settings.skip_weekends))
+            self._add_jobs(s, case.id, self._preboarding(now, start_utc, tz, from_status))
             await s.commit()
+        return case
+
+    def _preboarding(self, now: datetime, start_utc: datetime, tz: str, from_status: bool) -> list[sch.Job]:
+        if not from_status:
+            return sch.preboarding_jobs(now, start_utc, tz, self.settings.practice_days, self.settings.skip_weekends)
+        # Мит 19.11.2026: в личку кандидату бот не пишет — каждый рабочий день практики проверка
+        # вечернего отчёта в рабочем чате, утром в день старта — HR «подготовь документы и чат»,
+        # в последний день без решения — сигнал HR.
+        days = self.practice_days(sch.utc_to_local(start_utc, tz).date())
+        jobs: list[sch.Job] = [
+            ("report_check", sch.at_local(d, self.settings.report_hour, tz), {"day": d.isoformat()}) for d in days
+        ]
+        jobs.append(("practice_deadline", sch.at_local(days[-1], sch.NO_DECISION_HOUR, tz), {}))
+        hr_at = sch.at_local(days[0], 9, tz) + timedelta(minutes=30)
+        if hr_at > now:
+            jobs.append(("hr_practice_start", hr_at, {}))
+        return jobs
+
+    def _last_day(self, start_local: datetime, from_status: bool) -> date:
+        if from_status:
+            return self.practice_days(start_local.date())[-1]
+        return sch.practice_last_day(start_local.date(), self.settings.practice_days)
+
+    # ------------------------------------------------- события по статусу АТС (мит 19.11.2026)
+
+    async def apply_handoff_event(
+        self, event: dict, *, org_id: int | None = None, created_by: int | None = None,
+        hr_tg_id: int | None = None,
+    ) -> OnboardingCase | None:
+        """Событие из handoff.py (смена статуса в АТС): practice / transfer / stop.
+
+        practice — новая карточка, а если практика ещё не началась и дату перенесли — перенос;
+        transfer — переход в отдел (карточки не было — заводим и сразу переводим); stop —
+        практика: «не прошёл», отдел: «ушёл». Повтор того же события ничего не дублирует.
+        """
+        kind, entity_id = event["event"], event["id"]
+        async with self.sessions() as s:
+            case = await s.scalar(
+                select(OnboardingCase)
+                .where(OnboardingCase.entity_id == entity_id, OnboardingCase.status.in_(ACTIVE_STATUSES))
+                .order_by(OnboardingCase.id.desc())
+                .limit(1)
+            )
+        full_name = event.get("full_name") or ""
+        common = dict(
+            full_name=full_name, first_name=first_name_of(full_name),
+            candidate_tg_username=event.get("telegram"), tz=event.get("timezone") or None,
+            hr_tg_id=hr_tg_id, entity_id=entity_id, org_id=org_id, created_by=created_by, from_status=True,
+        )
+        if kind == "practice":
+            start = datetime.fromisoformat(event["practice_start_iso"])
+            if case is not None and case.status in PRACTICE_STATUSES:
+                return await self.reschedule_practice(case.id, start)
+            case = await self.create_case(practice_start=start, practice_lead=event.get("practice_lead") or "",
+                                          hrd=event.get("hrd") or "", **common)
+            log.info("ONBOARDING case=%s from status entity=%s practice=%s", case.id, entity_id, start.date())
+            return case
+        if kind == "transfer":
+            first_day = date.fromisoformat(event["first_day_iso"])
+            if case is not None and case.status in DEPARTMENT_STATUSES:
+                return case  # уже в отделе — повтор события
+            if case is None:  # практику вели не мы (до включения бота) — заводим карточку задним числом
+                start = datetime.combine(first_day, datetime.strptime(self.settings.practice_start_time, "%H:%M").time())
+                case = await self.create_case(practice_start=start, **common)
+            lead = await self.department_lead(org_id, event.get("department"))
+            case = await self.set_status(
+                case.id, CaseStatus.transferred, department=event.get("department"),
+                lead_name=event.get("lead") or (lead.full_name if lead else None),
+                lead_tg_id=lead.tg_id if lead else None, department_start_date=first_day)
+            log.info("ONBOARDING case=%s transfer entity=%s first_day=%s", case.id, entity_id, first_day)
+            return case
+        if kind == "stop":
+            if case is None:
+                return None
+            if case.status in PRACTICE_STATUSES:
+                case = await self.set_status(case.id, CaseStatus.failed)
+            else:
+                case = await self.set_status(case.id, CaseStatus.left, reason=event.get("reason"))
+            log.info("ONBOARDING case=%s stop entity=%s status=%s", case.id, entity_id, case.status)
+            return case
+        return case
+
+    async def reschedule_practice(self, case_id: int, practice_start: datetime) -> OnboardingCase:
+        """HR перенёс дату практики, пока она не началась: новые Loom и срок, старые задачи — отмена."""
+        async with self.sessions() as s:
+            case = await s.get(OnboardingCase, case_id)
+            start_utc = sch.local_to_utc(practice_start, case.timezone)
+            if case.status != CaseStatus.practice_assigned.value or case.practice_start_at == start_utc:
+                return case
+            case.practice_start_at = start_utc
+            case.practice_last_day = self._last_day(practice_start, True)
+            await self._cancel(s, case.id, PREBOARDING_JOBS)
+            self._add_jobs(s, case.id, self._preboarding(self.clock(), start_utc, case.timezone, True))
+            await s.commit()
+        log.info("ONBOARDING case=%s practice moved to %s", case_id, practice_start.date())
         return case
 
     def invite_link(self, case: OnboardingCase) -> str:
@@ -159,6 +280,7 @@ class OnboardingService:
             await self._send_candidate(
                 case, texts.CONGRATS.format(**self._ctx(case)), texts.survey_button("practice"), "поздравление"
             )
+            await self._after_transfer(case)
         elif status is CaseStatus.failed and self.settings.send_thanks_on_fail:
             await self._send_candidate(case, texts.THANKS_ON_FAIL.format(**self._ctx(case)), None, "благодарность")
         elif status is CaseStatus.left:
@@ -282,6 +404,10 @@ class OnboardingService:
                     await self._signal_survey(case, kind, step, f"{question.options[question.follow_up]}: {text}")
                 await self._after_advance(case, kind, next_step)
                 return True, None
+            if case.awaiting == "wallet" and self.cipher is None:
+                case.awaiting = None  # кошельки отложены (мит 19.11.2026), ключа нет — не собираем
+                await s.commit()
+                return False, None
             if case.awaiting == "wallet":
                 existing = await s.scalar(select(Wallet).where(Wallet.case_id == case.id))
                 if existing is None:
@@ -292,65 +418,6 @@ class OnboardingService:
                 await s.commit()
                 return True, texts.WALLET_SAVED
         return False, None
-
-    async def handle_bot_added(self, chat_id: int, adder_tg_id: int | None) -> bool:
-        """HR добавил бота в рабочий чат раньше кандидата: имени не знаем, кнопка общая.
-
-        Бот сидит и в других чатах компании, поэтому кнопку показываем, только если
-        добавил HR, у которого практика кандидата начинается в эти дни (вчера…послезавтра).
-        """
-        if adder_tg_id is None:
-            return False
-        today = sch.utc_to_local(self.clock(), self.settings.default_tz).date()
-        window_start = sch.local_to_utc(datetime.combine(today - timedelta(days=1), datetime.min.time()), self.settings.default_tz)
-        window_end = sch.local_to_utc(datetime.combine(today + timedelta(days=3), datetime.min.time()), self.settings.default_tz)
-        async with self.sessions() as s:
-            found = await s.scalar(
-                select(OnboardingCase.id).where(
-                    OnboardingCase.hr_tg_id == adder_tg_id,
-                    OnboardingCase.status == CaseStatus.practice_assigned.value,
-                    OnboardingCase.practice_start_at >= window_start,
-                    OnboardingCase.practice_start_at < window_end,
-                ).limit(1)
-            )
-        if found is None:
-            return False
-        try:
-            await self.messenger.send(chat_id, texts.WORK_CHAT_WELCOME_GENERIC, texts.START_BUTTON)
-        except SendError as exc:
-            log.warning("рабочий чат %s: %s", chat_id, exc)
-        return True
-
-    async def handle_members_joined(self, chat_id: int, members: Iterable[tuple[int, str | None]]) -> None:
-        for user_id, username in members:
-            async with self.sessions() as s:
-                case = await self._practice_case(s, user_id, username)
-            if case is not None and case.status == CaseStatus.practice_assigned.value:
-                try:
-                    await self.messenger.send(
-                        chat_id, texts.WORK_CHAT_WELCOME.format(**self._ctx(case)), texts.START_BUTTON
-                    )
-                except SendError as exc:
-                    log.warning("рабочий чат %s: %s", chat_id, exc)
-
-    async def handle_practice_start(self, chat_id: int, user_id: int, username: str | None) -> str | None:
-        """Кандидат нажал «Старт» в рабочем чате → правила и инвайт (ТЗ 3.1). Возвращает текст алерта."""
-        async with self.sessions() as s:
-            case = await self._practice_case(s, user_id, username)
-            if case is None:
-                return texts.START_NOT_CANDIDATE
-            if case.status != CaseStatus.practice_assigned.value:
-                return None  # уже стартовал
-            case.candidate_tg_id = case.candidate_tg_id or user_id
-            case.status = CaseStatus.practice_running.value
-            case.work_chat_id = chat_id
-            case.practice_started_at = self.clock()
-            await s.commit()
-        try:
-            await self.messenger.send(chat_id, texts.PRACTICE_START.format(**self._ctx(case)))
-        except SendError as exc:
-            await self._signal(case, "send_failed", what="правила практики", error=str(exc))
-        return None
 
     async def handle_loom(self, tg_user_id: int, day: str, choice: str) -> str | None:
         if choice not in texts.LOOM_REPLY:
@@ -536,7 +603,8 @@ class OnboardingService:
         if case.status not in DEPARTMENT_STATUSES:
             return
         async with self.sessions() as s:
-            no_wallet = await s.scalar(select(Wallet.id).where(Wallet.case_id == case.id)) is None
+            no_wallet = (self.cipher is not None
+                         and await s.scalar(select(Wallet.id).where(Wallet.case_id == case.id)) is None)
             if no_wallet:
                 fresh = await s.get(OnboardingCase, case.id)
                 if fresh.awaiting is None:
@@ -610,14 +678,25 @@ class OnboardingService:
     # ------------------------------------------------- отправка и сигналы
 
     async def _send_candidate(self, case: OnboardingCase, text: str, buttons: Buttons | None, what: str) -> bool:
-        if case.candidate_tg_id is None:
-            return False
-        try:
-            await self.messenger.send(case.candidate_tg_id, text, buttons)
-            return True
-        except SendError as exc:  # ТЗ, вопрос 3: HR должна видеть ошибку, а не тихий сбой
-            await self._signal(case, "send_failed", what=what, error=str(exc))
-            return False
+        error: SendError | None = None
+        if case.candidate_tg_id is not None:
+            try:
+                await self.messenger.send(case.candidate_tg_id, text, buttons)
+                return True
+            except SendError as exc:
+                error = exc
+        # Мит 19.11.2026: кандидат мог ни разу не открыть бота — тогда в личку нельзя, пишем в его
+        # рабочий чат, а опрос даём ссылкой в личку (отвечать при всех незачем).
+        chat_id = self._candidate_chat(case)
+        if chat_id is not None:
+            try:
+                await self.messenger.send(chat_id, text, self._chat_buttons(case, buttons))
+                return True
+            except SendError as exc:
+                error = exc
+        if error is not None:  # ТЗ, вопрос 3: HR должна видеть ошибку, а не тихий сбой
+            await self._signal(case, "send_failed", what=what, error=str(error))
+        return False
 
     async def _signal(self, case: OnboardingCase, kind: str, **extra: str) -> None:
         text = texts.SIGNAL[kind].format(**self._ctx(case), **extra)
@@ -648,6 +727,8 @@ class OnboardingService:
         async with self.sessions() as s:
             s.add(Signal(case_id=case.id, kind=kind, text=text, delivered_to=delivered_to))
             await s.commit()
+        if self.settings.hr_events_chat_id not in targets:
+            await self._events(text)
 
     # ------------------------------------------------------------ helpers
 
