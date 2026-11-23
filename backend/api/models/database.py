@@ -1601,7 +1601,9 @@ class Notification(Base):
     message = Column(Text, nullable=True)
     link = Column(String(500), nullable=True)  # e.g. /projects/1/tasks/5
     is_read = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=func.now())
+    # UTC из кода, как у остальных дат: func.now() — время базы в ЕЁ поясе
+    # (на проде UTC, локально Москва), а фронт читает дату как UTC.
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     # Поллинг: WHERE user_id=? ORDER BY is_read, created_at DESC LIMIT 50 каждые 25с
     # на пользователя. Композитный индекс убирает per-user сортировку под нагрузкой.

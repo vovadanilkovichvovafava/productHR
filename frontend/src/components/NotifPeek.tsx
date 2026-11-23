@@ -13,6 +13,7 @@ import {
 } from "@/services/api/notifications";
 import { isAnketaSoundMuted, setAnketaSoundMuted } from "@/utils/notificationSound";
 import { NotifSettings } from "@/components/NotifSettings";
+import { formatNotificationTime } from "@/utils/date";
 
 // ================================================================
 // NOTIF PEEK — кнопка уведомлений справа от «+» (FAB) + собственный поповер.
@@ -276,12 +277,7 @@ export function NotifPeek() {
                               </p>
                             )}
                             <p className="hf-hr-notifications-item-time mt-1 text-[length:var(--hf-fs-5xs)]">
-                              {new Date(notif.created_at).toLocaleString("ru-RU", {
-                                day: "numeric",
-                                month: "short",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
+                              {formatNotificationTime(notif.created_at)}
                             </p>
                           </div>
                         </div>

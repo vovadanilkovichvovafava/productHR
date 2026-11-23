@@ -22,6 +22,18 @@ export function parseServerDate(dateString: string | Date): Date {
 }
 
 /**
+ * Время уведомления в колокольчике: «19 нояб., 21:36» по часам смотрящего.
+ * Раньше строку разбирал `new Date(...)` без пометки UTC, и уведомление шло
+ * на 3 часа раньше, чем время той же анкеты (Мария, 23.11.2026).
+ */
+export function formatNotificationTime(dateString: string | Date | undefined | null): string {
+  if (!dateString) return '';
+  const date = parseServerDate(dateString);
+  if (isNaN(date.getTime())) return '';
+  return date.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+/**
  * Format a date string according to the specified format type.
  * 
  * @param dateString - ISO date string or undefined

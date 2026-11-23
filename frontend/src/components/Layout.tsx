@@ -63,6 +63,7 @@ import type { Vacancy } from "@/types";
 import { AnimatePresence, motion } from "framer-motion";
 import clsx from "clsx";
 import toast from "react-hot-toast";
+import { formatNotificationTime } from "@/utils/date";
 
 // Note: iconMap and labelMap removed — using section-based navigation now
 
@@ -1774,15 +1775,7 @@ export default function Layout() {
                                           </p>
                                         )}
                                         <p className="hf-hr-notifications-item-time mt-1 text-[length:var(--hf-fs-5xs)]">
-                                          {new Date(notif.created_at).toLocaleString(
-                                            "ru-RU",
-                                            {
-                                              day: "numeric",
-                                              month: "short",
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                            },
-                                          )}
+                                          {formatNotificationTime(notif.created_at)}
                                         </p>
                                       </div>
                                     </div>
@@ -2197,15 +2190,7 @@ export default function Layout() {
                                   </p>
                                 )}
                                 <p className="text-[length:var(--hf-fs-5xs)] text-[color:var(--hf-white-alpha-20)] mt-1">
-                                  {new Date(notif.created_at).toLocaleString(
-                                    "ru-RU",
-                                    {
-                                      day: "numeric",
-                                      month: "short",
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    },
-                                  )}
+                                  {formatNotificationTime(notif.created_at)}
                                 </p>
                               </div>
                             </div>
