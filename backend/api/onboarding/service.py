@@ -804,7 +804,7 @@ class OnboardingService(ChatFlowMixin):
             "practice_lead": case.practice_lead,
             "hrd": case.hrd,
             "department": case.department or "",
-            "lead": case.lead_name or "",
+            **texts.lead_phrases(case.lead_name),
             "probation_end": case.probation_end_date.strftime("%d.%m") if case.probation_end_date else "",
         }
 

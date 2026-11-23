@@ -101,7 +101,7 @@ def loom_buttons(day: str) -> list[list[tuple[str, str]]]:
 
 CONGRATS = (
     "{name}, поздравляем! Практика пройдена, ты переходишь в отдел {department}. "
-    "Руководитель {lead} свяжется с тобой. Всё, что нужно знать на старте, пришлём отдельно.\n\n"
+    "{lead_contact} Всё, что нужно знать на старте, пришлём отдельно.\n\n"
     "А пока ответь, пожалуйста, на 4 коротких вопроса о практике:"
 )
 THANKS_ON_FAIL = (  # ТЗ 3.2 «[предложение]», текст не дан
@@ -117,7 +117,7 @@ FIRST_DAY_WELCOME = (
     "- отпуск и больничные\n"
     "- реферальная программа\n"
     "- выплаты в криптовалюте\n\n"
-    "Сегодня руководитель {lead} познакомит тебя с работой, а на первой неделе "
+    "Сегодня {lead_intro} тебя с работой, а на первой неделе "
     "HR назначит с тобой отдельную встречу."
 )
 FIRST_DAY_WALLET = (  # «инструкции по кошельку, если он ещё не выслал с первого дня теста»
@@ -182,8 +182,14 @@ SIGNAL = {
         "боту. Добавь бота в рабочий чат кандидата или в чат отдела, и сообщения пойдут туда."
     ),
     "lead_no_tg": (
-        "{full} переходит в отдел {department}. Лид {lead} не привязал Telegram к staffwise, "
-        "поэтому бот не может ему написать. Предупреди лида сам."
+        "{full} переходит в отдел {department}. {lead_no_tg} Telegram к staffwise, "
+        "поэтому бот не может написать. Предупреди о новом сотруднике сам."
+    ),
+    "lead_send_failed": (
+        "{full} переходит в отдел {department}. {lead_who} не получил сообщение о новом сотруднике: "
+        "скорее всего, к staffwise у него привязан другой Telegram или с него ни разу не открывали бота. "
+        "Пусть {lead_short} откроет staffwise, отвяжет Telegram и привяжет заново. А о новом сотруднике "
+        "предупреди сам."
     ),
     "no_lead": (
         "{full} переходит в отдел {department}, но бот не знает, кто лид отдела. Предупреди лида сам. "
@@ -304,9 +310,38 @@ PRACTICE_DONE = (
     "{name}, практика закончена, поздравляем! Ты переходишь в отдел {department}. "
     "Скоро тебя добавят в чат отдела, там расскажут про старт."
 )
+def lead_names(raw: str | None) -> list[str]:
+    """Имена лидов из `lead_name` карточки: из оргструктуры их может быть несколько через запятую."""
+    return [n.strip() for n in (raw or "").split(",") if n.strip()]
+
+
+def join_names(names: list[str]) -> str:
+    """«Владимир», «Владимир и Ильнар», «Мария, Анастасия и Егор»."""
+    if len(names) < 2:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " и " + names[-1]
+
+
+def lead_phrases(raw: str | None) -> dict[str, str]:
+    """Фразы про лидов в нужном числе. Прод 23.11.2026: у RND отдела двое лидов, и кандидат
+    получил «Руководитель Владимир, Ильнар свяжется с тобой»."""
+    names = lead_names(raw)
+    who = join_names(names)
+    if len(names) > 1:
+        return {"lead": who, "lead_contact": f"Руководители {who} свяжутся с тобой.",
+                "lead_intro": f"руководители {who} познакомят", "lead_no_tg": f"Лиды {who} не привязали"}
+    if names:
+        return {"lead": who, "lead_contact": f"Руководитель {who} свяжется с тобой.",
+                "lead_intro": f"руководитель {who} познакомит", "lead_no_tg": f"Лид {who} не привязал"}
+    return {"lead": "", "lead_contact": "Руководитель свяжется с тобой.",
+            "lead_intro": "руководитель познакомит", "lead_no_tg": "Лид не привязал"}
+
+
 def dept_welcome(mention: str, department: str, first_day: str, probation_end: str, lead: str) -> str:
     """Поздравление в чате отдела. Прод 20.11.2026: без лида выходило «Твой лид — .»."""
-    lead_part = f" Твой лид: {lead}." if lead else ""
+    names = lead_names(lead)
+    lead_part = (f" Твои лиды: {join_names(names)}." if len(names) > 1
+                 else f" Твой лид: {names[0]}." if names else "")
     return (f"{mention}, поздравляем, ты в отделе {department}! Первый рабочий день {first_day}, "
             f"испытательный срок до {probation_end}.{lead_part} Удачи!")
 

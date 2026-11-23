@@ -367,6 +367,11 @@ class ChatFlowMixin:
             return None, None
         return lead.full_name, [lead.tg_id]
 
+    async def _lead_name_by_tg(self, tg_id: int) -> str:
+        async with self.sessions() as s:
+            name = (await s.scalars(select(User.name).where(User.telegram_id == tg_id))).first()
+        return name or ""
+
     @staticmethod
     def lead_ids(case: OnboardingCase) -> list[int]:
         ids = list(case.lead_tg_ids or [])
@@ -391,7 +396,12 @@ class ChatFlowMixin:
                 await self.messenger.send(tg_id, texts.LEAD_NEW_HIRE.format(
                     **ctx, first_day=first_day, probation_end_full=_ddmm(case.probation_end_date)))
             except SendError as exc:
-                await self._signal(case, "send_failed", what="лиду о новом сотруднике", error=str(exc))
+                # Прод 23.11.2026: у Владимира к staffwise привязан старый Telegram, «chat not found»,
+                # а HR читал «проверь Telegram в карточке» — в карточке кандидата всё было верно.
+                log.warning("лиду %s о новом сотруднике case=%s: %s", tg_id, case.id, exc)
+                name = await self._lead_name_by_tg(tg_id)  # имена только в именительном падеже
+                await self._signal(case, "lead_send_failed", lead_who=f"Лид {name}" if name else "Лид отдела",
+                                   lead_short=name or "лид")
         if not leads:
             # лиды в оргструктуре есть, но без Telegram — иначе бот вообще не знает лида
             await self._signal(case, "lead_no_tg" if case.lead_tg_ids == [] and case.lead_name else "no_lead")

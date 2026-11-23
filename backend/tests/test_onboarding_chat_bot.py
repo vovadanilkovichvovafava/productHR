@@ -23,6 +23,7 @@ from api.models.database import (
 from api.onboarding.config import Settings
 from api.onboarding.messenger import SendError
 from api.onboarding.models import BotJob, CaseStatus, DepartmentLead, OnboardingCase, Signal
+from api.onboarding import texts as texts_mod
 from api.onboarding.service import OnboardingService, first_name_of
 from api.services.auth import hash_password
 
@@ -293,9 +294,28 @@ async def test_leads_come_from_org_department_without_lead_command(env):
     for tg in (LEAD_TG, 7004):
         assert env.messenger.texts(tg)[-1].startswith("К тебе в отдел Push team переходит Петров Иван Сергеевич")
     assert not any("бот не знает, кто лид" in t for t in env.messenger.texts(HR_TG))
+    # кандидату — обоих в нужном числе (прод 23.11.2026: «Руководитель Владимир, Ильнар свяжется»)
+    ctx = env.bot._ctx(fresh)
+    assert "Руководители Владимир и Ильнар свяжутся с тобой." in texts_mod.CONGRATS.format(**ctx)
+    assert "руководители Владимир и Ильнар познакомят" in texts_mod.FIRST_DAY_WELCOME.format(**ctx)
     # второй лид тоже свой: его чат отдела бот узнаёт сам
     assert await env.bot.handle_bot_added(DEPT_CHAT, 7004)
     assert (await _fresh(env, case.id)).dept_chat_id == DEPT_CHAT
+
+
+async def test_org_lead_unreachable_tells_hr_to_rebind(env):
+    """Прод 23.11.2026: у Владимира к staffwise привязан старый Telegram — «chat not found».
+    HR должен понять, что перепривязать Telegram надо лиду, а не править карточку кандидата."""
+    org_dept = await _org_dept_with_leads(env, ("Владимир", LEAD_TG), ("Ильнар", 7004))
+    env.db.add(BoardDepartment(org_id=env.org.id, name="Push team", kind="team", org_department_id=org_dept.id))
+    await env.db.commit()
+    env.messenger.failing.add(LEAD_TG)
+    await _practice(env)
+    await _transfer(env)
+    warn = [t for t in env.messenger.texts(HR_TG) if "не получил сообщение о новом сотруднике" in t]
+    assert len(warn) == 1 and "Лид Владимир не получил" in warn[0] and "Пусть Владимир откроет staffwise" in warn[0]
+    assert "карточке" not in warn[0]
+    assert env.messenger.texts(7004)[-1].startswith("К тебе в отдел Push team переходит")
 
 
 async def test_org_lead_without_telegram_tells_hr(env):
@@ -406,6 +426,11 @@ def test_texts_without_mentor_and_lead():
     welcome = texts.dept_welcome("@ivan", "HR team", "20.11.2026", "20.02.2027", "")
     assert "лид —" not in welcome and "до 20.02.2027." in welcome
     assert "Твой лид: Марк." in texts.dept_welcome("@ivan", "SEO", "20.11.2026", "20.02.2027", "Марк")
+    assert "Твои лиды: Владимир и Ильнар." in texts.dept_welcome("@ivan", "SEO", "20.11.2026", "20.02.2027",
+                                                               "Владимир, Ильнар")
+    assert texts.lead_phrases("")["lead_contact"] == "Руководитель свяжется с тобой."
+    assert texts.lead_phrases("Марк")["lead_intro"] == "руководитель Марк познакомит"
+    assert texts.join_names(["Мария", "Анастасия", "Егор"]) == "Мария, Анастасия и Егор"
 
 
 async def test_candidate_unreachable_hr_told_once(env):
