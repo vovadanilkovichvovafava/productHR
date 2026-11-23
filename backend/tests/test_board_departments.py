@@ -196,3 +196,38 @@ async def test_new_department_goes_last(client, db_session, organization, admin_
 
     listed = (await client.get("/api/staff-board/departments", headers=_h(admin_user))).json()
     assert [d["name"] for d in listed] == ["Бета", "Альфа", "Ааа новый"]
+
+
+@pytest.mark.asyncio
+async def test_link_org_department_for_leads(client, db_session, organization, admin_user, org_owner):
+    """Отдел доски берёт лидов из «Управление → Отделы» (бот онбординга, 23.11.2026)."""
+    from api.models.database import DepartmentMember, DeptRole
+
+    org_dept = Department(org_id=organization.id, name="RND отдел", is_active=True)
+    db_session.add(org_dept)
+    await db_session.flush()
+    admin_user.telegram_id = 555
+    db_session.add(DepartmentMember(department_id=org_dept.id, user_id=admin_user.id, role=DeptRole.lead))
+    await db_session.commit()
+
+    r = await client.get("/api/staff-board/org-departments", headers=_h(admin_user))
+    assert r.status_code == 200, r.text
+    [opt] = [o for o in r.json() if o["id"] == org_dept.id]
+    assert opt["leads"] == [{"name": admin_user.name, "has_telegram": True}]
+
+    dept_id = (await client.post("/api/staff-board/departments", json={"name": "R&D разработка"},
+                                 headers=_h(admin_user))).json()["id"]
+    r = await client.patch(f"/api/staff-board/departments/{dept_id}", json={"org_department_id": org_dept.id},
+                           headers=_h(admin_user))
+    assert r.status_code == 200, r.text
+    assert r.json()["org_department_id"] == org_dept.id
+    # правка другого поля связь не снимает, явный null — снимает
+    r = await client.patch(f"/api/staff-board/departments/{dept_id}", json={"name": "R&D dev"}, headers=_h(admin_user))
+    assert r.json()["org_department_id"] == org_dept.id
+    r = await client.patch(f"/api/staff-board/departments/{dept_id}", json={"org_department_id": None},
+                           headers=_h(admin_user))
+    assert r.json()["org_department_id"] is None
+    # чужой / несуществующий отдел — 400
+    r = await client.patch(f"/api/staff-board/departments/{dept_id}", json={"org_department_id": 999999},
+                           headers=_h(admin_user))
+    assert r.status_code == 400

@@ -2089,6 +2089,11 @@ class BoardDepartment(Base):
     # рекрутёрам нужны только песочницы (Мария, 30.09.2026).
     visibility = Column(String(10), default="all", server_default="all")
     visible_to = Column(JSON, default=list)   # user_id, когда visibility = custom
+    # Отдел оргструктуры («Управление → Отделы»), чьи лиды — лиды этого отдела
+    # доски. Бот онбординга пишет им о переходе нового сотрудника без /lead
+    # (Ильнар, 23.11.2026: «там же всё через базу берётся»). У команды пусто —
+    # берётся у её песочницы.
+    org_department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=func.now())
 

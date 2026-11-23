@@ -13,6 +13,7 @@ import {
   getBoardRows, updateBoardRow, addBoardPlacement, removeBoardPlacement,
   getBoardDepartments, createBoardDepartment, updateBoardDepartment, deleteBoardDepartment,
   getCatalog, addCatalogItem, renameCatalogItem, deleteCatalogItem,
+  getOrgDepartmentsWithLeads, type OrgDepartmentOption,
   type CatalogItem, type CatalogKind,
   type BoardDepartment, type BoardRow, type BoardRowUpdate, type BoardTeamStint,
   removeTeamStint,
@@ -2232,6 +2233,15 @@ function DepartmentModal({
   // выбрана. Без этого отдел не проставлялся никому, пока HR не пройдёт по
   // всем воронкам (владелец, 01.10.2026).
   const [isDefault, setIsDefault] = useState(dept?.is_default ?? false);
+  // Откуда бот онбординга берёт лидов отдела: «Управление → Отделы» (23.11.2026,
+  // Ильнар: «там же всё через базу берётся»). Пусто у команды — как у песочницы.
+  const [orgDeptId, setOrgDeptId] = useState<number | null>(dept?.org_department_id ?? null);
+  const [orgDepts, setOrgDepts] = useState<OrgDepartmentOption[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getOrgDepartmentsWithLeads().then((d) => alive && setOrgDepts(d)).catch(() => alive && setOrgDepts([]));
+    return () => { alive = false; };
+  }, []);
   const [busy, setBusy] = useState(false);
 
   const sandboxes = departments.filter((d) => d.kind === "sandbox" && d.id !== dept?.id);
@@ -2256,6 +2266,7 @@ function DepartmentModal({
       visibility,
       visible_to: visibility === "custom" ? visibleTo : [],
       is_default: kind === "sandbox" ? isDefault : false,
+      org_department_id: orgDeptId,
     };
     setBusy(true);
     try {
@@ -2356,6 +2367,14 @@ function DepartmentModal({
           )}
         </div>
 
+        <LeadsSourceField
+          value={orgDeptId}
+          onChange={setOrgDeptId}
+          options={orgDepts}
+          inherited={kind === "team" ? departments.find((d) => d.id === parentId) ?? null : null}
+          disabled={busy}
+        />
+
         <div className="hf-statuses-modal-label">
           Кому виден
           <label className="hf-statuses-modal-radio">
@@ -2423,6 +2442,54 @@ function DepartmentModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/** «Лиды для бота»: из какого отдела «Управления» бот берёт лидов этого отдела.
+ *  Лидам с привязанным Telegram бот пишет о переходе нового сотрудника. */
+function LeadsSourceField({
+  value, onChange, options, inherited, disabled,
+}: {
+  value: number | null;
+  onChange: (id: number | null) => void;
+  options: OrgDepartmentOption[] | null;
+  /** Песочница команды: её связь работает, если у команды своей нет. */
+  inherited: BoardDepartment | null;
+  disabled: boolean;
+}) {
+  const fromParent = value == null && inherited?.org_department_id
+    ? options?.find((o) => o.id === inherited.org_department_id) ?? null
+    : null;
+  const chosen = value != null ? options?.find((o) => o.id === value) ?? null : fromParent;
+  return (
+    <label className="hf-statuses-modal-label">
+      Лиды для бота
+      <select
+        className="hf-statuses-modal-input"
+        value={value ?? ""}
+        disabled={disabled || options === null}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+      >
+        <option value="">
+          {options === null
+            ? "Загружаем отделы…"
+            : fromParent
+              ? `Как у песочницы: ${fromParent.name}`
+              : "Не выбрано"}
+        </option>
+        {(options ?? []).map((o) => (
+          <option key={o.id} value={o.id}>{o.name}</option>
+        ))}
+      </select>
+      <em className="hf-statuses-modal-note">
+        {chosen
+          ? chosen.leads.length
+            ? `Лиды: ${chosen.leads.map((l) => (l.has_telegram ? l.name : `${l.name} (без Telegram)`)).join(", ")}. `
+              + "Бот напишет им о переходе нового сотрудника."
+            : "В этом отделе Управления нет лидов. Назначьте их в Управление → Отделы."
+          : "Отдел из Управление → Отделы. Его лидам бот пишет о новых сотрудниках."}
+      </em>
+    </label>
   );
 }
 

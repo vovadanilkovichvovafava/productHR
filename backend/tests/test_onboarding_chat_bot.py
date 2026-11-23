@@ -9,7 +9,17 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from api.models.database import BoardDepartment, Entity, EntityStatus, EntityType, User, UserRole
+from api.models.database import (
+    BoardDepartment,
+    Department,
+    DepartmentMember,
+    DeptRole,
+    Entity,
+    EntityStatus,
+    EntityType,
+    User,
+    UserRole,
+)
 from api.onboarding.config import Settings
 from api.onboarding.messenger import SendError
 from api.onboarding.models import BotJob, CaseStatus, DepartmentLead, OnboardingCase, Signal
@@ -248,7 +258,53 @@ async def test_lead_registers_and_gets_new_hire(env):
 async def test_transfer_without_lead_tells_hr(env):
     await _practice(env)
     await _transfer(env)
-    assert any("лид отдела не подключён к боту" in t for t in env.messenger.texts(HR_TG))
+    assert any("бот не знает, кто лид отдела" in t for t in env.messenger.texts(HR_TG))
+
+
+async def _org_dept_with_leads(env, *leads):
+    """«Управление → Отделы»: отдел с лидами [(имя, telegram_id)]."""
+    org_dept = Department(org_id=env.org.id, name="RND отдел")
+    env.db.add(org_dept)
+    await env.db.flush()
+    for i, (name, tg) in enumerate(leads):
+        user = User(email=f"lead{i}@test.com", password_hash=hash_password("x"), name=name,
+                    role=UserRole.admin, is_active=True, telegram_id=tg)
+        env.db.add(user)
+        await env.db.flush()
+        env.db.add(DepartmentMember(department_id=org_dept.id, user_id=user.id, role=DeptRole.lead))
+    await env.db.commit()
+    return org_dept
+
+
+async def test_leads_come_from_org_department_without_lead_command(env):
+    """Ильнар, 23.11.2026: «там же всё через базу берётся» — лиды из «Управление → Отделы»,
+    связь у песочницы, команда наследует; оба лида получают нового сотрудника, /lead не нужен."""
+    org_dept = await _org_dept_with_leads(env, ("Владимир", LEAD_TG), ("Ильнар", 7004))
+    sandbox = BoardDepartment(org_id=env.org.id, name="SANDBOX R&D", kind="sandbox", org_department_id=org_dept.id)
+    env.db.add(sandbox)
+    await env.db.flush()
+    env.db.add(BoardDepartment(org_id=env.org.id, name="Push team", kind="team", parent_id=sandbox.id))
+    await env.db.commit()
+
+    case = await _practice(env)
+    await _transfer(env)
+    fresh = await _fresh(env, case.id)
+    assert fresh.lead_name == "Владимир, Ильнар" and fresh.lead_tg_ids == [LEAD_TG, 7004]
+    for tg in (LEAD_TG, 7004):
+        assert env.messenger.texts(tg)[-1].startswith("К тебе в отдел Push team переходит Петров Иван Сергеевич")
+    assert not any("бот не знает, кто лид" in t for t in env.messenger.texts(HR_TG))
+    # второй лид тоже свой: его чат отдела бот узнаёт сам
+    assert await env.bot.handle_bot_added(DEPT_CHAT, 7004)
+    assert (await _fresh(env, case.id)).dept_chat_id == DEPT_CHAT
+
+
+async def test_org_lead_without_telegram_tells_hr(env):
+    org_dept = await _org_dept_with_leads(env, ("Николай", None))
+    env.db.add(BoardDepartment(org_id=env.org.id, name="Push team", kind="team", org_department_id=org_dept.id))
+    await env.db.commit()
+    await _practice(env)
+    await _transfer(env)
+    assert any("Лид Николай не привязал Telegram к staffwise" in t for t in env.messenger.texts(HR_TG))
 
 
 async def test_lead_without_approvers(env, db_session):

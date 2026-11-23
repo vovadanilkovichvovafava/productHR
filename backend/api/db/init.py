@@ -230,6 +230,12 @@ async def init_database():
         # Чат отдела у карточки бота (мит 19.11.2026)
         ("ALTER TABLE onboarding_cases ADD COLUMN IF NOT EXISTS dept_chat_id BIGINT",
          "onboarding_cases.dept_chat_id"),
+        # Лиды отдела из оргструктуры вместо /lead (23.11.2026)
+        ("ALTER TABLE staff_board_departments ADD COLUMN IF NOT EXISTS org_department_id INTEGER "
+         "REFERENCES departments(id) ON DELETE SET NULL",
+         "staff_board_departments.org_department_id"),
+        ("ALTER TABLE onboarding_cases ADD COLUMN IF NOT EXISTS lead_tg_ids JSON",
+         "onboarding_cases.lead_tg_ids"),
         # Передача HR-аккаунтам (api/onboarding/handoff.py): события практика/перевод/стоп,
         # 03.11.2026. Таблица могла появиться в предыдущей версии без этих колонок.
         ("ALTER TABLE onboarding_handoffs ADD COLUMN IF NOT EXISTS practice_date DATE",

@@ -25,7 +25,15 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, or_, select
 
-from api.models.database import BoardDepartment, Entity, OrgMember, OrgRole, User
+from api.models.database import (
+    BoardDepartment,
+    DepartmentMember,
+    DeptRole,
+    Entity,
+    OrgMember,
+    OrgRole,
+    User,
+)
 
 from . import schedule as sch
 from . import texts
@@ -73,7 +81,7 @@ class ChatFlowMixin:
         # Кто добавил: HR кандидата / лид отдела — его люди; иначе — все (только если добавил сотрудник:
         # бот сидит и в других чатах компании, писать туда «для кого чат» незачем).
         mine_p = [c for c in practice if c.hr_tg_id == adder_tg_id]
-        mine_d = [c for c in dept if c.lead_tg_id == adder_tg_id or c.hr_tg_id == adder_tg_id]
+        mine_d = [c for c in dept if adder_tg_id in self.lead_ids(c) or c.hr_tg_id == adder_tg_id]
         options = mine_p + mine_d
         if not options:
             if not staff:
@@ -310,6 +318,62 @@ class ChatFlowMixin:
         want = department.strip().lower()  # сравнение в Python: lower() в SQLite не знает кириллицы
         return next((lead for lead in leads if lead.department.strip().lower() == want), None)
 
+    async def org_department_leads(self, org_id: int | None, department: str | None) -> list[tuple[str, int | None]]:
+        """Лиды отдела «Штата» из оргструктуры: [(имя, telegram_id или None)].
+
+        Отдел доски связан с отделом «Управление → Отделы» (`org_department_id`); у команды
+        без своей связи берётся связь её песочницы. Связи нет или лидов нет — пусто, тогда
+        бот ищет лида, подтверждённого через /lead.
+        """
+        if not department:
+            return []
+        want = department.strip().lower()
+        async with self.sessions() as s:
+            q = select(BoardDepartment)
+            if org_id is not None:
+                q = q.where(BoardDepartment.org_id == org_id)
+            depts = (await s.scalars(q)).all()
+            by_id = {d.id: d for d in depts}
+            board = next((d for d in depts if (d.name or "").strip().lower() == want), None)
+            if board is None:
+                return []
+            link = board.org_department_id
+            if link is None and board.parent_id in by_id:
+                link = by_id[board.parent_id].org_department_id
+            if link is None:
+                return []
+            rows = (await s.execute(
+                select(User.name, User.telegram_id)
+                .join(DepartmentMember, DepartmentMember.user_id == User.id)
+                .where(DepartmentMember.department_id == link, DepartmentMember.role == DeptRole.lead)
+                .order_by(DepartmentMember.id)
+            )).all()
+        return [(name or "", tg) for name, tg in rows]
+
+    async def transfer_leads(
+        self, org_id: int | None, department: str | None,
+    ) -> tuple[str | None, list[int] | None]:
+        """Кто лид отдела для бота: (имена через запятую, telegram_id).
+
+        Сначала оргструктура: тогда список есть всегда, пустой — лиды есть, но без Telegram.
+        Связи с оргструктурой нет — лид, подтверждённый через /lead, или (None, None).
+        """
+        from_org = await self.org_department_leads(org_id, department)
+        if from_org:
+            names = ", ".join(n for n, _ in from_org if n) or None
+            return names, list(dict.fromkeys(tg for _, tg in from_org if tg))
+        lead = await self.department_lead(org_id, department)
+        if lead is None:
+            return None, None
+        return lead.full_name, [lead.tg_id]
+
+    @staticmethod
+    def lead_ids(case: OnboardingCase) -> list[int]:
+        ids = list(case.lead_tg_ids or [])
+        if case.lead_tg_id and case.lead_tg_id not in ids:
+            ids.insert(0, case.lead_tg_id)
+        return ids
+
     async def _after_transfer(self, case: OnboardingCase) -> None:
         """Чат практики — прощание; лиду — «создай чат отдела»; лида нет — сигнал HR."""
         ctx = self._ctx(case)
@@ -321,14 +385,16 @@ class ChatFlowMixin:
         if not self.settings.handoff_to_bot:
             return
         first_day = _ddmm(case.department_start_date)
-        if case.lead_tg_id:
+        leads = self.lead_ids(case)
+        for tg_id in leads:
             try:
-                await self.messenger.send(case.lead_tg_id, texts.LEAD_NEW_HIRE.format(
+                await self.messenger.send(tg_id, texts.LEAD_NEW_HIRE.format(
                     **ctx, first_day=first_day, probation_end_full=_ddmm(case.probation_end_date)))
             except SendError as exc:
                 await self._signal(case, "send_failed", what="лиду о новом сотруднике", error=str(exc))
-        else:
-            await self._signal(case, "no_lead")
+        if not leads:
+            # лиды в оргструктуре есть, но без Telegram — иначе бот вообще не знает лида
+            await self._signal(case, "lead_no_tg" if case.lead_tg_ids == [] and case.lead_name else "no_lead")
 
     async def lead_departments(self) -> list[BoardDepartment]:
         async with self.sessions() as s:

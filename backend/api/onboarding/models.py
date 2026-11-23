@@ -7,7 +7,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 
 from api.models.database import Base
 
@@ -65,6 +65,8 @@ class OnboardingCase(Base):
     department = Column(String(200), nullable=True)
     lead_name = Column(String(200), nullable=True)
     lead_tg_id = Column(BigInteger, nullable=True)
+    # Все лиды отдела с Telegram (из «Управление → Отделы»; lead_tg_id — первый из них)
+    lead_tg_ids = Column(JSON, nullable=True)
     department_start_date = Column(Date, nullable=True)
     probation_end_date = Column(Date, nullable=True)
     # Закрытие испытательного (ТЗ 4): stays / extended; уход — статус left + причина (ТЗ 5)

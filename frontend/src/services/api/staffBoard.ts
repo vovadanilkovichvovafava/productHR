@@ -200,6 +200,9 @@ export interface BoardDepartment {
    *  через это окно (11.11.2026). Свой (offered && !canonical) можно
    *  переименовать и удалить. */
   offered?: boolean;
+  /** Отдел «Управление → Отделы», чьи лиды — лиды этого отдела для бота
+   *  онбординга (23.11.2026). У команды пусто — берётся у песочницы. */
+  org_department_id?: number | null;
 }
 
 export interface BoardDepartmentInput {
@@ -210,6 +213,20 @@ export interface BoardDepartmentInput {
   visible_to?: number[];
   hidden?: boolean;
   is_default?: boolean;
+  /** null — снять связь с отделом Управления. */
+  org_department_id?: number | null;
+}
+
+/** Отдел «Управление → Отделы» с лидами — откуда бот берёт лидов отдела доски. */
+export interface OrgDepartmentOption {
+  id: number;
+  name: string;
+  leads: { name: string; has_telegram: boolean }[];
+}
+
+export async function getOrgDepartmentsWithLeads(): Promise<OrgDepartmentOption[]> {
+  const { data } = await api.get('/staff-board/org-departments');
+  return data || [];
 }
 
 export async function getBoardDepartments(): Promise<BoardDepartment[]> {

@@ -204,11 +204,12 @@ class OnboardingService(ChatFlowMixin):
             if case is None:  # практику вели не мы (до включения бота) — заводим карточку задним числом
                 start = datetime.combine(first_day, datetime.strptime(self.settings.practice_start_time, "%H:%M").time())
                 case = await self.create_case(practice_start=start, **common)
-            lead = await self.department_lead(org_id, event.get("department"))
+            lead_names, lead_ids = await self.transfer_leads(org_id, event.get("department"))
             case = await self.set_status(
                 case.id, CaseStatus.transferred, department=event.get("department"),
-                lead_name=event.get("lead") or (lead.full_name if lead else None),
-                lead_tg_id=lead.tg_id if lead else None, department_start_date=first_day)
+                lead_name=event.get("lead") or lead_names,
+                lead_tg_id=lead_ids[0] if lead_ids else None, lead_tg_ids=lead_ids,
+                department_start_date=first_day)
             log.info("ONBOARDING case=%s transfer entity=%s first_day=%s", case.id, entity_id, first_day)
             return case
         if kind == "stop":
@@ -248,6 +249,7 @@ class OnboardingService(ChatFlowMixin):
         department: str | None = None,
         lead_name: str | None = None,
         lead_tg_id: int | None = None,
+        lead_tg_ids: list[int] | None = None,
         department_start_date: date | None = None,
         reason: str | None = None,
     ) -> OnboardingCase:
@@ -261,6 +263,8 @@ class OnboardingService(ChatFlowMixin):
                 case.department = department or case.department
                 case.lead_name = lead_name or case.lead_name
                 case.lead_tg_id = lead_tg_id or case.lead_tg_id
+                if lead_tg_ids is not None:
+                    case.lead_tg_ids = lead_tg_ids
                 start = department_start_date or self._local_now(case).date()
                 case.department_start_date = start
                 case.probation_end_date = sch.add_months(start, 3)
@@ -630,8 +634,9 @@ class OnboardingService(ChatFlowMixin):
         for who in targets:
             if who == "hr":
                 await self._deliver(case, kind, text)
-            elif case.lead_tg_id:
-                await self._deliver(case, kind, text, [case.lead_tg_id])
+            elif self.lead_ids(case):
+                for lead_tg in self.lead_ids(case):  # _deliver шлёт до первой удачи — каждому лиду отдельно
+                    await self._deliver(case, kind, text, [lead_tg])
             elif "hr" not in targets:
                 # напоминание только для лида, а его Telegram не знаем — не теряем, отдаём HR
                 await self._deliver(case, kind, f"Лиду не доставлено (не привязан Telegram):\n{text}")

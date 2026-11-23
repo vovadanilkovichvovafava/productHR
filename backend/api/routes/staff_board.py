@@ -40,6 +40,7 @@ from ..models.database import (
     BoardStatusView,
     EntityTag, entity_tag_association, OrgMember, OrgRole, UserRole,
     NameTag, entity_name_tag_association,
+    Department, DepartmentMember, DeptRole,
 )
 from ..services.board_catalog import (
     OWN_ITEMS_KEYS, canon_index, canon_positions, own_department_ids, own_items,
@@ -399,6 +400,9 @@ class BoardDept(BaseModel):
     # через это окно (11.11.2026). Свой отдел можно переименовать и удалить,
     # отдел из списка — нет (его узнают по названию).
     offered: bool = False
+    # Отдел «Управление → Отделы», чьих лидов бот онбординга зовёт лидами этого
+    # отдела (23.11.2026). У команды пусто — берётся у песочницы.
+    org_department_id: Optional[int] = None
 
 
 DEPT_KINDS = ("sandbox", "team")
@@ -416,6 +420,7 @@ class BoardDeptCreate(BaseModel):
     visibility: str = "all"
     visible_to: Optional[List[int]] = None
     is_default: Optional[bool] = None
+    org_department_id: Optional[int] = None
 
 
 class BoardDeptOrder(BaseModel):
@@ -432,6 +437,19 @@ class BoardDeptUpdate(BaseModel):
     visibility: Optional[str] = None
     visible_to: Optional[List[int]] = None
     is_default: Optional[bool] = None
+    # null — снять связь; поле не прислали — не трогаем (model_fields_set)
+    org_department_id: Optional[int] = None
+
+
+class OrgDeptLead(BaseModel):
+    name: str
+    has_telegram: bool = False
+
+
+class OrgDeptOption(BaseModel):
+    id: int
+    name: str
+    leads: List[OrgDeptLead] = []
 
 
 class BoardAssignee(BaseModel):
@@ -756,6 +774,7 @@ def _dept_out(
         visible_to=[v for v in ([_as_int(x) for x in (d.visible_to or [])]) if v is not None],
         is_default=(default_id is not None and d.id == default_id),
         offered=(d.kind or "team") != "sandbox" and d.id in (own_ids or []),
+        org_department_id=d.org_department_id,
         **canon,
     )
 
@@ -1296,6 +1315,45 @@ async def list_board_departments(
     return [_dept_out(d, default_id, own) for d in rows]
 
 
+async def _org_department_link(db: AsyncSession, org_id: int, link: Optional[int]) -> Optional[int]:
+    """Отдел «Управления» для связи с отделом доски: свой организации или 400."""
+    if link is None:
+        return None
+    ok = (await db.execute(
+        select(Department.id).where(Department.id == link, Department.org_id == org_id)
+    )).scalar_one_or_none()
+    if ok is None:
+        raise HTTPException(400, "Такого отдела в Управлении нет")
+    return link
+
+
+@router.get("/org-departments", response_model=List[OrgDeptOption])
+async def list_org_departments_with_leads(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отделы «Управление → Отделы» с лидами — выбор «откуда брать лидов» в окне отдела доски."""
+    current_user = await db.merge(current_user)
+    org = await get_user_org(current_user, db)
+    if not org:
+        raise HTTPException(403, "No organization access")
+    depts = (await db.execute(
+        select(Department).where(Department.org_id == org.id, Department.is_active.is_not(False))
+        .order_by(Department.name)
+    )).scalars().all()
+    rows = (await db.execute(
+        select(DepartmentMember.department_id, User.name, User.telegram_id)
+        .join(User, User.id == DepartmentMember.user_id)
+        .where(DepartmentMember.department_id.in_([d.id for d in depts] or [0]),
+               DepartmentMember.role == DeptRole.lead)
+        .order_by(DepartmentMember.id)
+    )).all()
+    leads: Dict[int, List[OrgDeptLead]] = {}
+    for dept_id, name, tg in rows:
+        leads.setdefault(dept_id, []).append(OrgDeptLead(name=name or "", has_telegram=bool(tg)))
+    return [OrgDeptOption(id=d.id, name=d.name, leads=leads.get(d.id, [])) for d in depts]
+
+
 @router.put("/departments/order", response_model=List[BoardDept])
 async def save_board_department_order(
     data: BoardDeptOrder,
@@ -1385,6 +1443,7 @@ async def create_board_department(
         org_id=org.id, name=name, created_by=current_user.id,
         kind=kind, parent_id=parent_id,
         visibility=visibility, visible_to=visible_to,
+        org_department_id=await _org_department_link(db, org.id, data.org_department_id),
     )
     db.add(dept)
     await db.flush()
@@ -1459,6 +1518,11 @@ async def update_board_department(
             f"BOARD_DEPT role: id={dept_id} → {kind}, parent={parent_id}, "
             f"visibility={visibility} by user {current_user.id}"
         )
+
+    if "org_department_id" in data.model_fields_set:
+        link = await _org_department_link(db, org.id, data.org_department_id)
+        dept.org_department_id = link
+        logger.info(f"BOARD_DEPT leads from org dept: id={dept_id} → {link} by user {current_user.id}")
 
     placed_now: Optional[int] = None
     if data.is_default is not None:
