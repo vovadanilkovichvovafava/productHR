@@ -598,7 +598,7 @@ class OnboardingService(ChatFlowMixin):
             if await self._survey_done(s, case.id, kind):
                 return
         await self._send_candidate(  # один раз, без сигнала HR (ТЗ 3.5, 4)
-            case, texts.SURVEY_REMINDER.format(**self._ctx(case)), texts.survey_button(kind), "напоминание об опросе"
+            case, texts.SURVEY_REMINDER.format(**self._ctx(case), about=texts.SURVEY_ABOUT.get(kind, "")), texts.survey_button(kind), "напоминание об опросе"
         )
 
     async def _job_first_day_welcome(self, case: OnboardingCase, payload: dict) -> None:

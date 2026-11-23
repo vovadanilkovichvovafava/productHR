@@ -241,3 +241,30 @@ def test_runtime_enabled_with_to_bot(monkeypatch, raw, expected):
     monkeypatch.setattr("api.config.settings.onboarding_handoff_to_bot", bool(raw))
     assert runtime.enabled() is expected
     assert runtime.handoff_enabled() is expected
+
+
+async def test_survey_reminders_after_weekend_name_the_survey(setup, db_session, organization, admin_user):
+    """Прод 23.11.2026: переход в пятницу — напоминания об опросе о практике и о первом дне ушли
+    в понедельник в 10:00 одинаковым текстом, кандидат видел «дубль». Теперь в тексте — какой опрос."""
+    entity = await _person(db_session, organization, admin_user)
+    await setup.handoff.tick()
+    [case] = await _cases(setup, entity.id)
+    async with setup.sessions() as s:
+        (await s.get(OnboardingCase, case.id)).candidate_tg_id = 555
+        await s.commit()
+
+    setup.clock.now = datetime(2026, 11, 20, 9, 50)  # пятница, 12:50 МСК
+    entity.status = EntityStatus.transferred
+    entity.extra_data = {**entity.extra_data, "department_transfer_date": "2026-11-20"}
+    await db_session.commit()
+    await setup.handoff.tick()
+    setup.clock.now = datetime(2026, 11, 20, 15, 1)  # пятница, 18:01 МСК — опрос первого дня
+    await setup.bot.run_due_jobs()
+    setup.clock.now = datetime(2026, 11, 23, 7, 1)  # понедельник, 10:01 МСК
+    await setup.bot.run_due_jobs()
+
+    reminders = [t for t in setup.messenger.to(555) if "напоминаю про короткий опрос" in t]
+    assert sorted(reminders) == [
+        "Иван, напоминаю про короткий опрос о первом дне — это займёт пару минут.",
+        "Иван, напоминаю про короткий опрос о практике — это займёт пару минут.",
+    ]
