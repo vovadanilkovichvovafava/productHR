@@ -28,6 +28,7 @@ from api.models.database import (
     User, Organization, OrgMember, OrgRole,
 )
 from api.services.auth import get_current_user, get_user_org
+from api.services.biz_time import biz_day_end_utc, biz_day_start_utc
 from api.utils.csv_safe import csv_safe
 
 logger = logging.getLogger("hr-analyzer.pen")
@@ -180,6 +181,17 @@ async def _get_employees_for_org(db: AsyncSession, org_id: int):
     return list(result.scalars().all())
 
 
+def _period_bounds(period_from: Optional[datetime], period_to: Optional[datetime]):
+    """Период ПЭН приходит датами («2026-11-01» … «2026-11-23») — это
+    московские дни целиком. Раньше конец периода был полуночью, и события
+    последнего дня (по умолчанию — сегодняшние) не считались вовсе."""
+    if period_from is not None:
+        period_from = biz_day_start_utc(period_from.date())
+    if period_to is not None:
+        period_to = biz_day_end_utc(period_to.date())
+    return period_from, period_to
+
+
 def _in_period(dt: Optional[datetime], period_from: Optional[datetime], period_to: Optional[datetime]) -> bool:
     """Check if datetime falls within period."""
     if dt is None:
@@ -276,6 +288,7 @@ async def get_pen_metrics(
     db: AsyncSession = Depends(get_db),
 ):
     """Get aggregate PEN metrics for the organization."""
+    period_from, period_to = _period_bounds(period_from, period_to)
     org, role = await _get_org_and_role(user, db)
 
     # Recruiters can only see their own
@@ -324,6 +337,7 @@ async def get_pen_recruiters(
     db: AsyncSession = Depends(get_db),
 ):
     """Get per-recruiter PEN breakdown. Lead/HRD only."""
+    period_from, period_to = _period_bounds(period_from, period_to)
     org, role = await _get_org_and_role(user, db)
     if not _is_lead_or_above(user, role):
         raise HTTPException(status_code=403, detail="Lead/HRD access required")

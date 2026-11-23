@@ -20,6 +20,7 @@ import * as employeesApi from '@/services/api/employees';
 import * as docsApi from '@/services/api/documents';
 import type { SignedDocument } from '@/services/api/documents';
 import SignatureCanvas from '@/components/SignatureCanvas';
+import { parseServerDay } from '@/utils/date';
 import type {
   EmployeeData,
   LeaveBalance,
@@ -32,7 +33,7 @@ import type {
 
 function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString('ru-RU', {
+  return parseServerDay(dateStr).toLocaleDateString('ru-RU', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -193,8 +194,8 @@ function LeaveRequestModal({
     try {
       const payload: LeaveRequestCreate = {
         type,
-        start_date: new Date(startDate).toISOString(),
-        end_date: new Date(endDate).toISOString(),
+        start_date: `${startDate}T00:00:00`,
+        end_date: `${endDate}T00:00:00`,
         days,
         reason: reason || null,
       };

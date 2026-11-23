@@ -22,6 +22,21 @@ export function parseServerDate(dateString: string | Date): Date {
 }
 
 /**
+ * День для показа. Дата без времени («2026-11-20») и «конец/начало дня» без
+ * пояса («…T00:00:00», «…T23:59:59» — так хранятся дедлайны, даты отпусков,
+ * выход в отдел) — это КАЛЕНДАРНЫЙ день, он одинаков в любой стране: читаем
+ * его как местную дату. Через UTC он уезжал: у смотрящего западнее Лондона
+ * «20.11» становилось «19.11», а дедлайн «до 25.11» в Москве — «26.11».
+ * Всё остальное — момент времени с сервера (naive UTC), как parseServerDate.
+ */
+export function parseServerDay(value: string | Date): Date {
+  if (value instanceof Date) return value;
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](?:00:00(?::00(?:\.0+)?)?|23:59(?::59(?:\.9+)?)?))?$/.exec(value);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return parseServerDate(value);
+}
+
+/**
  * Время уведомления в колокольчике: «19 нояб., 21:36» по часам смотрящего.
  * Раньше строку разбирал `new Date(...)` без пометки UTC, и уведомление шло
  * на 3 часа раньше, чем время той же анкеты (Мария, 23.11.2026).
@@ -206,7 +221,7 @@ export function isPast(dateString: string | Date | undefined | null): boolean {
  */
 export function calculateAge(birthDate: string | undefined | null): number | null {
   if (!birthDate) return null;
-  const birth = new Date(birthDate);
+  const birth = parseServerDay(birthDate);
   if (isNaN(birth.getTime())) return null;
   const now = new Date();
   let age = now.getFullYear() - birth.getFullYear();

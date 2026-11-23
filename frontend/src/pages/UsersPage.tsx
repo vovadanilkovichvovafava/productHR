@@ -37,6 +37,7 @@ import clsx from 'clsx';
 import { backdropClose } from '@/utils/backdropClose';
 import { getEmailDomain, type EmailDomainMember } from '@/services/api/auth';
 import { EmailDomainCard, MemberEmail } from '@/components/users/EmailDomainCard';
+import { parseServerDate } from '@/utils/date';
 
 const ORG_ROLE_CONFIG: Record<OrgRole, { label: string; icon: typeof Crown; color: string; description: string }> = {
   owner: { label: 'Владелец', icon: Crown, color: 'text-yellow-400 bg-yellow-500/20', description: 'Полный доступ, управление организацией' },
@@ -449,7 +450,7 @@ function OrganizationMembers({ currentUser }: { currentUser: any }) {
 
                 {member.invited_by_name && (
                   <p className="text-xs text-white/30 mt-2">
-                    Приглашён: {member.invited_by_name} • {new Date(member.created_at).toLocaleDateString('ru-RU')}
+                    Приглашён: {member.invited_by_name} • {parseServerDate(member.created_at).toLocaleDateString('ru-RU')}
                   </p>
                 )}
               </motion.div>
@@ -512,7 +513,7 @@ function InvitationCard({ invitation, onRevoke }: { invitation: Invitation; onRe
   }, []);
 
   const inviteUrl = `${window.location.origin}${invitation.invitation_url}`;
-  const isExpired = invitation.expires_at && new Date(invitation.expires_at) < new Date();
+  const isExpired = invitation.expires_at && parseServerDate(invitation.expires_at) < new Date();
 
   const copyLink = async () => {
     try {
@@ -582,7 +583,7 @@ function InvitationCard({ invitation, onRevoke }: { invitation: Invitation; onRe
             {invitation.expires_at && (
               <span className="flex items-center gap-1">
                 <Clock size={12} />
-                До: {new Date(invitation.expires_at).toLocaleDateString('ru-RU')}
+                До: {parseServerDate(invitation.expires_at).toLocaleDateString('ru-RU')}
               </span>
             )}
           </div>
@@ -749,7 +750,7 @@ function InviteMemberModal({
           {createdInvitation.expires_at && (
             <p className="text-xs text-white/40 text-center mb-4 flex items-center justify-center gap-1">
               <Clock size={12} />
-              Действует до: {new Date(createdInvitation.expires_at).toLocaleDateString('ru-RU')}
+              Действует до: {parseServerDate(createdInvitation.expires_at).toLocaleDateString('ru-RU')}
             </p>
           )}
 

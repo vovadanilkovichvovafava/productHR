@@ -14,6 +14,7 @@ import AddToVacancyModal from '@/components/entities/AddToVacancyModal';
 
 import type { SetURLSearchParams } from 'react-router-dom';
 import { avatarThumbUrl } from '@/utils/avatarThumb';
+import { parseServerDate } from '@/utils/date';
 
 // Список кандидатов воронки слева: строки, выбор галочками, массовые действия
 // («Перенести», «Удалить с воронки») — вынесено из RecruiterFunnelsPage, 20.10.2026.
@@ -203,7 +204,7 @@ export function FunnelCandidateList({
                   )}
                   {(candidate.last_stage_change_at || candidate.applied_at) && (
                     <span className="hf-candidate-row-date" title="Дата последнего переноса статуса">
-                      {new Date(candidate.last_stage_change_at || candidate.applied_at).toLocaleDateString('ru')}
+                      {parseServerDate(candidate.last_stage_change_at || candidate.applied_at).toLocaleDateString('ru')}
                     </span>
                   )}
                 </div>

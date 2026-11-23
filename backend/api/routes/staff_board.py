@@ -23,6 +23,7 @@ PracticeListPage, так что уже введённые данные подх�
 import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from ..services.biz_time import biz_today, to_biz
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -942,8 +943,8 @@ def _remember_rotation(
     history.append({
         "department_id": old_dept.id,
         "name": old_dept.name,
-        "from": old.created_at.date().isoformat() if old.created_at else None,
-        "to": date.today().isoformat(),
+        "from": to_biz(old.created_at).date().isoformat() if old.created_at else None,
+        "to": biz_today().isoformat(),
     })
     ex[_K_TEAM_HISTORY] = history
     entity.extra_data = ex
@@ -1929,7 +1930,7 @@ async def create_placement(
     if (dept.kind or "team") != "sandbox":
         ex = dict(_extra(entity))
         if not _pick(ex, _K_DEPT_START, _CF_DEPT_START):
-            ex[_K_DEPT_START] = date.today().isoformat()
+            ex[_K_DEPT_START] = biz_today().isoformat()
             entity.extra_data = ex
             flag_modified(entity, "extra_data")
     db.add(placement)
@@ -3083,7 +3084,7 @@ async def update_row(
     if autofill_dept_start:
         store = bucket(_K_DEPT_START)
         if not store.get(_K_DEPT_START) and not store.get(_CF_DEPT_START):
-            store[_K_DEPT_START] = date.today().isoformat()
+            store[_K_DEPT_START] = biz_today().isoformat()
             touched_extra = True
 
     # Отметки у вех — текст (галочка, крестик, месяц, бонус). Пустое значение

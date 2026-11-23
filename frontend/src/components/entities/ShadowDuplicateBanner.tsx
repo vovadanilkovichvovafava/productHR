@@ -16,6 +16,7 @@ import {
 } from "@/services/api/entities";
 import { clearCompareFilesCache } from "./CompareResumePreview";
 import { STATUS_LABELS } from "@/types";
+import { parseServerDate } from "@/utils/date";
 import {
   CompareTable,
   DupCarousel,
@@ -410,7 +411,7 @@ export default function ShadowDuplicateBanner({ card, status, onResolved, reject
                       details: [
                         ent?.position,
                         ((ent as unknown as { city?: string } | undefined)?.city) || ((ent?.extra_data as { city?: string } | undefined)?.city),
-                        ent?.created_at ? `добавлена ${new Date(ent.created_at).toLocaleDateString("ru", { day: "numeric", month: "short", year: "numeric" })}` : null,
+                        ent?.created_at ? `добавлена ${parseServerDate(ent.created_at).toLocaleDateString("ru", { day: "numeric", month: "short", year: "numeric" })}` : null,
                       ].filter(Boolean).join(" · ") || undefined,
                       badge: ent?.is_archived
                         ? { text: "архив", tone: "gray" }

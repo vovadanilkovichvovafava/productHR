@@ -40,6 +40,7 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
+import { parseServerDate } from '@/utils/date';
 
 // Available permissions that can be configured
 const AVAILABLE_PERMISSIONS = [
@@ -1116,7 +1117,7 @@ export default function RoleManagement() {
                           {log.action === 'create' ? 'создание' : log.action === 'update' ? 'изменение' : 'удаление'}
                         </span>
                         <span className="text-dark-500 text-xs">
-                          {new Date(log.created_at).toLocaleString()}
+                          {parseServerDate(log.created_at).toLocaleString('ru-RU')}
                         </span>
                       </div>
                       {log.permission && (

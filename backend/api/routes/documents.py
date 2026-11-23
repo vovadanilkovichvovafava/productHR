@@ -12,6 +12,7 @@ import binascii
 import logging
 import re
 from datetime import datetime
+from ..services.biz_time import biz_now
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -120,7 +121,7 @@ def _validate_signature(data: str) -> None:
 
 def _render_template(content: str, employee: Employee, user: User) -> str:
     """Replace {{variables}} in template with employee data."""
-    now = datetime.utcnow()
+    now = biz_now()  # дата документа — сегодняшнее число по Москве
     replacements = {
         "name": user.name or "",
         "email": user.email or "",

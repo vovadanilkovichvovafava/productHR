@@ -14,6 +14,7 @@ User заводится с недоступным случайным парол�
 """
 import secrets
 from datetime import date, datetime
+from ...services.biz_time import biz_today
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -195,7 +196,7 @@ async def hire_entity(
         # сегодня, но только если её ещё нет: вбитую руками не перетираем.
         ex = dict(ent.extra_data) if isinstance(ent.extra_data, dict) else {}
         if not ex.get("department_transfer_date") and not ex.get("cf:Выход в отдел"):
-            ex["department_transfer_date"] = date.today().isoformat()
+            ex["department_transfer_date"] = biz_today().isoformat()
             ent.extra_data = ex
             flag_modified(ent, "extra_data")
     if data.position:

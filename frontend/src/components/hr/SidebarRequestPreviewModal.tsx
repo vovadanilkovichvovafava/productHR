@@ -5,7 +5,7 @@ import toast from "react-hot-toast";
 import { X } from "lucide-react";
 import { sanitizeHtml } from "@/utils/sanitizeHtml";
 import { formatSalary } from "@/utils/currency";
-import { parseServerDate } from "@/utils/date";
+import { parseServerDay } from "@/utils/date";
 import { hasPersonallyAccepted } from "@/utils/vacancy";
 import { useAuthStore } from "@/stores/authStore";
 import { useVacancyStore } from "@/stores/vacancyStore";
@@ -22,7 +22,7 @@ function formatSidebarVacancyDate(date?: string | null) {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  }).format(parseServerDate(date));
+  }).format(parseServerDay(date));
 }
 
 function RequestPreviewBlock({

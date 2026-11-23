@@ -49,10 +49,19 @@ STATIC_DIR = Path(__file__).parent / "static"
 MINIAPP_DIR = Path(__file__).parent / "static-miniapp"
 
 
+def _days_left_text(what: str, days_left: int) -> str:
+    if days_left <= 0:
+        return f"{what} сегодня"
+    if days_left == 1:
+        return f"{what} завтра"
+    return f"{what} через {days_left} дн."
+
+
 async def employee_reminders_task():
     """Daily check for probation endings and 1-year anniversaries, creates notifications for HRD."""
     from datetime import datetime, timedelta
     from api.database import AsyncSessionLocal
+    from api.services.biz_time import biz_day_start_utc, biz_today
     from api.models.database import Employee, Notification, OrgMember, OrgRole
     from sqlalchemy import select, and_, or_
     from sqlalchemy.orm import selectinload
@@ -63,8 +72,14 @@ async def employee_reminders_task():
     while True:
         try:
             async with AsyncSessionLocal() as db:
-                now = datetime.utcnow()
+                # Даты срока и годовщины — календарные дни (хранятся полуночью),
+                # «сегодня» — по Москве. Раньше сравнивали с текущим моментом по
+                # UTC: «через N дн.» выходило на день меньше, а в сам последний
+                # день напоминания не было вовсе.
+                today = biz_today()
+                now = datetime.combine(today, datetime.min.time())
                 in_7_days = now + timedelta(days=7)
+                day_start_utc = biz_day_start_utc(today)
 
                 # Find employees with upcoming probation end or 1-year anniversary
                 result = await db.execute(
@@ -102,14 +117,14 @@ async def employee_reminders_task():
 
                     for admin_id in admin_ids:
                         if emp.probation_end_date and now <= emp.probation_end_date <= in_7_days:
-                            days_left = (emp.probation_end_date - now).days
+                            days_left = (emp.probation_end_date.date() - today).days
                             # Check if notification already exists today
                             existing = await db.execute(
                                 select(Notification).where(
                                     Notification.user_id == admin_id,
                                     Notification.type == "probation_ending",
                                     Notification.link == f"/employees?highlight={emp.id}",
-                                    Notification.created_at >= now.replace(hour=0, minute=0, second=0),
+                                    Notification.created_at >= day_start_utc,
                                 )
                             )
                             if not existing.scalar_one_or_none():
@@ -117,18 +132,18 @@ async def employee_reminders_task():
                                     user_id=admin_id,
                                     type="probation_ending",
                                     title=f"Испытательный срок: {name}",
-                                    message=f"Испытательный срок заканчивается через {days_left} дн.",
+                                    message=_days_left_text("Испытательный срок заканчивается", days_left),
                                     link=f"/employees?highlight={emp.id}",
                                 ))
 
                         if emp.one_year_date and now <= emp.one_year_date <= in_7_days:
-                            days_left = (emp.one_year_date - now).days
+                            days_left = (emp.one_year_date.date() - today).days
                             existing = await db.execute(
                                 select(Notification).where(
                                     Notification.user_id == admin_id,
                                     Notification.type == "one_year_anniversary",
                                     Notification.link == f"/employees?highlight={emp.id}",
-                                    Notification.created_at >= now.replace(hour=0, minute=0, second=0),
+                                    Notification.created_at >= day_start_utc,
                                 )
                             )
                             if not existing.scalar_one_or_none():
@@ -136,7 +151,7 @@ async def employee_reminders_task():
                                     user_id=admin_id,
                                     type="one_year_anniversary",
                                     title=f"1 год работы: {name}",
-                                    message=f"Годовщина работы через {days_left} дн.",
+                                    message=_days_left_text("Годовщина работы", days_left),
                                     link=f"/employees?highlight={emp.id}",
                                 ))
 

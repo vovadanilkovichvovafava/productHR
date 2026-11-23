@@ -7,6 +7,7 @@ import {
   type PublicPreviewFile,
 } from '@/services/api/entities';
 import { sanitizeHtml } from '@/utils/sanitizeHtml';
+import { parseServerDate } from '@/utils/date';
 
 /**
  * Публичный предпросмотр кандидата для заказчика (модуль 3).
@@ -210,7 +211,7 @@ export default function CandidatePreviewPage() {
                     <div key={i}>
                       <div className="text-xs text-emerald-600/90">
                         {item.author_name || 'HR'}
-                        {item.date && ` · ${new Date(item.date).toLocaleString('ru', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`}
+                        {item.date && ` · ${parseServerDate(item.date).toLocaleString('ru', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`}
                       </div>
                       <div className="text-[14px] text-emerald-950 whitespace-pre-wrap">
                         {item.title && <div>{item.title}</div>}

@@ -59,6 +59,7 @@ import { getInitials, formatPhoneDisplay, getVacancyStageLabel } from "@/compone
 import { AnketaTab } from "@/components/entities/candidateDetail/AnketaTab";
 import { useCandidateActivity } from "@/components/entities/candidateDetail/useCandidateActivity";
 import { type DetailSection, type StageContainer, resolveContainerStatusLabel } from "@/components/entities/candidateDetail/model";
+import { parseServerDate } from "@/utils/date";
 const AnketaDrawer = lazy(() =>
   import("@/features/forms/AnketaDrawer").then((m) => ({ default: m.AnketaDrawer })),
 );
@@ -949,7 +950,7 @@ export const InfoTab = memo(function InfoTab({
           key={`removed-${f.application_id}`}
           card={card}
           applicationId={-f.application_id}
-          vacancyTitle={`${f.vacancy_title || "Воронка"} · убран(а) из воронки${f.removed_by_name ? ` · ${f.removed_by_name}` : ""}${f.removed_at ? `, ${new Date(f.removed_at).toLocaleDateString("ru")}` : ""}`}
+          vacancyTitle={`${f.vacancy_title || "Воронка"} · убран(а) из воронки${f.removed_by_name ? ` · ${f.removed_by_name}` : ""}${f.removed_at ? `, ${parseServerDate(f.removed_at).toLocaleDateString("ru")}` : ""}`}
           currentStage={f.stage || "rejected"}
           notes={[]}
           events={f.events}

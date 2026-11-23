@@ -20,9 +20,10 @@ import { getAcceptorIds, getVacancyExitOptions } from '@/utils/vacancy';
 import type { Vacancy, User } from '@/types';
 import { VacancyStatusBadge } from '@/components/vacancies';
 import { HUNTFLOW_VACANCY_STATUS_FILTERS } from '@/components/hr/huntflowVacancyStatus';
+import { parseServerDay } from '@/utils/date';
 const formatVacancyListDate = (date?: string | null) => {
   if (!date) return 'не указана';
-  const parsed = new Date(date);
+  const parsed = parseServerDay(date);
   if (Number.isNaN(parsed.getTime())) return 'не указана';
   return parsed.toLocaleDateString('ru-RU', {
     day: 'numeric',

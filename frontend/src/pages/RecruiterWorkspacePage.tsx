@@ -9,6 +9,7 @@ import clsx from 'clsx';
 import * as workspacesApi from '@/services/api/workspaces';
 import { smartNameMatch, contactMatch } from '@/utils/translit';
 import { FUNNEL_STAGE_ORDER, HR_STAGES, STAGE_LABEL_BY_STAGE, STAGE_TAB_COLORS, type StageTabColors } from '@/constants/hrStages';
+import { parseServerDay } from '@/utils/date';
 
 // --------------- constants ---------------
 
@@ -223,7 +224,7 @@ export default function RecruiterWorkspacePage() {
   const formatDate = (iso?: string | null) => {
     if (!iso) return '';
     try {
-      return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+      return parseServerDay(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
     } catch {
       return '';
     }

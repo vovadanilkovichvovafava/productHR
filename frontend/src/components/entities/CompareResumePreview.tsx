@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Download, ExternalLink, FileText, Loader2 } from "lucide-react";
 import { getEntityFiles, type EntityFile } from "@/services/api/entities";
 import { buildResumeSources } from "./candidateDetail/model";
+import { parseServerDate } from "@/utils/date";
 
 /**
  * Резюме кандидата прямо в окне сравнения дублей: САМ загруженный файл (PDF в
@@ -32,7 +33,7 @@ export type ResumeTextParts = {
 
 function fmtDate(iso?: string | null): string {
   if (!iso) return "";
-  const d = new Date(iso);
+  const d = parseServerDate(iso);
   return Number.isNaN(d.getTime())
     ? ""
     : d.toLocaleDateString("ru", { day: "numeric", month: "short", year: "numeric" });

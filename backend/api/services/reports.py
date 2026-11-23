@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from .biz_time import format_biz_datetime
 
 logger = logging.getLogger(__name__)
 from reportlab.lib import colors
@@ -128,7 +129,7 @@ def generate_pdf_report(title: str, content: str, chat_title: str) -> bytes:
 
     # Title
     story.append(Paragraph(escape_html(f"Аналитический отчёт: {chat_title}"), styles['CustomTitle']))
-    story.append(Paragraph(f"Дата создания: {datetime.now().strftime('%d.%m.%Y %H:%M')}", styles['CustomBody']))
+    story.append(Paragraph(f"Дата создания: {format_biz_datetime(datetime.utcnow())}", styles['CustomBody']))
     story.append(Spacer(1, 30))
 
     # Parse markdown and add content
@@ -210,7 +211,7 @@ def generate_docx_report(title: str, content: str, chat_title: str) -> bytes:
     # Date
     date_para = doc.add_paragraph()
     date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    date_run = date_para.add_run(f"Дата создания: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    date_run = date_para.add_run(f"Дата создания: {format_biz_datetime(datetime.utcnow())}")
     date_run.font.size = Pt(10)
     date_run.font.color.rgb = RGBColor(100, 100, 100)
 

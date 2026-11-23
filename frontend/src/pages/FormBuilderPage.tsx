@@ -18,6 +18,7 @@ import { FormBuilder, nextFieldId, fieldWord, submissionWord } from '@/features/
 import { useAuthStore } from '@/stores/authStore';
 import HrConfirm from '@/components/hr/HrConfirm';
 import { FormsPageTabs } from '@/features/forms/FormsPageTabs';
+import { parseServerDate } from '@/utils/date';
 
 // ============================================================
 // List mode component
@@ -154,7 +155,7 @@ function FormListView() {
               </td>
               <td className="hf-forms-td hf-forms-td-num">{form.fields.length} {fieldWord(form.fields.length)}</td>
               <td className="hf-forms-td hf-forms-td-num">
-                {form.created_at ? new Date(form.created_at).toLocaleDateString('ru') : '—'}
+                {form.created_at ? parseServerDate(form.created_at).toLocaleDateString('ru') : '—'}
               </td>
               <td className="hf-forms-td hf-forms-td-actions">
                 {/* «Скопировать ссылку» убрана: публичный slug-сабмит намеренно

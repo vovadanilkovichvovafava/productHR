@@ -45,6 +45,7 @@ import {
   ErrorMessage,
 } from '@/components/ui';
 import { HUNTFLOW_VACANCY_STATUS_FILTERS, getHuntflowVacancyStatusFilterLabel } from '@/components/hr/huntflowVacancyStatus';
+import { parseServerDay } from '@/utils/date';
 
 export default function VacanciesPage() {
   const { vacancyId } = useParams();
@@ -417,7 +418,7 @@ export default function VacanciesPage() {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
-    }).format(new Date(value));
+    }).format(parseServerDay(value));
   };
 
   const getVacancyStatusLabel = (status: VacancyStatus) =>

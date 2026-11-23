@@ -32,6 +32,7 @@ import { useUrlTab } from "@/hooks/useUrlTab";
 import { useAuthStore } from "@/stores/authStore";
 import { STATUS_LABELS } from "@/types";
 import DepartureReasonModal from "@/components/hr/DepartureReasonModal";
+import { parseServerDay } from "@/utils/date";
 
 /**
  * Страница «Статусы» — доска жизненного цикла сотрудника внутри направления.
@@ -265,13 +266,13 @@ const filterLabel = (key: FilterKey) => fieldLabel(key);
  *  В фильтрах, чипах и выгрузке остаётся полная «09.11.2026». */
 const fmtShort = (iso: string | null) => {
   if (!iso) return "";
-  const d = new Date(iso);
+  const d = parseServerDay(iso);
   return isNaN(d.getTime()) ? "" : `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
 };
 
 const fmt = (iso: string | null) => {
   if (!iso) return "";
-  const d = new Date(iso);
+  const d = parseServerDay(iso);
   return isNaN(d.getTime()) ? "" : d.toLocaleDateString("ru-RU");
 };
 

@@ -14,7 +14,7 @@ from typing import Optional, List
 
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -25,6 +25,7 @@ from api.models.database import (
     DepartmentMember, OrgUnit, OrgMember, OrgRole, Notification, EmployeeDocument, UserRole,
 )
 from api.services.auth import get_current_user, get_user_org, hash_password, revoke_all_user_tokens
+from api.services.biz_time import to_naive_utc
 from api.services.leave_limits import family_total, limit_for, sick_total
 
 logger = logging.getLogger("hr-analyzer.employees")
@@ -286,6 +287,15 @@ class LeaveRequestCreate(BaseModel):
     # Принимается для совместимости и ИГНОРИРУЕТСЯ: дни считает сервер по датам.
     days: Optional[int] = None
     reason: Optional[str] = None
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def _naive_utc(cls, v: datetime) -> datetime:
+        # «Мой профиль» шлёт toISOString() — с «Z». Колонка без пояса, и
+        # asyncpg на aware-значении падает («can't subtract offset-naive and
+        # offset-aware datetimes») — заявка уходила в 500. Окно Factorial шлёт
+        # без пояса — его значение не меняется.
+        return to_naive_utc(v)
 
 
 _LEAVE_MAX_DAYS = 366

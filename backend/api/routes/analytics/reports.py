@@ -9,7 +9,7 @@ Reports:
 5. Candidate Movement (Движение кандидатов) — how many moved between stages
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ from ...models.database import (
     OrgMember, OrgRole, EntityTag, entity_tag_association,
 )
 from ...services.auth import get_current_user, get_user_org
+from ...services.biz_time import biz_day_end_utc, biz_day_start_utc, format_biz_date
 from ...utils.logging import get_logger
 from ...services.hr_stages import STAGE_LABELS  # общий справочник этапов
 
@@ -190,16 +191,18 @@ def _get_date_filter(period: str, date_from_str: Optional[str] = None, date_to_s
     For custom range: returns (date_from, date_to).
     """
     if period == "custom" and date_from_str:
+        # Дни периода — московские (рабочее время платформы, 23.11.2026):
+        # «1–30 ноября» = с 00:00 1-го до конца 30-го по Москве. Раньше границы
+        # были по UTC, и всё, что делали с 00:00 до 03:00 МСК 1-го числа,
+        # попадало в прошлый месяц.
         try:
-            df = datetime.fromisoformat(date_from_str)
+            df = biz_day_start_utc(date.fromisoformat(date_from_str[:10]))
         except ValueError:
             df = None
         dt = None
         if date_to_str:
             try:
-                dt = datetime.fromisoformat(date_to_str)
-                # Include the full end day
-                dt = dt.replace(hour=23, minute=59, second=59)
+                dt = biz_day_end_utc(date.fromisoformat(date_to_str[:10]))
             except ValueError:
                 pass
         return df, dt
@@ -315,9 +318,9 @@ async def get_time_to_fill(
                 candidate_name=row.candidate_name or "—",
                 vacancy_title=row.vacancy_title or "—",
                 recruiter_name=recruiter.name if recruiter else None,
-                closed_date=row.last_stage_change_at.strftime("%d %B %Y") if row.last_stage_change_at else None,
+                closed_date=format_biz_date(row.last_stage_change_at) if row.last_stage_change_at else None,
                 days_to_close=days,
-                start_date=row.applied_at.strftime("%d %B %Y") if row.applied_at else None,
+                start_date=format_biz_date(row.applied_at) if row.applied_at else None,
             ))
 
     avg_days = round(sum(days_list) / len(days_list), 1) if days_list else None

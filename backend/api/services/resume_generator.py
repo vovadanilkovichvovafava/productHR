@@ -9,6 +9,7 @@ import os
 import logging
 import re
 from datetime import datetime
+from .biz_time import format_biz_datetime
 from typing import Optional
 
 import anthropic
@@ -404,7 +405,7 @@ def generate_candidate_pdf(
         spaceAfter=6,
     ))
     story.append(Paragraph(
-        f"Сгенерировано: {datetime.now().strftime('%d.%m.%Y %H:%M')} | HR-Bot AI",
+        f"Сгенерировано: {format_biz_datetime(datetime.utcnow())} | HR-Bot AI",
         ParagraphStyle(
             'Footer', fontName=font_regular, fontSize=7,
             textColor=colors.HexColor('#999999'),

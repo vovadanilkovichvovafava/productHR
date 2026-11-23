@@ -35,6 +35,7 @@ import {
 // Единый рендер ответа анкеты: ClickUp-вложение (JSON) → кликабельная ссылка,
 // гео-JSON → адрес. Иначе объединённая анкета вываливает сырой JSON.
 import { renderAnswer, isBlankAnswer } from "./ImportedParticipations";
+import { parseServerDate } from "@/utils/date";
 
 // ---------- откуда берутся файлы ----------
 // Обычно — из живой карточки. Удалённую карточку корзина рисует тем же
@@ -64,7 +65,7 @@ function getInitials(name: string): string {
 }
 
 function formatDateFull(dateStr: string): string {
-  return new Date(dateStr).toLocaleString("ru", {
+  return parseServerDate(dateStr).toLocaleString("ru", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -74,7 +75,7 @@ function formatDateFull(dateStr: string): string {
 }
 
 function formatResumeSaved(dateStr: string): string {
-  const date = new Date(dateStr);
+  const date = parseServerDate(dateStr);
   const months = [
     "января",
     "февраля",
@@ -563,7 +564,7 @@ const ResumeTab = memo(function ResumeTab({
                     {m.name || "Кандидат"}
                   </span>
                   {m.merged_by_name ? ` · ${m.merged_by_name}` : ""}
-                  {m.merged_at ? ` · ${new Date(m.merged_at).toLocaleString("ru")}` : ""}
+                  {m.merged_at ? ` · ${parseServerDate(m.merged_at).toLocaleString("ru")}` : ""}
                 </div>
                 {hasBody ? (
                   <ImportedQuestionnaire

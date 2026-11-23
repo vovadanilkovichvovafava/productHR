@@ -17,6 +17,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { getErrorDetail } from '@/utils';
 import * as timeoffApi from '@/services/api/timeoff';
 import type { TimeOffRequest, TimeOffCalendarEntry } from '@/services/api/timeoff';
+import { parseServerDate } from '@/utils/date';
 
 // ============================================================
 // CONSTANTS
@@ -80,7 +81,7 @@ function formatDateRange(from: string, to: string): string {
 
 function timeAgo(dateStr: string): string {
   const now = new Date();
-  const date = new Date(dateStr);
+  const date = parseServerDate(dateStr);
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return 'только что';

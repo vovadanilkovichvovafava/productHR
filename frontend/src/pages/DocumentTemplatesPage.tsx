@@ -20,6 +20,7 @@ import {
 import clsx from 'clsx';
 import * as docsApi from '@/services/api/documents';
 import type { DocumentTemplate, DocumentTemplateCreate } from '@/services/api/documents';
+import { parseServerDate } from '@/utils/date';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -204,7 +205,7 @@ export default function DocumentTemplatesPage() {
                     </div>
                   )}
                   <p className="text-xs text-white/20 mt-2">
-                    Создан: {t.created_at ? new Date(t.created_at).toLocaleDateString('ru-RU') : '—'}
+                    Создан: {t.created_at ? parseServerDate(t.created_at).toLocaleDateString('ru-RU') : '—'}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 ml-4">

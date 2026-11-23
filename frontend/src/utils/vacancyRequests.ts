@@ -1,4 +1,5 @@
 import type { User, Vacancy, VacancyStatus } from "@/types";
+import { parseServerDate } from "@/utils/date";
 
 // Какие заявки видны в разделе «Заявки» и как работают его фильтры — чистая
 // функция (вынесено из VacanciesPage, 20.10.2026, без изменения поведения),
@@ -136,7 +137,7 @@ export function filterVacancyRequests(
     if (quickFilters.dateRange !== 'any') {
       const dateConfig = DATE_RANGES.find(d => d.id === quickFilters.dateRange);
       if (dateConfig?.days) {
-        const vacancyDate = new Date(vacancy.created_at);
+        const vacancyDate = parseServerDate(vacancy.created_at);
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - dateConfig.days);
         if (vacancyDate < cutoffDate) return false;

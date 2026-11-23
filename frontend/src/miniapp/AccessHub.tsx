@@ -16,6 +16,7 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { getMyEmployeeProfile, type EmployeeData } from "@/services/api/employees";
 import AccessAdmin from "./AccessAdmin";
 import type { Me } from "./MiniApp";
+import { parseServerDay } from "@/utils/date";
 
 /**
  * Хаб доступов — кабинет сотрудника.
@@ -49,7 +50,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const fmtDate = (iso: string | null) => {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = parseServerDay(iso);
   return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("ru-RU");
 };
 

@@ -6,7 +6,7 @@ import { sanitizeHtml } from "@/utils/sanitizeHtml";
 import { CompareResumePreview } from "./CompareResumePreview";
 import { pickTelegram } from "./candidateDetail/model";
 import { getEntityActivity, type VacancyActivityBlock } from "@/services/api/entities";
-import { parseServerDate } from "@/utils/date";
+import { parseServerDate, formatDate } from "@/utils/date";
 import { STAGE_CHIP_BRIGHT_BY_STAGE, STAGE_LABEL_BY_STAGE } from "@/constants/hrStages";
 
 const stageLabel = (stage: string): string =>
@@ -367,7 +367,7 @@ function NotesList({ notes }: { notes: Side["notes"] }) {
             className="text-slate-800 whitespace-pre-wrap hf-rich-content"
             dangerouslySetInnerHTML={{ __html: sanitizeHtml(n.text) }}
           />
-          <div className="text-slate-400 mt-1">{[n.author, n.date?.replace("T", " ").slice(0, 16)].filter(Boolean).join(" · ")}</div>
+          <div className="text-slate-400 mt-1">{[n.author, n.date ? formatDate(n.date, "datetime") : ""].filter(Boolean).join(" · ")}</div>
         </div>
       ))}
     </div>
