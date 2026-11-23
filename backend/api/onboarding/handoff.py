@@ -433,12 +433,12 @@ class HandoffService:
             to_bot = self.settings.handoff_to_bot
             if moved_from:
                 done = "напоминания бота перенесены" if to_bot else "HR-профилю передано"
-                text = (f"{self._name_html(entity)}: дата практики изменена "
-                        f"({moved_from.strftime('%d.%m.%Y')} → {event['practice_start']}), {done}.")
+                text = (f"{self._name_html(entity)}: дата практики изменена с "
+                        f"{moved_from.strftime('%d.%m.%Y')} на {event['practice_start']}, {done}.")
             elif auto_date:
                 who = "бот перенесёт напоминания" if to_bot else "HR-профиль получит новую"
-                text += (" Дата выхода на практику не стояла — поставлена следующим рабочим днём на "
-                         f"«Штате». Если практика в другой день, поправьте дату: {who}.")
+                text += (" Дата выхода на практику не стояла, поэтому поставлена следующим рабочим днём на "
+                         f"Штате. Если практика в другой день, поправьте дату, и {who}.")
             await self._confirm_hr(entity, text, chat_id)
         return 1
 
@@ -497,7 +497,7 @@ class HandoffService:
             who = f"лида ({html.escape(str(lead))})" if lead else "лида"
             return (f"Сегодня у {name} первый рабочий день{where}. Спроси {who}: установлена ли связь "
                     "с новичком и назначен ли онбординг-звонок.")
-        return (f"У {name} шестой день{where}. В первую неделю HR проводит с новичком отдельную встречу — "
+        return (f"У {name} шестой день{where}. В первую неделю HR проводит с новичком отдельную встречу, "
                 "запланируй созвон: пройтись по ответам опроса недели и по ДНК с демонстрацией экрана.")
 
     async def _stop(self, row: Handoff, entity: Entity) -> int:
@@ -751,22 +751,22 @@ class HandoffService:
                      else "переход в отдел", f"первый рабочий день {event['first_day']}",
                      f"испытательный срок до {event['probation_end']}"]
             return f"{name} передан(а) HR-профилю: " + ", ".join(parts) + "."
-        return f"{name}: HR-профилю передан стоп — {html.escape(event.get('reason') or '')}."
+        return f"{name}: HR-профилю передан стоп, причина: {html.escape(event.get('reason') or '')}."
 
     def _bot_confirm_text(self, name: str, event: dict) -> str:
         """Что HR узнаёт, когда событие получил наш бот (а не HR-аккаунт)."""
         bot = f"@{self.settings.bot_username}" if self.settings.bot_username else "бота"
         kind = event["event"]
         if kind == "practice":
-            return (f"{name}: практика с {event['practice_start']}. В день старта создай рабочий чат, "
-                    f"добавь туда кандидата и {bot} — бот поздравит кандидата со стартом и будет "
+            return (f"{name}: практика с {event['practice_start']}. В день старта создай рабочий чат "
+                    f"и добавь туда кандидата и {bot}. Бот поздравит кандидата со стартом и будет "
                     "напоминать про вечерний Loom.")
         if kind == "transfer":
             parts = [f"переход в отдел {html.escape(event['department'])}" if event.get("department")
                      else "переход в отдел", f"первый рабочий день {event['first_day']}",
                      f"испытательный срок до {event['probation_end']}"]
             return f"{name}: " + ", ".join(parts) + ". Опросы и напоминания онбординга бот запланировал."
-        return f"{name}: бот остановил напоминания — {html.escape(event.get('reason') or '')}."
+        return f"{name}: бот остановил напоминания, причина: {html.escape(event.get('reason') or '')}."
 
     async def _hr_tg_id(self, entity: Entity) -> Optional[int]:
         """Telegram HR, который завёл карточку (сигналы бота идут ему лично)."""
@@ -809,16 +809,16 @@ class HandoffService:
         name = self._name_html(entity)
         text = {
             "no_telegram": (
-                f"{name}: в карточке нет Telegram и телефона — допишите, иначе HR-бот "
+                f"{name}: в карточке нет Telegram и телефона. Допишите, иначе бот "
                 "не сможет написать кандидату первым."
             ),
             "no_practice_date": (
-                f"{name} на практике, но не указана дата выхода на практику — проставьте её "
-                "на «Штате», иначе HR-бот не напишет кандидату."
+                f"{name} на практике, но не указана дата выхода на практику. Поставьте её "
+                "на Штате, иначе бот не напишет кандидату."
             ),
             "no_first_day": (
-                f"{name} переведён(а) в отдел, но не указана дата выхода в отдел — проставьте её "
-                "на «Штате», от неё считаются первый рабочий день и этапы онбординга."
+                f"{name}: перевод в отдел есть, а даты выхода в отдел нет. Поставьте её "
+                "на Штате, от неё считаются первый рабочий день и этапы онбординга."
             ),
         }[reason]
         targets = await self._hr_targets(entity)

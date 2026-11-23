@@ -495,7 +495,7 @@ class TestCommandHandlers:
                 message = self._private_message(telegram_private_chat, telegram_user, "/start")
                 await handle_bind_token(message, token)
                 message.answer.assert_called_once()
-                assert "недействительна" in message.answer.call_args[0][0]
+                assert "не работает" in message.answer.call_args[0][0]
         finally:
             p.stop()
 

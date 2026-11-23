@@ -146,13 +146,13 @@ async def test_two_candidates_asks_whose_chat_title_decides(env):
 async def test_start_with_wrong_nick_and_rules(env):
     case = await _practice(env, tg="wrong_nick")
     await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
-    assert await env.bot.handle_practice_start(WORK_CHAT, MENTOR_TG, "egor_s") == "Эта кнопка — для кандидата на практику."
+    assert await env.bot.handle_practice_start(WORK_CHAT, MENTOR_TG, "egor_s") == "Эта кнопка для кандидата на практику."
     assert await env.bot.handle_practice_start(WORK_CHAT, CANDIDATE_TG, "ivan_real") is None
     fresh = await _fresh(env, case.id)
     assert fresh.status == CaseStatus.practice_running.value and fresh.candidate_tg_id == CANDIDATE_TG
     rules = env.messenger.texts(WORK_CHAT)[-1]
     assert rules.startswith("Старт практики!") and "#вечерний_отчёт" in rules
-    assert "Приглашение на платформу пришлёт HR" in rules and "руководителем практики Егор" in rules
+    assert "Приглашение на платформу HR пришлёт" in rules and "руководителем практики Егор" in rules
 
 
 async def test_evening_report_reminder_and_mentor_tag(env):
@@ -177,7 +177,7 @@ async def test_evening_report_reminder_and_mentor_tag(env):
     assert env.messenger.texts(WORK_CHAT)[-1].startswith("@ivan_p, напоминаю про вечерний отчёт")
     env.clock.now = datetime(2026, 11, 20, 16, 2)
     await env.bot.run_due_jobs()
-    late = "@egor_s, Петров Иван Сергеевич не прислал(а) вечерний отчёт за 20.11.2026."
+    late = "@egor_s, кандидат Петров Иван Сергеевич не прислал вечерний отчёт за 20.11.2026."
     assert env.messenger.texts(WORK_CHAT)[-1] == late
     assert late in env.messenger.texts(EVENTS_CHAT)
     assert [j.payload for j in await _jobs(env, case.id, "report_check")]  # остальные дни ещё впереди
@@ -208,13 +208,13 @@ async def _department(env, name="Push team"):
 async def test_lead_registers_and_gets_new_hire(env):
     dept = await _department(env)
     assert [d.name for d in await env.bot.lead_departments()] == ["Push team"]
-    assert await env.bot.request_lead(LEAD_TG, "mark_lead", "Марк", dept.id) == "Запрос отправлен HR. Как подтвердят — напишу."
+    assert await env.bot.request_lead(LEAD_TG, "mark_lead", "Марк", dept.id) == "Запрос ушёл HR. Как подтвердят, напишу."
     [request] = env.messenger.to(HR_TG)
-    assert "Марк (@mark_lead) пишет, что он(а) лид отдела Push team" in request.text
+    assert "Марк (@mark_lead) называет себя лидом отдела Push team" in request.text
     lead_id = int(request.buttons[0][0][1].split(":")[1])
     assert await env.bot.decide_lead(lead_id, MENTOR_TG, True) == "Подтверждать лидов могут только владелец и админы HR."
     assert (await env.bot.decide_lead(lead_id, HR_TG, True)).startswith("Подтверждено")
-    assert env.messenger.texts(LEAD_TG)[-1].startswith("Подтверждено: ты лид отдела Push team")
+    assert env.messenger.texts(LEAD_TG)[-1].startswith("Подтверждено, ты лид отдела Push team")
     assert await env.bot.decide_lead(lead_id, HR_TG, False) == "Запрос уже обработан."
 
     case = await _practice(env)
@@ -226,10 +226,10 @@ async def test_lead_registers_and_gets_new_hire(env):
     fresh = await _fresh(env, case.id)
     assert fresh.status == CaseStatus.transferred.value and fresh.lead_tg_id == LEAD_TG and fresh.lead_name == "Марк"
     chat = env.messenger.to(WORK_CHAT)
-    congrats = next(m for m in chat if "поздравляем! Ты прошёл(ла) практику" in m.text)
+    congrats = next(m for m in chat if "поздравляем! Практика пройдена" in m.text)
     [[(label, link)]] = congrats.buttons
     assert label == "Пройти опрос" and link.startswith("https://t.me/Staffwise_bot?start=obs_p")
-    assert chat[-1].text.startswith("Иван, практика закончена — поздравляем, ты переходишь в отдел Push team")
+    assert chat[-1].text.startswith("Иван, практика закончена, поздравляем! Ты переходишь в отдел Push team")
     assert env.messenger.texts(LEAD_TG)[-1].startswith("К тебе в отдел Push team переходит Петров Иван Сергеевич")
 
     # кандидат открыл опрос по ссылке — дальше в личке
@@ -255,7 +255,7 @@ async def test_lead_without_approvers(env, db_session):
     env.user.telegram_id = None
     await db_session.commit()
     dept = await _department(env)
-    assert "Некому подтвердить" in await env.bot.request_lead(LEAD_TG, None, "Марк", dept.id)
+    assert "Подтвердить некому" in await env.bot.request_lead(LEAD_TG, None, "Марк", dept.id)
     async with env.sessions() as s:
         assert (await s.scalars(select(DepartmentLead))).all() == []
 
@@ -323,7 +323,7 @@ async def test_telegram_glue_group_text_lead_and_url_buttons(env, monkeypatch):
         # /lead без отделов — подсказка
         answer = AsyncMock()
         await tg.lead_command(SimpleNamespace(answer=answer))
-        answer.assert_awaited_once_with("Отделов пока нет — попроси HR завести их на «Штате».")
+        answer.assert_awaited_once_with("Отделов пока нет. Попроси HR завести их на Штате.")
         assert tg.is_onboarding_token("obs_pabc") and tg.is_onboarding_token("ob_abc")
     finally:
         runtime.set_service(None)
@@ -344,12 +344,12 @@ def test_texts_without_mentor_and_lead():
 
     rules = texts.practice_start({"practice_lead": "", "hrd": "", "platform_invite_url": ""})
     assert "руководителем практики руководитель" not in rules and "Контакты" not in rules
-    assert "Это чат для связи с руководителем практики." in rules
+    assert "ты на связи с руководителем практики. " in rules
     with_lead = texts.practice_start({"practice_lead": "Егор", "hrd": "Настя", "platform_invite_url": ""})
-    assert "Контакты: руководитель практики Егор (направление и фидбек), HRD Настя (орг. вопросы)." in with_lead
+    assert "Контакты: руководитель практики Егор, по задачам и обратной связи; HRD Настя, по организационным вопросам." in with_lead
     welcome = texts.dept_welcome("@ivan", "HR team", "20.11.2026", "20.02.2027", "")
     assert "лид —" not in welcome and "до 20.02.2027." in welcome
-    assert "Твой лид — Марк." in texts.dept_welcome("@ivan", "SEO", "20.11.2026", "20.02.2027", "Марк")
+    assert "Твой лид: Марк." in texts.dept_welcome("@ivan", "SEO", "20.11.2026", "20.02.2027", "Марк")
 
 
 async def test_candidate_unreachable_hr_told_once(env):

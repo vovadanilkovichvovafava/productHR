@@ -74,7 +74,7 @@ async def get_db() -> AsyncSession:
         yield session
 
 
-LINK_FIRST_TEXT = "Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»"
+LINK_FIRST_TEXT = "Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы"
 
 
 def _link_problem_text(user) -> str:
@@ -1174,7 +1174,7 @@ async def cmd_menu(message: types.Message):
     async with async_session() as session:
         access = await _get_user_access(session, message.from_user.id)
         if not access:
-            await message.answer("Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»")
+            await message.answer("Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы")
             return
         await message.answer("📱 Главное меню:", reply_markup=main_menu_kb(access))
 
@@ -1304,7 +1304,7 @@ async def cb_main_menu(callback: CallbackQuery):
         access = await _get_user_access(session, callback.from_user.id)
         if not access:
             await callback.message.edit_text(
-                "Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»",
+                "Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы",
                 reply_markup=_access_denied_kb(),
             )
             await callback.answer()
@@ -1320,7 +1320,7 @@ async def cb_status(callback: CallbackQuery):
         access = await _get_user_access(session, callback.from_user.id)
         if not access:
             await callback.message.edit_text(
-                "Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»",
+                "Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы",
                 reply_markup=_access_denied_kb(),
             )
             await callback.answer()
@@ -1416,7 +1416,7 @@ async def cb_my_tasks(callback: CallbackQuery):
         access = await _get_user_access(session, callback.from_user.id)
         if not access:
             await callback.message.edit_text(
-                "Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»",
+                "Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы",
                 reply_markup=_access_denied_kb(),
             )
             await callback.answer()
@@ -1581,7 +1581,7 @@ async def cb_department_detail(callback: CallbackQuery):
         access = await _get_user_access(session, callback.from_user.id)
         if not access:
             await callback.message.edit_text(
-                "Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»",
+                "Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы",
                 reply_markup=_access_denied_kb(),
             )
             await callback.answer()
@@ -1724,7 +1724,7 @@ async def cb_project_detail(callback: CallbackQuery):
         access = await _get_user_access(session, callback.from_user.id)
         if not access:
             await callback.message.edit_text(
-                "Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»",
+                "Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы",
                 reply_markup=_access_denied_kb(),
             )
             await callback.answer()
@@ -2106,7 +2106,7 @@ async def cmd_timeoff(message: types.Message):
         async with async_session() as session:
             user = await find_user_by_telegram_id(session, message.from_user.id)
             if not user:
-                await message.answer("Вы не зарегистрированы в системе. Откройте личный кабинет на сайте и нажмите «Привязать Telegram».")
+                await message.answer("Вы не зарегистрированы в системе. Откройте staffwise и нажмите Привязать Telegram вверху страницы.")
                 return
 
             org_result = await session.execute(
@@ -2226,7 +2226,7 @@ async def cmd_blocker(message: types.Message):
                         user_id = chat_obj.owner_id
 
             if not org_id or not user_id:
-                await message.answer("Не удалось определить организацию. Откройте личный кабинет на сайте и нажмите «Привязать Telegram».")
+                await message.answer("Не удалось определить организацию. Откройте staffwise и нажмите Привязать Telegram вверху страницы.")
                 return
 
             # Parse description
@@ -2393,7 +2393,7 @@ async def cmd_vacancy(message: types.Message):
                         user_id = chat_obj.owner_id
 
             if not org_id or not user_id:
-                await message.answer("Не удалось определить организацию. Откройте личный кабинет на сайте и нажмите «Привязать Telegram».")
+                await message.answer("Не удалось определить организацию. Откройте staffwise и нажмите Привязать Telegram вверху страницы.")
                 return
 
             # Parse description
@@ -2879,8 +2879,8 @@ async def cmd_start(message: types.Message):
         if payload.startswith("bind_"):
             await message.answer(
                 "❌ Эта ссылка устарела и больше не работает.\n\n"
-                "Откройте личный кабинет на сайте и нажмите «Привязать Telegram» — "
-                "получите новую одноразовую ссылку."
+                "Откройте staffwise и нажмите Привязать Telegram вверху страницы, "
+                "придёт новая одноразовая ссылка."
             )
             return
         # Ссылка-приглашение кандидата на практику (ob_…), а не привязка аккаунта
@@ -2922,7 +2922,7 @@ async def handle_bind_token(message: types.Message, token: str):
     # Токен длинный и случайный; заведомо мусорные строки отсекаем сразу,
     # чтобы не ходить в БД на каждое случайное сообщение с /start.
     if len(token) < 20 or len(token) > 64:
-        await message.answer("❌ Ссылка недействительна или устарела.")
+        await message.answer("❌ Ссылка не работает или устарела.")
         return
 
     async with async_session() as session:
@@ -2933,8 +2933,8 @@ async def handle_bind_token(message: types.Message, token: str):
         if (not user or not user.telegram_bind_expires
                 or user.telegram_bind_expires < _dt.utcnow()):
             await message.answer(
-                "❌ Ссылка недействительна или устарела.\n\n"
-                "Получите новую в личном кабинете: «Привязать Telegram»."
+                "❌ Ссылка не работает или устарела.\n\n"
+                "Новую можно получить в staffwise: кнопка Привязать Telegram вверху страницы."
             )
             return
 
@@ -3015,7 +3015,7 @@ async def cmd_chats(message: types.Message):
         user = await find_user_by_telegram_id(session, message.from_user.id)
 
         if not user:
-            await message.answer("Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»")
+            await message.answer("Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы")
             return
 
         result = await session.execute(
@@ -3120,7 +3120,7 @@ async def cmd_meets(message: types.Message):
     async with async_session() as session:
         user = await find_user_by_telegram_id(session, message.from_user.id)
         if not user:
-            await message.answer("Сначала привяжите аккаунт: откройте личный кабинет на сайте и нажмите «Привязать Telegram»")
+            await message.answer("Сначала привяжите аккаунт: откройте staffwise и нажмите Привязать Telegram вверху страницы")
             return
 
         # Parse the message: remove /meets command, get lines

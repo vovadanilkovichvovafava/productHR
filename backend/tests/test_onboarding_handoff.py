@@ -166,7 +166,7 @@ async def test_practice_transfer_stop_go_to_one_account(handoff, messenger, db_s
         "Он напишет кандидату первым.",
         '<a href="https://t.me/ivan_p">Иван Петров</a> передан(а) HR-профилю: переход в отдел SEO, '
         "первый рабочий день 12.11.2026, испытательный срок до 12.02.2027.",
-        '<a href="https://t.me/ivan_p">Иван Петров</a>: HR-профилю передан стоп — уволен.',
+        '<a href="https://t.me/ivan_p">Иван Петров</a>: HR-профилю передан стоп, причина: уволен.',
     ]
 
 
@@ -257,8 +257,8 @@ async def test_practice_date_moved_is_sent_again(handoff, messenger, clock, db_s
     await handoff.tick()
     first, second = messenger.to(ACC_ONE)
     assert "Старт практики: 05.11.2026 10:00" in first and "Старт практики: 06.11.2026 10:00" in second
-    assert messenger.to(FALLBACK)[-1] == ('<a href="https://t.me/ivan_p">Иван Петров</a>: дата практики изменена '
-                                          "(05.11.2026 → 06.11.2026 10:00), HR-профилю передано.")
+    assert messenger.to(FALLBACK)[-1] == ('<a href="https://t.me/ivan_p">Иван Петров</a>: дата практики изменена с '
+                                          "05.11.2026 на 06.11.2026 10:00, HR-профилю передано.")
 
     clock.now = datetime(2026, 11, 9, 9, 0)  # практика уже идёт — правка задним числом не шлётся
     person.extra_data = {**person.extra_data, "practice_start_date": "2026-11-05"}
@@ -283,8 +283,8 @@ async def test_hr_notice_replaced_when_data_added(handoff, messenger, db_session
     # «допишите» удалено, вместо него — «передан»; даты не было — бот поставил завтра (04.11)
     assert messenger.visible(FALLBACK) == [
         '<a href="https://t.me/third">Третий Тест</a> передан(а) HR-профилю: практика с 04.11.2026 10:00. '
-        "Он напишет кандидату первым. Дата выхода на практику не стояла — поставлена следующим рабочим "
-        "днём на «Штате». Если практика в другой день, поправьте дату: HR-профиль получит новую."
+        "Он напишет кандидату первым. Дата выхода на практику не стояла, поэтому поставлена следующим рабочим "
+        "днём на Штате. Если практика в другой день, поправьте дату, и HR-профиль получит новую."
     ]
     assert "Telegram: @third" in messenger.to(ACC_ONE)[0]
     async with handoff.sessions() as s:
@@ -422,7 +422,7 @@ async def test_transfer_without_first_day_waits(handoff, messenger, db_session, 
     await handoff.tick()
     practice_ok, waiting = messenger.to(FALLBACK)
     assert "передан(а) HR-профилю: практика с 05.11.2026 10:00" in practice_ok
-    assert "не указана дата выхода в отдел" in waiting
+    assert "даты выхода в отдел нет" in waiting
     assert len(messenger.to(ACC_ONE)) == 1  # только практика
 
 

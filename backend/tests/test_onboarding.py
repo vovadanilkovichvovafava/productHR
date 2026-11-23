@@ -148,7 +148,7 @@ async def test_first_message_after_start(service, messenger):
     assert service.invite_link(case) == f"https://t.me/test_bot?start={case.link_token}"
     assert await service.handle_start(CANDIDATE_TG, case.link_token)
     [msg] = messenger.to(CANDIDATE_TG)
-    assert msg.text.startswith("Привет, Иван! Практика стартует 05.11 в 10:00.")
+    assert msg.text.startswith("Привет, Иван! Практика начинается 05.11 в 10:00.")
     assert [row[0][1] for row in msg.buttons] == ["scr:ok", "scr:questions", "scr:decline"]
     assert "invite_check" not in await _pending(service, case.id)
 
@@ -164,7 +164,7 @@ async def test_retries_then_hr_signal(service, messenger, clock):
     clock.now = datetime(2026, 11, 4, 7, 1)  # 04.11 10:01 МСК
     await service.run_due_jobs()
     [signal] = messenger.to(HR_TG)
-    assert "не ответил(а) по практике на 04.11" in signal.text
+    assert "нет ответа по практике на 04.11" in signal.text
 
 
 async def test_questions_signal_falls_back_to_hr_chat(service, messenger):
@@ -173,7 +173,7 @@ async def test_questions_signal_falls_back_to_hr_chat(service, messenger):
     await service.handle_start(CANDIDATE_TG, case.link_token)
     await service.handle_script_answer(CANDIDATE_TG, "questions")
     [signal] = messenger.to(FALLBACK)
-    assert "задал(а) вопрос" in signal.text
+    assert "есть вопрос по практике" in signal.text
 
 
 async def test_wallet_encrypted_and_text_passthrough(service):
@@ -194,13 +194,13 @@ async def test_work_chat_start_and_loom(service, messenger, clock):
     await service.handle_start(CANDIDATE_TG, case.link_token)
     await service.handle_members_joined(WORK_CHAT, [(CANDIDATE_TG, "ivan_p")])
     assert messenger.to(WORK_CHAT)[0].buttons == [[("Старт", "pstart")]]
-    assert await service.handle_practice_start(WORK_CHAT, 777, "stranger") == "Эта кнопка — для кандидата на практику."
+    assert await service.handle_practice_start(WORK_CHAT, 777, "stranger") == "Эта кнопка для кандидата на практику."
     assert await service.handle_practice_start(WORK_CHAT, CANDIDATE_TG, "ivan_p") is None
     assert messenger.to(WORK_CHAT)[-1].text.startswith("Старт практики!")
 
     clock.now = datetime(2026, 11, 5, 17, 1)  # 20:01 МСК
     await service.run_due_jobs()
-    assert messenger.to(CANDIDATE_TG)[-1].text.startswith("Иван, время для вечернего Loom")
+    assert messenger.to(CANDIDATE_TG)[-1].text.startswith("Иван, пора записать вечерний Loom")
 
 
 async def test_bot_added_welcome_only_for_hr_with_practice_now(service, messenger):
@@ -442,7 +442,7 @@ async def test_api_transfer_and_wallet(client, service, messenger, org_owner, ad
                                             "department_start_date": "2026-11-12"}, headers=auth_headers(admin_token))
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "transferred" and r.json()["probation_end_date"] == "2027-02-12"
-    assert messenger.to(CANDIDATE_TG)[-1].text.startswith("Пётр, поздравляем! Ты прошёл(ла) практику и переходишь в отдел SEO.")
+    assert messenger.to(CANDIDATE_TG)[-1].text.startswith("Пётр, поздравляем! Практика пройдена, ты переходишь в отдел SEO.")
 
 
 async def test_api_probation_decision(client, service, org_owner, admin_token, practice_entity):

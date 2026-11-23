@@ -482,8 +482,8 @@ class ChatFlowMixin:
         if prev and prev.telegram_id and rec.get("by") != prev.id:
             sent += await self._safe_send(prev.telegram_id, texts.HR_CHANGE_PREV.format(
                 name=entity.name, new=(new.name if new else "другой HR"), link=link))
-        await self._events(f"Смена HR: {entity.name} — {prev.name if prev else '—'} → "
-                           f"{new.name if new else '—'}. {link}")
+        await self._events(f"Смена HR: {entity.name}, было {prev.name if prev else 'без HR'}, "
+                           f"стало {new.name if new else 'без HR'}. {link}")
         log.info("ONBOARDING hr change ping entity=%s rec=%s sent=%s", entity.id, rec.get("id"), sent)
         return sent
 
