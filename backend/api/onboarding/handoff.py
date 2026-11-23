@@ -380,7 +380,7 @@ class HandoffService:
         if kind == "practice":
             event["practice_start"] = f"{practice_date.strftime('%d.%m.%Y')} {self.settings.practice_start_time}"
             event["practice_start_iso"] = f"{practice_date.isoformat()}T{self.settings.practice_start_time}"
-            event["practice_lead"] = _pick(extra, MANAGER_KEYS)
+            event["practice_lead"] = await self._practice_mentor(entity)
             event["hrd"] = self.settings.hrd or None
         else:
             department, _ = await self._department_and_hr(entity)
@@ -475,6 +475,18 @@ class HandoffService:
                     setattr(fresh, flag, True)
                     await s.commit()
         return sent
+
+    async def _practice_mentor(self, entity: Entity) -> Optional[str]:
+        """Ментор практики — тег у ФИО (окно перевода, строка «Ментор» в карточке, «Штат»).
+        Прод 23.11.2026: бот читал только старые manager_name / cf:Рук-ль, а установка ментора их
+        стирает — у новых карточек руководителя практики бот не видел и @ментора не тегал."""
+        from ..services.practice_mentor import load_mentors
+
+        async with self.sessions() as s:
+            tags = (await load_mentors(s, entity.org_id, [entity.id])).get(entity.id)
+        if tags:
+            return tags[0]
+        return _pick(entity.extra_data or {}, MANAGER_KEYS)
 
     async def _reminder_text(self, entity: Entity, key: str) -> str:
         name = self._name_html(entity)

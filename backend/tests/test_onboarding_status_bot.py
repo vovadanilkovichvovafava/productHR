@@ -268,3 +268,18 @@ async def test_survey_reminders_after_weekend_name_the_survey(setup, db_session,
         "Иван, напоминаю про короткий опрос о первом дне — это займёт пару минут.",
         "Иван, напоминаю про короткий опрос о практике — это займёт пару минут.",
     ]
+
+
+async def test_practice_lead_from_mentor_tag(setup, db_session, organization, admin_user):
+    """Прод 23.11.2026: ментора ставят тегом у ФИО (окно перевода, строка «Ментор»), а старое
+    manager_name при этом стирается — бот не видел руководителя практики и не тегал ментора."""
+    from api.services.practice_mentor import set_entity_mentor
+
+    entity = await _person(db_session, organization, admin_user, status=EntityStatus.new)
+    await set_entity_mentor(db_session, entity, "Влад", user_id=admin_user.id)
+    entity.status = EntityStatus.probation
+    await db_session.commit()
+    assert "manager_name" not in entity.extra_data
+    await setup.handoff.tick()
+    [case] = await _cases(setup, entity.id)
+    assert case.practice_lead == "Влад"
