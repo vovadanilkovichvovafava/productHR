@@ -35,6 +35,12 @@ export const getTelegramLinkInfo = async (): Promise<TelegramLinkInfo> => {
   return data;
 };
 
+/** Одноразовая ссылка привязки Telegram (живёт 15 минут, гаснет после первого нажатия). */
+export const createTelegramBindLink = async (): Promise<string> => {
+  const { data } = await api.post<{ link: string }>('/auth/telegram-bind-link', {});
+  return data.link;
+};
+
 export interface OrgStage {
   key: string;
   label: string;

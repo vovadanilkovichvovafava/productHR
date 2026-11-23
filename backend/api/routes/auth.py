@@ -513,11 +513,10 @@ async def get_telegram_link(user: User = Depends(get_current_user)):
     """
     bot_username = (settings.telegram_bot_username or "").lstrip("@")
     is_linked = user.telegram_id is not None
-    link_url = (
-        f"https://t.me/{bot_username}?start=bind_{user.id}"
-        if bot_username and not is_linked
-        else None
-    )
+    # Прод 23.11.2026: здесь отдавалась ссылка «?start=bind_<id>», а бот такие давно отклоняет
+    # («Эта ссылка устарела») — привязать Telegram через сайт было нельзя. Рабочая ссылка
+    # одноразовая и создаётся по нажатию: POST /auth/telegram-bind-link (баннер так и делает).
+    link_url = None
     return {
         "is_linked": is_linked,
         "telegram_id": user.telegram_id,
