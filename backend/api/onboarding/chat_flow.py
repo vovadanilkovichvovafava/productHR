@@ -570,6 +570,14 @@ class ChatFlowMixin:
             rows = (await s.scalars(select(User).where(User.id.in_(ids)))).all()
         users = {u.id: u for u in rows}
         new, prev = users.get(rec.get("new")), users.get(rec.get("prev"))
+        if new and new.telegram_id:
+            # Прод 24.11.2026: после «Сменить HR» сигналы бота (блокер, переход, первый день) уходили
+            # прежнему HR — карточка бота помнила Telegram того, кто был HR при старте практики.
+            async with self.sessions() as s:
+                for case in (await s.scalars(select(OnboardingCase).where(
+                        OnboardingCase.entity_id == entity.id))).all():
+                    case.hr_tg_id = new.telegram_id
+                await s.commit()
         link = f"{self.settings.app_url}/all-candidates?entity={entity.id}"
         sent = 0
         if new and new.telegram_id and rec.get("by") != new.id:
@@ -607,7 +615,7 @@ class ChatFlowMixin:
 
     async def _mentor_tag(self, case: OnboardingCase) -> str | None:
         """«@ник» ментора (руководителя практики) по имени из карточки, иначе само имя."""
-        name = (case.practice_lead or "").strip()
+        name = (await self._current_mentor(case) or case.practice_lead or "").strip()
         if not name:
             return None
         if "@" in name:
@@ -620,6 +628,20 @@ class ChatFlowMixin:
         if len(users) == 1:
             return f"@{users[0].telegram_username.lstrip('@')}"
         return name
+
+    async def _current_mentor(self, case: OnboardingCase) -> str | None:
+        """Ментор, который стоит в карточке СЕЙЧАС. Прод 24.11.2026: ментора поставили после старта
+        практики, а бот помнил пустое имя со старта и тегал «Руководитель практики»."""
+        if case.entity_id is None:
+            return None
+        from api.services.practice_mentor import load_mentors
+
+        async with self.sessions() as s:
+            entity = await s.get(Entity, case.entity_id)
+            if entity is None:
+                return None
+            tags = (await load_mentors(s, entity.org_id, [entity.id])).get(entity.id)
+        return tags[0] if tags else None
 
     @staticmethod
     def _mention(case: OnboardingCase) -> str:

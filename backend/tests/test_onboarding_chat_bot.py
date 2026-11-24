@@ -194,6 +194,23 @@ async def test_evening_report_reminder_and_mentor_tag(env):
     assert [j.payload for j in await _jobs(env, case.id, "report_check")]  # остальные дни ещё впереди
 
 
+async def test_mentor_set_after_start_is_tagged(env, db_session):
+    """Прод 24.11.2026: ментора поставили в карточке уже после старта практики — бот его не видел."""
+    from api.services.practice_mentor import set_entity_mentor
+
+    case = await _practice(env, practice_lead="")
+    await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
+    await env.bot.handle_practice_start(WORK_CHAT, CANDIDATE_TG, "ivan_p")
+    entity = await db_session.get(Entity, case.entity_id)
+    await set_entity_mentor(db_session, entity, "Егор", user_id=env.user.id)
+    await db_session.commit()
+    env.clock.now = datetime(2026, 11, 19, 15, 1)  # 18:01 МСК: отчёта нет — напоминание
+    await env.bot.run_due_jobs()
+    env.clock.now = datetime(2026, 11, 19, 16, 2)  # 19:02 — тег ментора
+    await env.bot.run_due_jobs()
+    assert env.messenger.texts(WORK_CHAT)[-1].startswith("@egor_s, кандидат Петров Иван Сергеевич не прислал")
+
+
 async def test_no_work_chat_hr_told_once(env):
     case = await _practice(env)
     env.clock.now = datetime(2026, 11, 19, 6, 31)  # 09:31 МСК — HR: «сегодня старт»
@@ -395,6 +412,28 @@ async def test_hr_change_pings_new_and_previous(env, db_session):
     assert msg.startswith("Тебе передали кандидата Захаров Илья (было у Admin User)")
     assert msg.endswith(f"https://staffwise.club/all-candidates?entity={entity.id}")
     assert await env.bot.ping_hr_changes() == 0  # повторно не шлём
+
+
+async def test_hr_change_moves_bot_signals_to_new_hr(env, db_session):
+    """Прод 24.11.2026: после «Сменить HR» блокер и сигналы перехода уходили прежнему HR."""
+    new_hr = User(email="masha@test.com", password_hash=hash_password("x"), name="Мария", role=UserRole.admin,
+                  is_active=True, telegram_id=7400)
+    db_session.add(new_hr)
+    await db_session.commit()
+    case = await _practice(env)
+    await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
+    assert await env.bot.ping_hr_changes() == 0
+    entity = await db_session.get(Entity, case.entity_id)
+    env.clock.now += timedelta(minutes=5)
+    entity.extra_data = {"hr_changes": [{"id": "x1", "at": env.clock.now.isoformat(), "by": env.user.id,
+                                         "prev": env.user.id, "new": new_hr.id}]}
+    entity.updated_at = env.clock.now
+    await db_session.commit()
+    await env.bot.ping_hr_changes()
+    assert (await _fresh(env, case.id)).hr_tg_id == 7400
+    await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "#блокер нет доступа")
+    assert env.messenger.texts(7400)[-1].startswith("🚧 Блокер у")
+    assert not any(t.startswith("🚧") for t in env.messenger.texts(HR_TG))
 
 
 # ------------------------------------------------------------------ Telegram-обвязка
