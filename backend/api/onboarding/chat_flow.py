@@ -80,6 +80,14 @@ class ChatFlowMixin:
             staff = await self._is_staff(s, adder_tg_id)
         # Кто добавил: HR кандидата / лид отдела — его люди; иначе — все (только если добавил сотрудник:
         # бот сидит и в других чатах компании, писать туда «для кого чат» незачем).
+        if staff and title:
+            # Прод 24.11.2026: лид R&D создал «Практика Тестбот Владимир» для кандидата, у которого он не HR, —
+            # бот выбирал только из «своих» карточек и привязал чат к чужому отделу. Полное имя в названии
+            # главнее того, кто добавил.
+            named = _named_in_title(practice + dept, title)
+            if len(named) == 1:
+                await self._bind(chat_id, named[0].id)
+                return True
         mine_p = [c for c in practice if c.hr_tg_id == adder_tg_id]
         mine_d = [c for c in dept if adder_tg_id in self.lead_ids(c) or c.hr_tg_id == adder_tg_id]
         options = mine_p + mine_d
@@ -640,6 +648,23 @@ def _title_score(case: OnboardingCase, title: str) -> int:
     """Сколько слов ФИО кандидата есть в названии чата."""
     low = title.lower()
     return sum(1 for w in (case.full_name or "").split() if len(w) > 2 and w.lower() in low)
+
+
+def _named_in_title(cases: list[OnboardingCase], title: str) -> list[OnboardingCase]:
+    """Карточки, ВСЁ ФИО которых есть в названии чата. Несколько — решает слово «практика»/«отдел»
+    в названии: «Практика Тестбот Владимир» подходит и «Тестбот Практика», но это чат практики."""
+    named = []
+    for c in cases:
+        words = [w for w in (c.full_name or "").split() if len(w) > 2]
+        if words and _title_score(c, title) == len(words):
+            named.append(c)
+    if len(named) > 1:
+        low = title.lower()
+        if "практик" in low:
+            named = [c for c in named if c.status in PRACTICE_STATUSES] or named
+        elif "отдел" in low:
+            named = [c for c in named if c.status in DEPARTMENT_STATUSES] or named
+    return named
 
 
 def _ddmm(day: date | None) -> str:

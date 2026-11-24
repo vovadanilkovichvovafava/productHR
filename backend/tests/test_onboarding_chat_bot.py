@@ -485,6 +485,24 @@ async def test_title_picks_most_matching_name(env):
     assert not any(m.buttons and m.buttons[0][0][1].startswith("pchat:") for m in env.messenger.to(WORK_CHAT))
 
 
+async def test_full_name_in_title_beats_adders_own_cases(env):
+    """Прод 24.11.2026: лид R&D добавил бота в «Практика Тестбот Владимир» — кандидат не его (HR другой),
+    а у самого лида в отделе «Тестбот Практика». Бот привязал чат к отделу и поздравил не того."""
+    own = await _practice(env, 1, name="Тестбот Практика", tg="a1")
+    await _transfer(env, 1)
+    async with env.sessions() as s:
+        case = await s.get(OnboardingCase, own.id)
+        case.lead_tg_ids = [MENTOR_TG]  # добавляет лид отдела, он же сотрудник
+        await s.commit()
+    entity_id = await _entity_id(env, 2, "Тестбот Владимир")
+    other = await env.bot.apply_handoff_event(_event(entity_id, name="Тестбот Владимир", tg="a2"), org_id=env.org.id,
+                                              created_by=env.user.id, hr_tg_id=LEAD_TG)
+    assert await env.bot.handle_bot_added(WORK_CHAT, MENTOR_TG, "Практика Тестбот Владимир")
+    assert (await _fresh(env, other.id)).work_chat_id == WORK_CHAT
+    assert (await _fresh(env, own.id)).dept_chat_id is None
+    assert not any("ты в отделе" in m.text for m in env.messenger.to(WORK_CHAT))
+
+
 async def test_legacy_evening_report_silent_in_onboarding_chat(env, monkeypatch):
     """Прод 20.11.2026: на #вечерний_отчёт в чате практики отвечал и старый «вечерний отчёт»."""
     from unittest.mock import AsyncMock
