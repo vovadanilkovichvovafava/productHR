@@ -95,6 +95,8 @@ class OnboardingService(ChatFlowMixin):
         self.settings = settings
         self.cipher = cipher
         self.clock = clock
+        # /blocker без текста: (чат, человек) → когда спросили «что мешает», ждём следующее сообщение
+        self._pending_blockers: dict[tuple[int, int], datetime] = {}
 
     # ------------------------------------------------------------------ АТС
 

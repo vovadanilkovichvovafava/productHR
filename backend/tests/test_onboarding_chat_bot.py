@@ -2,7 +2,7 @@
 лиды, чат отдела, блокер, смена HR. Логика — api/onboarding/chat_flow.py."""
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest_asyncio
@@ -349,6 +349,29 @@ async def test_blocker_goes_to_hr_and_mentor(env):
     assert to_hr.startswith("🚧 Блокер у Петров Иван Сергеевич (рабочий чат практики) от Иван")
     assert "не приходит инвайт" in to_hr and to_hr in env.messenger.texts(EVENTS_CHAT)
     assert await env.bot.handle_group_text(-555, CANDIDATE_TG, "ivan_p", "Иван", "#блокер") is None  # чужой чат
+
+
+async def test_blocker_command(env):
+    """Мит 24.11.2026: блокер — командой /blocker. С текстом — сразу HR; без текста — бот спрашивает,
+    следующее сообщение того же человека уходит HR."""
+    await _practice(env)
+    await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
+    reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван",
+                                            "/blocker@Staffwise_bot нет доступа к кабинету")
+    assert reply.startswith("Передал HR")
+    assert env.messenger.texts(HR_TG)[-1].endswith("от Иван:\nнет доступа к кабинету")
+
+    sent = len(env.messenger.texts(HR_TG))
+    assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "/blocker") == texts_mod.BLOCKER_ASK
+    assert len(env.messenger.texts(HR_TG)) == sent  # пустой блокер HR не уходит
+    assert await env.bot.handle_group_text(WORK_CHAT, MENTOR_TG, "egor_s", "Егор", "сейчас гляну") is None  # другой человек
+    reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "не открывается Loom")
+    assert reply.startswith("Передал HR") and env.messenger.texts(HR_TG)[-1].endswith("не открывается Loom")
+    assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "спасибо") is None  # уже не блокер
+
+    await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "/blocker")
+    env.clock.now += timedelta(minutes=20)  # описание пришло слишком поздно — это обычное сообщение
+    assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "всё, разобрался") is None
 
 
 async def test_hr_change_pings_new_and_previous(env, db_session):

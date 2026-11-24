@@ -51,6 +51,8 @@ from .models import (
 log = logging.getLogger(__name__)
 
 REPORT_SURVEY = "report"  # SurveyResponse.survey: answer = день практики (ISO), по которому пришёл отчёт
+BLOCKER_CMD_RE = re.compile(r"^/blocker(?:@\w+)?(?:\s+(.*))?$", re.IGNORECASE | re.DOTALL)
+BLOCKER_WAIT = timedelta(minutes=15)  # сколько ждём описание после /blocker без текста
 REPORT_RE = re.compile(r"#\s*(вечерн\w*_?отч[её]т|отч[её]т)|loom\.com/", re.IGNORECASE)
 # Код опроса в ссылке t.me/<бот>?start=obs_<код><токен> (у start ≤ 64 знаков, только [A-Za-z0-9_-])
 SURVEY_CODES = {"practice": "p", "first_day": "f", "week": "w", "month1": "1", "month2": "2", "month3": "3"}
@@ -226,6 +228,17 @@ class ChatFlowMixin:
             if candidate and case.candidate_tg_id is None:
                 case.candidate_tg_id = user_id
                 await s.commit()
+        # Мит 24.11.2026: блокер — командой /blocker (её видно в меню команд), #блокер тоже работает.
+        command = BLOCKER_CMD_RE.match(text.strip())
+        if command:
+            body = (command.group(1) or "").strip()
+            if not body:
+                self._pending_blockers[(chat_id, user_id)] = self.clock()
+                return texts.BLOCKER_ASK
+            return await self._blocker(case, chat_id, author, body)
+        asked = self._pending_blockers.pop((chat_id, user_id), None)
+        if asked is not None and self.clock() - asked <= BLOCKER_WAIT:
+            return await self._blocker(case, chat_id, author, text)
         low = text.lower()
         if any(tag in low for tag in texts.BLOCKER_TAGS):
             return await self._blocker(case, chat_id, author, text)

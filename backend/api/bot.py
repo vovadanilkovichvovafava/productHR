@@ -2200,6 +2200,10 @@ async def cmd_blocker(message: types.Message):
         /blocker жду API от бэкенда
         /blocker не могу задеплоить, CI падает
     """
+    if message.chat.type in ("group", "supergroup") and await onboarding_tg.is_onboarding_chat(message.chat.id):
+        # Чат практики/отдела: блокер кандидата ведёт бот онбординга (HR + ментор), не дашборд блокеров
+        await onboarding_tg.on_group_message(message)
+        return
     try:
         async with async_session() as session:
             user = await find_user_by_telegram_id(session, message.from_user.id)
