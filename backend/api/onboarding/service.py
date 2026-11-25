@@ -847,11 +847,16 @@ class OnboardingService(ChatFlowMixin):
             "in_dept": f" в отделе {dept}" if dept else "",
             "to_dept": f" в отдел {dept}" if dept else " в отдел",
             "first_day": d.strftime("%d.%m.%Y") if d else "",
-            "day7": (d + timedelta(days=6)).strftime("%d.%m") if d else "",
+            "day7": self._day7(d).strftime("%d.%m") if d else "",
             "start_time": self.settings.practice_start_time,
             "lead_paren": f" {lead_label}: {texts.join_names(names)}." if names else "",
             "bot": f"@{self.settings.bot_username}" if self.settings.bot_username else "бота",
         }
+
+    def _day7(self, d: date) -> date:
+        """День 7 от выхода — как у напоминания 13: выходной переносится на понедельник."""
+        day = d + timedelta(days=6)
+        return sch.next_workday(day) if self.settings.skip_weekends else day
 
     @property
     def sheet(self) -> bool:

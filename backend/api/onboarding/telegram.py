@@ -51,6 +51,14 @@ class AiogramMessenger:
         except TelegramAPIError as exc:
             raise SendError(str(exc)) from exc
 
+    async def is_member(self, chat_id: int, user_id: int) -> bool:
+        """Есть ли человек в группе (/demo шлёт в личку только тем, кто в беседе)."""
+        try:
+            member = await self.bot.get_chat_member(chat_id, user_id)
+        except TelegramAPIError:
+            return False
+        return member.status not in ("left", "kicked")
+
 
 # --------------------------------------------------------------- хуки для api/bot.py
 
@@ -273,6 +281,17 @@ async def preview_command(message: Message) -> None:
     if service is None or message.from_user is None:
         return
     reply = await service.preview_sheet(message.chat.id, message.from_user.id)
+    if reply:
+        await message.reply(reply)
+
+
+@router.message(Command("demo"), F.chat.type.in_({"group", "supergroup"}))
+async def demo_command(message: Message) -> None:
+    """Сотрудник пишет /demo в беседе кандидата — схема Маши целиком: в беседу и в личку по ролям."""
+    service = await get_service()
+    if service is None or message.from_user is None:
+        return
+    reply = await service.demo_sheet(message.chat.id, message.from_user.id)
     if reply:
         await message.reply(reply)
 

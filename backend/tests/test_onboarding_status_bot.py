@@ -279,6 +279,8 @@ async def test_sheet_onboarding_schedule_and_texts(setup, db_session, organizati
     assert setup.messenger.to(HR_TG)[-1] == (
         "Сегодня первый день Петров Иван Сергеевич. Спроси лида про онбординг-звонок, отправь "
         f"приветствие и материалы. Лид: Марк.\n{link}")
+    # день 7 от 20.11 — четверг 26.11; встреча недели в тексте 11 и в 13 — один день
+    assert env_day7(setup, case) == "26.11"
 
     # решение по ИС внесено — 18 и Л11 не приходят
     await setup.bot.decide_probation(case.id, "stays")
@@ -301,3 +303,13 @@ async def test_practice_lead_from_mentor_tag(setup, db_session, organization, ad
     await setup.handoff.tick()
     [case] = await _cases(setup, entity.id)
     assert case.practice_lead == "Влад"
+
+
+def env_day7(setup, case):
+    return setup.bot._sheet_ctx(case)["day7"]
+
+
+def test_day7_weekend_goes_to_monday():
+    bot = OnboardingService(None, None, Settings(handoff_to_bot=True), None, lambda: datetime(2026, 11, 23))
+    assert bot._day7(date(2026, 11, 23)).isoformat() == "2026-11-30"  # 29.11 — воскресенье
+    assert bot._day7(date(2026, 11, 20)).isoformat() == "2026-11-26"

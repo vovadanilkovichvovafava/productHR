@@ -28,6 +28,7 @@ from sqlalchemy import func, or_, select
 
 from api.models.database import (
     BoardDepartment,
+    Department,
     DepartmentMember,
     DeptRole,
     Entity,
@@ -602,10 +603,7 @@ class ChatFlowMixin:
         async with self.sessions() as s:
             if not await self._is_staff(s, user_id):
                 return None
-            case = await s.scalar(select(OnboardingCase).where(OnboardingCase.hr_tg_id == user_id)
-                                  .order_by(OnboardingCase.id.desc()).limit(1))
-            if case is None:
-                case = await s.scalar(select(OnboardingCase).order_by(OnboardingCase.id.desc()).limit(1))
+            case = await self._example_case(s, user_id)
         if case is None:
             return texts.PREVIEW_NO_CASE
         items = self.sheet_preview_messages(case)
@@ -616,8 +614,24 @@ class ChatFlowMixin:
         log.info("ONBOARDING preview chat=%s case=%s n=%s", chat_id, case.id, len(items))
         return texts.PREVIEW_START.format(full=case.full_name, n=texts.messages_count(len(items)))
 
+    @staticmethod
+    async def _example_case(s, user_id: int) -> OnboardingCase | None:
+        """Карточка для примера. Прод 25.11.2026: пример взялся с удалённой тестовой карточки — без
+        ссылки на карточку. Берём живую: с карточкой в АТС и в работе; своя (ты HR) — раньше чужой."""
+        live = select(OnboardingCase).where(OnboardingCase.entity_id.is_not(None),
+                                            OnboardingCase.status.in_(PRACTICE_STATUSES + DEPARTMENT_STATUSES))
+        for q in (live.where(OnboardingCase.hr_tg_id == user_id), live, select(OnboardingCase)):
+            case = await s.scalar(q.order_by(OnboardingCase.id.desc()).limit(1))
+            if case is not None:
+                return case
+        return None
+
     def sheet_preview_messages(self, case: OnboardingCase) -> list[tuple[str, Buttons | None]]:
         """Тексты схемы Маши в порядке листа: «[номер] кому, когда» + сообщение, как его получит адресат."""
+        return [(f"[{num}] {who}\n\n{text}", buttons) for num, who, _, text, buttons in self.sheet_plan(case)]
+
+    def sheet_plan(self, case: OnboardingCase) -> list[tuple[str, str, str, str, Buttons | None]]:
+        """(номер, кому и когда, роль hr/lead/chat, текст, кнопки) — все уведомления схемы по порядку."""
         demo = OnboardingCase(**{c.name: getattr(case, c.name) for c in OnboardingCase.__table__.columns})
         if demo.department_start_date is None:  # практика ещё идёт — выход «на следующий рабочий день»
             demo.department_start_date = sch.next_workday(demo.practice_last_day + timedelta(days=1))
@@ -670,7 +684,91 @@ class ChatFlowMixin:
             ("21", "HR, 6 месяцев", staff(r["s_hr_6m"].format(**ctx)), None),
             ("Л12", "лиду, 6 месяцев", staff(r["s_lead_6m"].format(**ctx)), None),
         ]
-        return [(f"[{num}] {who}\n\n{text}", buttons) for num, who, text, buttons in plan]
+        return [(num, who, "chat" if num == "4" else ("lead" if num.startswith("Л") else "hr"), text, buttons)
+                for num, who, text, buttons in plan]
+
+    async def demo_sheet(self, chat_id: int, user_id: int) -> str | None:
+        """/demo в беседе кандидата: схема Маши целиком за пару минут. В беседу — то, что бот пишет в чат
+        (Loom) и шапка каждого шага; в личку — HR и лиду, если они есть в этой беседе (Ильнар 25.11.2026:
+        «сообщения получат все, кто указан там по ролям и существует в этой беседе»)."""
+        async with self.sessions() as s:
+            if not await self._is_staff(s, user_id):
+                return None
+            # беседа не привязана (проверочный чат) — пример, как у /preview
+            case = await self._case_for_chat(s, chat_id) or await self._example_case(s, user_id)
+        if case is None:
+            return texts.DEMO_NO_CASE
+        hr = [case.hr_tg_id] if case.hr_tg_id else []
+        leads = self.lead_ids(case) or await self._known_leads(case.org_id)
+        roles = {"hr": [tg for tg in hr if await self._in_chat(chat_id, tg)],
+                 "lead": [tg for tg in leads if await self._in_chat(chat_id, tg)]}
+        names = {tg: await self._staff_name(tg) for tg in set(roles["hr"] + roles["lead"])}
+        task = asyncio.create_task(self._run_demo(chat_id, self.sheet_plan(case), roles, names))
+        self._preview_tasks = getattr(self, "_preview_tasks", set())
+        self._preview_tasks.add(task)
+        task.add_done_callback(self._preview_tasks.discard)
+        log.info("ONBOARDING demo chat=%s case=%s hr=%s leads=%s", chat_id, case.id, roles["hr"], roles["lead"])
+
+        def who(role: str) -> str:
+            return ", ".join(names[tg] for tg in roles[role]) or "никого из беседы"
+        return texts.DEMO_START.format(full=case.full_name, hr=who("hr"), lead=who("lead"))
+
+    async def _run_demo(self, chat_id: int, plan, roles: dict[str, list[int]], names: dict[int, str]) -> None:
+        failed: set[int] = set()
+        for i, (num, when, role, text, buttons) in enumerate(plan):
+            if i and self.preview_pause:
+                await asyncio.sleep(self.preview_pause)
+            try:
+                if role == "chat":
+                    await self.messenger.send(chat_id, f"[{num}] {when}")
+                    await self.messenger.send(chat_id, text, buttons)
+                    continue
+                got = []
+                for tg in roles[role]:
+                    if tg in failed:
+                        continue
+                    try:
+                        await self.messenger.send(tg, f"[{num}] {when}\n\n{text}")
+                        got.append(names[tg])
+                    except SendError as exc:
+                        failed.add(tg)
+                        log.warning("ONBOARDING demo dm %s: %s", tg, exc)
+                        await self.messenger.send(chat_id, texts.DEMO_DM_FAILED.format(name=names[tg]))
+                to = ", ".join(got) or "никому: этой роли нет в беседе"
+                await self.messenger.send(chat_id, f"[{num}] {when} → в личку: {to}")
+            except SendError as exc:
+                log.warning("ONBOARDING demo chat=%s stopped at %s: %s", chat_id, i, exc)
+                return
+        try:
+            await self.messenger.send(chat_id, texts.DEMO_DONE)
+        except SendError:
+            pass
+
+    async def _in_chat(self, chat_id: int, tg_id: int) -> bool:
+        check = getattr(self.messenger, "is_member", None)
+        return bool(check) and await check(chat_id, tg_id)
+
+    async def _known_leads(self, org_id: int | None) -> list[int]:
+        """Все лиды организации с Telegram: из оргструктуры и подтверждённые через /lead."""
+        async with self.sessions() as s:
+            q = (select(User.telegram_id).join(DepartmentMember, DepartmentMember.user_id == User.id)
+                 .join(Department, Department.id == DepartmentMember.department_id)
+                 .where(DepartmentMember.role == DeptRole.lead, User.telegram_id.is_not(None)))
+            if org_id is not None:
+                q = q.where(Department.org_id == org_id)
+            org = list(await s.scalars(q))
+            q = select(DepartmentLead.tg_id).where(DepartmentLead.status == "confirmed")
+            if org_id is not None:
+                q = q.where(or_(DepartmentLead.org_id == org_id, DepartmentLead.org_id.is_(None)))
+            confirmed = list(await s.scalars(q))
+        return list(dict.fromkeys(org + confirmed))
+
+    async def _staff_name(self, tg_id: int) -> str:
+        async with self.sessions() as s:
+            name = await s.scalar(select(User.name).where(User.telegram_id == tg_id).limit(1))
+            if not name:
+                name = await s.scalar(select(DepartmentLead.full_name).where(DepartmentLead.tg_id == tg_id).limit(1))
+        return name or str(tg_id)
 
     async def _send_preview(self, chat_id: int, items: list[tuple[str, Buttons | None]]) -> None:
         for i, (text, buttons) in enumerate(items):
