@@ -650,42 +650,57 @@ async def test_preview_sends_every_sheet_message(env):
     assert "выход 25.11.2026" in sent[3].text  # практика до 24.11 — выход на следующий рабочий день
 
 
-async def test_demo_routes_by_role_and_chat_membership(env):
-    """/demo: беседа кандидата — Loom и шапки шагов; HR и лиду — в личку, только если они в беседе."""
+async def test_demo_is_a_natural_run(env):
+    """/demo: ход кандидата как в жизни, быстро — Loom в беседу, HR и лиду в личку тем же текстом, без
+    номеров и пояснений; только тем, кто в беседе; без веток «не прошёл»/уход и второго месяца."""
     import asyncio
 
-    org_dept = await _org_dept_with_leads(env, ("Владимир", LEAD_TG), ("Ильнар", 7004))
-    case = await _practice(env)
+    await _org_dept_with_leads(env, ("Владимир", LEAD_TG), ("Ильнар", 7004))
+    case = await _practice(env, tg="admin_tg")  # тестовая карточка: кандидат — сам HR на своём Telegram
     await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
     env.messenger.members = {(WORK_CHAT, HR_TG), (WORK_CHAT, LEAD_TG)}  # Ильнара в беседе нет
     env.bot.preview_pause = 0
     assert await env.bot.demo_sheet(WORK_CHAT, STRANGER_TG) is None
     before = len(env.messenger.to(WORK_CHAT))
-    reply = await env.bot.demo_sheet(WORK_CHAT, HR_TG)
-    assert "HR — Admin User; лиду — Владимир." in reply
+    assert await env.bot.demo_sheet(WORK_CHAT, HR_TG, "admin_tg") is None  # в беседу — ни слова от себя
     await asyncio.gather(*env.bot._preview_tasks)
 
-    chat = env.messenger.texts(WORK_CHAT)[before:]
-    assert "@ivan_p, время для вечернего Loom: до 5 минут, экран и голос." in chat
-    assert "[6] HR, сразу при переводе в отдел → в личку: Admin User" in chat
-    assert "[Л2] лиду, сразу при переводе в отдел → в личку: Владимир" in chat
-    assert chat[-1] == "Демо закончено."
-    hr = env.messenger.texts(HR_TG)
-    assert sum(t.startswith("[") for t in hr) == 19  # 3, 5–21 (16 — дважды: за 3 дня и в день)
-    assert sum(t.startswith("[Л") for t in env.messenger.texts(LEAD_TG)) == 12
+    chat = env.messenger.to(WORK_CHAT)[before:]
+    assert [m.text for m in chat] == ["@admin_tg, время для вечернего Loom: до 5 минут, экран и голос."]
+    assert chat[0].buttons
+    hr, lead = env.messenger.texts(HR_TG), env.messenger.texts(LEAD_TG)
+    assert len(hr) == 14 and len(lead) == 9
+    assert not any(t.startswith("[") for t in hr + lead)
+    link = f"https://staffwise.club/all-candidates?entity={case.entity_id}"
+    assert all(t.endswith(link) for t in hr + lead)
+    assert hr[0].startswith("Сегодня старт Петров Иван Сергеевич в 10:00")
+    assert not any("не прошёл" in t or "уходит" in t or "2 месяц" in t for t in hr + lead)
     assert env.messenger.texts(7004) == []
-    assert org_dept.id
 
 
 async def test_demo_in_unbound_chat_uses_own_case(env):
     """Проверочный чат без кандидата: пример — своя карточка, в личку только тем, кто в беседе."""
     import asyncio
 
-    case = await _practice(env)
+    await _practice(env)
     env.messenger.members = {(-555, HR_TG)}
     env.bot.preview_pause = 0
-    reply = await env.bot.demo_sheet(-555, HR_TG)
-    assert reply.startswith(f"Демо по листу «пре:онборд» на {case.full_name}") and "лиду — никого из беседы" in reply
+    assert await env.bot.demo_sheet(-555, HR_TG, "admin_tg") is None
     await asyncio.gather(*env.bot._preview_tasks)
-    assert "[Л2] лиду, сразу при переводе в отдел → в личку: никому: этой роли нет в беседе" in env.messenger.texts(-555)
-    assert sum(t.startswith("[") for t in env.messenger.texts(HR_TG)) == 19
+    assert len(env.messenger.texts(HR_TG)) == 14
+    assert len(env.messenger.texts(-555)) == 1  # Loom
+
+
+
+async def test_demo_and_preview_refused_where_candidate_sits(env):
+    """Прод 25.11.2026: служебные строки демо видел бы кандидат — в его беседе /demo и /preview не идут."""
+    await _practice(env)
+    await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
+    env.bot.preview_pause = 0
+    refused = texts_mod.DEMO_CANDIDATE_HERE.format(cmd="/demo")
+    assert await env.bot.demo_sheet(WORK_CHAT, HR_TG, "admin_tg") == refused  # кандидат @ivan_p, мог прочесть
+    await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "привет")  # бот узнал его id
+    env.messenger.members = {(WORK_CHAT, HR_TG), (WORK_CHAT, CANDIDATE_TG)}
+    assert await env.bot.preview_sheet(WORK_CHAT, HR_TG, "admin_tg") == texts_mod.DEMO_CANDIDATE_HERE.format(cmd="/preview")
+    env.messenger.members = {(WORK_CHAT, HR_TG)}  # кандидат вышел из беседы
+    assert await env.bot.demo_sheet(WORK_CHAT, HR_TG, "admin_tg") is None  # запустилось

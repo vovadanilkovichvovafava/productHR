@@ -61,6 +61,9 @@ SURVEY_CODES = {"practice": "p", "first_day": "f", "week": "w", "month1": "1", "
 SURVEY_BY_CODE = {v: k for k, v in SURVEY_CODES.items()}
 SURVEY_LINK_PREFIX = "obs_"
 HR_CHANGE_SEEN_MAX = 2000
+# /demo: что из листа не показываем (другие ветки и повтор) и с каких сообщений начинается новый этап
+DEMO_SKIP = {"7", "18", "Л11", "20"}
+DEMO_STAGE_STARTS = {"6", "8", "Л5", "11", "14", "17", "21"}
 BIND_WINDOW_BEFORE, BIND_WINDOW_AFTER = timedelta(days=1), timedelta(days=4)
 DEPT_BIND_WINDOW = timedelta(days=10)
 
@@ -597,13 +600,16 @@ class ChatFlowMixin:
 
     preview_pause = 3.1  # Bot API: в одну группу не больше 20 сообщений в минуту
 
-    async def preview_sheet(self, chat_id: int, user_id: int) -> str | None:
+    async def preview_sheet(self, chat_id: int, user_id: int, username: str | None = None) -> str | None:
         """/preview в группе: все уведомления схемы Маши по очереди в этот чат, на примере последней
         карточки бота (своей, если ты её HR). Только сотрудникам. Ответ в чат или None."""
         async with self.sessions() as s:
             if not await self._is_staff(s, user_id):
                 return None
+            bound = await self._case_for_chat(s, chat_id)
             case = await self._example_case(s, user_id)
+        if bound is not None and await self._candidate_in_chat(chat_id, bound, user_id, username):
+            return texts.DEMO_CANDIDATE_HERE.format(cmd="/preview")
         if case is None:
             return texts.PREVIEW_NO_CASE
         items = self.sheet_preview_messages(case)
@@ -687,62 +693,63 @@ class ChatFlowMixin:
         return [(num, who, "chat" if num == "4" else ("lead" if num.startswith("Л") else "hr"), text, buttons)
                 for num, who, text, buttons in plan]
 
-    async def demo_sheet(self, chat_id: int, user_id: int) -> str | None:
-        """/demo в беседе кандидата: схема Маши целиком за пару минут. В беседу — то, что бот пишет в чат
-        (Loom) и шапка каждого шага; в личку — HR и лиду, если они есть в этой беседе (Ильнар 25.11.2026:
-        «сообщения получат все, кто указан там по ролям и существует в этой беседе»)."""
+    async def demo_sheet(self, chat_id: int, user_id: int, username: str | None = None) -> str | None:
+        """/demo: естественный ход одного кандидата по схеме Маши, в ускоренном виде (Ильнар 25.11.2026:
+        «сценарий должен имитировать естественный процесс работы, но в ускоренном виде, а не показывать
+        абсолютно все шаги в сыром виде»). Сообщения — как в жизни: Loom в беседу, HR и лиду в личку,
+        тем же текстом; получают те, кто указан по ролям и есть в этой беседе. Без номеров и пояснений;
+        альтернативные ветки (не прошёл, уход), второй месяц и «если решения нет» не показываем."""
         async with self.sessions() as s:
             if not await self._is_staff(s, user_id):
                 return None
+            bound = await self._case_for_chat(s, chat_id)
             # беседа не привязана (проверочный чат) — пример, как у /preview
-            case = await self._case_for_chat(s, chat_id) or await self._example_case(s, user_id)
+            case = bound or await self._example_case(s, user_id)
         if case is None:
             return texts.DEMO_NO_CASE
-        hr = [case.hr_tg_id] if case.hr_tg_id else []
+        if bound is not None and await self._candidate_in_chat(chat_id, bound, user_id, username):
+            return texts.DEMO_CANDIDATE_HERE.format(cmd="/demo")
+        hr_all = [case.hr_tg_id] if case.hr_tg_id else []
         leads = self.lead_ids(case) or await self._known_leads(case.org_id)
-        roles = {"hr": [tg for tg in hr if await self._in_chat(chat_id, tg)],
-                 "lead": [tg for tg in leads if await self._in_chat(chat_id, tg)]}
-        names = {tg: await self._staff_name(tg) for tg in set(roles["hr"] + roles["lead"])}
-        task = asyncio.create_task(self._run_demo(chat_id, self.sheet_plan(case), roles, names))
+        present = {"hr": [tg for tg in hr_all if await self._in_chat(chat_id, tg)],
+                   "lead": [tg for tg in leads if await self._in_chat(chat_id, tg)]}
+        steps = [(num, role, text, buttons) for num, when, role, text, buttons in self.sheet_plan(case)
+                 if num not in DEMO_SKIP and "2 месяц" not in when]
+        task = asyncio.create_task(self._run_demo(chat_id, user_id, steps, present))
         self._preview_tasks = getattr(self, "_preview_tasks", set())
         self._preview_tasks.add(task)
         task.add_done_callback(self._preview_tasks.discard)
-        log.info("ONBOARDING demo chat=%s case=%s hr=%s leads=%s", chat_id, case.id, roles["hr"], roles["lead"])
+        log.info("ONBOARDING demo chat=%s case=%s hr=%s leads=%s", chat_id, case.id, present["hr"], present["lead"])
+        return None
 
-        def who(role: str) -> str:
-            return ", ".join(names[tg] for tg in roles[role]) or "никого из беседы"
-        return texts.DEMO_START.format(full=case.full_name, hr=who("hr"), lead=who("lead"))
-
-    async def _run_demo(self, chat_id: int, plan, roles: dict[str, list[int]], names: dict[int, str]) -> None:
+    async def _run_demo(self, chat_id: int, owner: int, steps, present: dict[str, list[int]]) -> None:
         failed: set[int] = set()
-        for i, (num, when, role, text, buttons) in enumerate(plan):
-            if i and self.preview_pause:
-                await asyncio.sleep(self.preview_pause)
-            try:
-                if role == "chat":
-                    await self.messenger.send(chat_id, f"[{num}] {when}")
-                    await self.messenger.send(chat_id, text, buttons)
-                    continue
-                got = []
-                for tg in roles[role]:
-                    if tg in failed:
-                        continue
-                    try:
-                        await self.messenger.send(tg, f"[{num}] {when}\n\n{text}")
-                        got.append(names[tg])
-                    except SendError as exc:
-                        failed.add(tg)
-                        log.warning("ONBOARDING demo dm %s: %s", tg, exc)
-                        await self.messenger.send(chat_id, texts.DEMO_DM_FAILED.format(name=names[tg]))
-                to = ", ".join(got) or "никому: этой роли нет в беседе"
-                await self.messenger.send(chat_id, f"[{num}] {when} → в личку: {to}")
-            except SendError as exc:
-                log.warning("ONBOARDING demo chat=%s stopped at %s: %s", chat_id, i, exc)
-                return
-        try:
-            await self.messenger.send(chat_id, texts.DEMO_DONE)
-        except SendError:
-            pass
+        for i, (num, role, text, buttons) in enumerate(steps):
+            if i and self.preview_pause:  # новый этап — пауза длиннее: «прошло время»
+                await asyncio.sleep(self.preview_pause * (2 if num in DEMO_STAGE_STARTS else 1))
+            targets = [chat_id] if role == "chat" else [tg for tg in present[role] if tg not in failed]
+            for target in targets:
+                try:
+                    await self.messenger.send(target, text, buttons if role == "chat" else None)
+                except SendError as exc:
+                    log.warning("ONBOARDING demo %s: %s", target, exc)
+                    if target == chat_id:
+                        return
+                    failed.add(target)
+                    try:  # кто не открывал бота — тихо сказать запустившему, в беседу не пишем
+                        await self.messenger.send(owner, texts.DEMO_DM_FAILED.format(
+                            name=await self._staff_name(target)))
+                    except SendError:
+                        pass
+
+    async def _candidate_in_chat(self, chat_id: int, case: OnboardingCase, user_id: int,
+                                 username: str | None) -> bool:
+        """Кандидат этой беседы может её читать (а не тот, кто тестирует на своём Telegram)."""
+        if _is_candidate(case, user_id, username):
+            return False
+        if case.candidate_tg_id is not None:
+            return await self._in_chat(chat_id, case.candidate_tg_id)
+        return True  # чат кандидата, а есть ли он в нём — бот узнать не может
 
     async def _in_chat(self, chat_id: int, tg_id: int) -> bool:
         check = getattr(self.messenger, "is_member", None)

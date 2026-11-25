@@ -280,7 +280,7 @@ async def preview_command(message: Message) -> None:
     service = await get_service()
     if service is None or message.from_user is None:
         return
-    reply = await service.preview_sheet(message.chat.id, message.from_user.id)
+    reply = await service.preview_sheet(message.chat.id, message.from_user.id, message.from_user.username)
     if reply:
         await message.reply(reply)
 
@@ -291,7 +291,7 @@ async def demo_command(message: Message) -> None:
     service = await get_service()
     if service is None or message.from_user is None:
         return
-    reply = await service.demo_sheet(message.chat.id, message.from_user.id)
+    reply = await service.demo_sheet(message.chat.id, message.from_user.id, message.from_user.username)
     if reply:
         await message.reply(reply)
 
