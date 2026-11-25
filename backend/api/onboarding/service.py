@@ -38,6 +38,7 @@ from .surveys import SURVEYS
 log = logging.getLogger(__name__)
 
 PREBOARDING_JOBS = {
+    "loom_chat",
     "report_check",
     "report_escalate",
     "hr_practice_start",
@@ -147,15 +148,15 @@ class OnboardingService(ChatFlowMixin):
     def _preboarding(self, now: datetime, start_utc: datetime, tz: str, from_status: bool) -> list[sch.Job]:
         if not from_status:
             return sch.preboarding_jobs(now, start_utc, tz, self.settings.practice_days, self.settings.skip_weekends)
-        # Мит 19.11.2026: в личку кандидату бот не пишет — каждый рабочий день практики проверка
-        # вечернего отчёта в рабочем чате, утром в день старта — HR «подготовь документы и чат»,
-        # в последний день без решения — сигнал HR.
+        # Схема Маши «пре:онборд» (25.11.2026): за час до старта — HR «создай чат, отправь инвайт и
+        # правила» (3); каждый рабочий день практики в 20:00 — Loom в рабочий чат, HR не уведомляется
+        # (4); в последний день — HR «решение по кандидату» (5). Кандидату в личку бот не пишет.
         days = self.practice_days(sch.utc_to_local(start_utc, tz).date())
         jobs: list[sch.Job] = [
-            ("report_check", sch.at_local(d, self.settings.report_hour, tz), {"day": d.isoformat()}) for d in days
+            ("loom_chat", sch.at_local(d, sch.LOOM_HOUR, tz), {"day": d.isoformat()}) for d in days
         ]
         jobs.append(("practice_deadline", sch.at_local(days[-1], sch.NO_DECISION_HOUR, tz), {}))
-        hr_at = sch.at_local(days[0], 9, tz) + timedelta(minutes=30)
+        hr_at = start_utc - timedelta(hours=1)
         if hr_at > now:
             jobs.append(("hr_practice_start", hr_at, {}))
         return jobs
@@ -272,9 +273,13 @@ class OnboardingService(ChatFlowMixin):
                 case.probation_end_date = sch.add_months(start, 3)
                 case.awaiting = None
                 await self._cancel(s, case.id, PREBOARDING_JOBS)
-                reminder = self._work_time(self.clock() + timedelta(hours=24), case)
-                self._add_jobs(s, case.id, [("survey_reminder", reminder, {"kind": "practice"})])
-                self._add_jobs(s, case.id, sch.onboarding_jobs(start, case.timezone, self.settings.skip_weekends))
+                if self.sheet:  # схема Маши: опросы шлёт HR, бот ей напоминает
+                    self._add_jobs(s, case.id, sch.sheet_onboarding_jobs(
+                        start, case.timezone, self._local_now(case).date(), self.settings.skip_weekends))
+                else:
+                    reminder = self._work_time(self.clock() + timedelta(hours=24), case)
+                    self._add_jobs(s, case.id, [("survey_reminder", reminder, {"kind": "practice"})])
+                    self._add_jobs(s, case.id, sch.onboarding_jobs(start, case.timezone, self.settings.skip_weekends))
             elif status is CaseStatus.failed:
                 case.awaiting = None
                 await self._cancel(s, case.id, PREBOARDING_JOBS)
@@ -286,10 +291,13 @@ class OnboardingService(ChatFlowMixin):
             await s.commit()
 
         if status is CaseStatus.transferred:
-            await self._send_candidate(
-                case, texts.CONGRATS.format(**self._ctx(case)), texts.survey_button("practice"), "поздравление"
-            )
+            if not self.sheet:  # схема Маши: поздравляет и шлёт опрос о практике HR (уведомление 6)
+                await self._send_candidate(
+                    case, texts.CONGRATS.format(**self._ctx(case)), texts.survey_button("practice"), "поздравление"
+                )
             await self._after_transfer(case)
+        elif status is CaseStatus.failed and self.sheet:
+            await self._signal(case, "failed")  # 7: кандидату сообщает HR лично
         elif status is CaseStatus.failed and self.settings.send_thanks_on_fail:
             await self._send_candidate(case, texts.THANKS_ON_FAIL.format(**self._ctx(case)), None, "благодарность")
         elif status is CaseStatus.left:
@@ -316,7 +324,16 @@ class OnboardingService(ChatFlowMixin):
                 raise ValueError("испытательный срок идёт только у переведённых в отдел")
             if decision == "stays":
                 case.probation_decision = "stays"
-                await self._cancel_onboarding_kinds(s, case.id, {"probation_close"})
+                await self._cancel_onboarding_kinds(
+                    s, case.id, {"probation_close", "s_hr_no_decision", "s_lead_no_decision", "s_hr_probation_close"})
+            elif self.sheet:
+                if new_end is None or (case.probation_end_date and new_end <= case.probation_end_date):
+                    raise ValueError("новая дата конца срока должна быть позже текущей")
+                case.probation_decision = "extended"
+                case.probation_end_date = new_end
+                await self._cancel_onboarding_kinds(s, case.id, sch.SHEET_PROBATION_KINDS)
+                self._add_jobs(s, case.id, sch.sheet_probation_jobs(
+                    new_end, case.timezone, self._local_now(case).date(), self.settings.skip_weekends))
             else:
                 if new_end is None or (case.probation_end_date and new_end <= case.probation_end_date):
                     raise ValueError("новая дата конца срока должна быть позже текущей")
@@ -629,10 +646,16 @@ class OnboardingService(ChatFlowMixin):
         kind = payload["kind"]
         if case.status not in DEPARTMENT_STATUSES:
             return
-        if kind == "probation_close" and case.probation_decision == "stays":
+        if kind in ("probation_close", "s_hr_probation_close") and case.probation_decision == "stays":
             return
-        text = texts.STAFF_REMINDER[kind].format(**self._ctx(case))
-        targets = texts.STAFF_TARGETS[kind]
+        if kind in texts.SHEET_REMINDER:  # схема Маши: s_hr_* — HR, s_lead_* — каждому лиду
+            if kind in texts.SHEET_IF_NO_DECISION and case.probation_decision:
+                return
+            text = texts.SHEET_REMINDER[kind].format(**self._ctx(case))
+            targets = ("hr",) if kind.startswith("s_hr_") else ("lead",)
+        else:
+            text = texts.STAFF_REMINDER[kind].format(**self._ctx(case))
+            targets = texts.STAFF_TARGETS[kind]
         for who in targets:
             if who == "hr":
                 await self._deliver(case, kind, text)
@@ -719,7 +742,8 @@ class OnboardingService(ChatFlowMixin):
         return False
 
     async def _signal(self, case: OnboardingCase, kind: str, **extra: str) -> None:
-        text = texts.SIGNAL[kind].format(**self._ctx(case), **extra)
+        tpl = texts.SHEET_SIGNAL.get(kind) if self.sheet else None
+        text = (tpl or texts.SIGNAL[kind]).format(**self._ctx(case), **extra)
         await self._deliver(case, kind, text)
 
     async def _signal_survey(self, case: OnboardingCase, kind: str, step: int, answer: str) -> None:
@@ -734,6 +758,9 @@ class OnboardingService(ChatFlowMixin):
         """Лично HR из карточки; не вышло — в запасной HR-чат. Всё пишется в журнал."""
         if targets is None:
             targets = [case.hr_tg_id, self.settings.hr_fallback_chat_id]
+        link = self.card_link(case)
+        if self.sheet and link and link not in text:  # схема Маши: в каждом сообщении ссылка на карточку
+            text = f"{text}\n{texts.CARD_LINK.format(link=link)}"
         delivered_to = None
         for chat_id in targets:
             if not chat_id:
@@ -808,7 +835,33 @@ class OnboardingService(ChatFlowMixin):
             "department": case.department or "",
             **texts.lead_phrases(case.lead_name),
             "probation_end": case.probation_end_date.strftime("%d.%m") if case.probation_end_date else "",
+            **self._sheet_ctx(case),
         }
+
+    def _sheet_ctx(self, case: OnboardingCase) -> dict[str, str]:
+        d = case.department_start_date
+        names = texts.lead_names(case.lead_name)
+        lead_label = "Лиды" if len(names) > 1 else "Лид"
+        dept = case.department or ""
+        return {
+            "in_dept": f" в отделе {dept}" if dept else "",
+            "to_dept": f" в отдел {dept}" if dept else " в отдел",
+            "first_day": d.strftime("%d.%m.%Y") if d else "",
+            "day7": (d + timedelta(days=6)).strftime("%d.%m") if d else "",
+            "start_time": self.settings.practice_start_time,
+            "lead_paren": f" {lead_label}: {texts.join_names(names)}." if names else "",
+            "bot": f"@{self.settings.bot_username}" if self.settings.bot_username else "бота",
+        }
+
+    @property
+    def sheet(self) -> bool:
+        """Схема Маши «пре:онборд» (25.11.2026) — в режиме «бот по статусу АТС»."""
+        return self.settings.handoff_to_bot
+
+    def card_link(self, case: OnboardingCase) -> str:
+        if not case.entity_id or not self.settings.app_url:
+            return ""
+        return f"{self.settings.app_url}/all-candidates?entity={case.entity_id}"
 
 
 def _norm_username(username: str | None) -> str | None:

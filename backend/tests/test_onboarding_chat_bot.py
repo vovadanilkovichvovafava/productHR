@@ -127,16 +127,20 @@ async def _jobs(env, case_id, kind=None, status="pending"):
 # ------------------------------------------------------------------ рабочий чат практики
 
 
-async def test_hr_adds_bot_chat_is_bound_and_candidate_greeted(env):
+async def test_hr_adds_bot_chat_is_bound_quietly(env):
+    """Схема Маши: правила и инвайт шлёт HR — бот только говорит, что подключён, без «Старт»."""
     case = await _practice(env)
     assert not await env.bot.handle_bot_added(WORK_CHAT, STRANGER_TG)  # не сотрудник — бот молчит
     assert await env.bot.handle_bot_added(WORK_CHAT, HR_TG, "Практика Петров")
 
     [hello] = env.messenger.to(WORK_CHAT)
-    assert "рабочий чат практики Петров Иван Сергеевич" in hello.text and "@ivan_p" in hello.text
-    assert hello.buttons == [[("Старт", "pstart")]]
+    assert hello.text == ("Чат подключён к практике Петров Иван Сергеевич. "
+                          "Каждый день практики в 20:00 напомню про вечерний Loom.")
+    assert hello.buttons is None
     assert (await _fresh(env, case.id)).work_chat_id == WORK_CHAT
     assert not await env.bot.handle_bot_added(WORK_CHAT, HR_TG)  # повторно — уже привязан
+    await env.bot.handle_members_joined(WORK_CHAT, [(CANDIDATE_TG, "ivan_p")])
+    assert len(env.messenger.to(WORK_CHAT)) == 1  # кандидата приветствует HR, не бот
 
 
 async def test_two_candidates_asks_whose_chat_title_decides(env):
@@ -166,10 +170,11 @@ async def test_start_with_wrong_nick_and_rules(env):
     assert "Приглашение на платформу HR пришлёт" in rules and "руководителем практики Егор" in rules
 
 
-async def test_evening_report_reminder_and_mentor_tag(env):
+async def test_loom_reminder_at_20_with_buttons(env):
+    """Схема Маши, уведомление 4: каждый день практики в 20:00 — Loom в рабочий чат с кнопками,
+    HR не уведомляется, ментора не тегаем."""
     case = await _practice(env)
     await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
-    await env.bot.handle_practice_start(WORK_CHAT, CANDIDATE_TG, "ivan_p")
 
     # день 1 (19.11): отчёт прислан — вечером тишина
     reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "Сделал парсер #вечерний_отчёт")
@@ -177,50 +182,45 @@ async def test_evening_report_reminder_and_mentor_tag(env):
     assert await env.bot.handle_group_text(WORK_CHAT, MENTOR_TG, "egor_s", "Егор", "#отчёт") is None  # не кандидат
     env.clock.now = datetime(2026, 11, 19, 7, 0)
     await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "loom.com/share/abc")
-    env.clock.now = datetime(2026, 11, 19, 15, 1)  # 18:01 МСК
+    env.clock.now = datetime(2026, 11, 19, 17, 1)  # 20:01 МСК
     before = len(env.messenger.to(WORK_CHAT))
     await env.bot.run_due_jobs()
     assert len(env.messenger.to(WORK_CHAT)) == before
 
-    # день 2 (20.11): отчёта нет — напоминание в 18:00, через час — тег ментора
-    env.clock.now = datetime(2026, 11, 20, 15, 1)
+    # день 2 (20.11): отчёта нет — 20:00 Loom с кнопками
+    hr_before = len(env.messenger.to(HR_TG))
+    env.clock.now = datetime(2026, 11, 20, 17, 1)
     await env.bot.run_due_jobs()
-    assert env.messenger.texts(WORK_CHAT)[-1].startswith("@ivan_p, напоминаю про вечерний отчёт")
-    env.clock.now = datetime(2026, 11, 20, 16, 2)
+    loom = env.messenger.to(WORK_CHAT)[-1]
+    assert loom.text == "@ivan_p, время для вечернего Loom: до 5 минут, экран и голос."
+    assert loom.buttons == [[("Отправил(а)", "lmc:2026-11-20:sent"), ("Ещё в работе", "lmc:2026-11-20:later")]]
+    assert await env.bot.handle_loom_chat(WORK_CHAT, MENTOR_TG, "egor_s", "2026-11-20", "sent") == (
+        None, "Эти кнопки для кандидата.")
+    assert await env.bot.handle_loom_chat(WORK_CHAT, CANDIDATE_TG, "ivan_p", "2026-11-20", "sent") == ("Спасибо!", None)
+    env.clock.now = datetime(2026, 11, 20, 18, 30)
     await env.bot.run_due_jobs()
-    late = "@egor_s, кандидат Петров Иван Сергеевич не прислал вечерний отчёт за 20.11.2026."
-    assert env.messenger.texts(WORK_CHAT)[-1] == late
-    assert late in env.messenger.texts(EVENTS_CHAT)
-    assert [j.payload for j in await _jobs(env, case.id, "report_check")]  # остальные дни ещё впереди
-
-
-async def test_mentor_set_after_start_is_tagged(env, db_session):
-    """Прод 24.11.2026: ментора поставили в карточке уже после старта практики — бот его не видел."""
-    from api.services.practice_mentor import set_entity_mentor
-
-    case = await _practice(env, practice_lead="")
-    await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
-    await env.bot.handle_practice_start(WORK_CHAT, CANDIDATE_TG, "ivan_p")
-    entity = await db_session.get(Entity, case.entity_id)
-    await set_entity_mentor(db_session, entity, "Егор", user_id=env.user.id)
-    await db_session.commit()
-    env.clock.now = datetime(2026, 11, 19, 15, 1)  # 18:01 МСК: отчёта нет — напоминание
-    await env.bot.run_due_jobs()
-    env.clock.now = datetime(2026, 11, 19, 16, 2)  # 19:02 — тег ментора
-    await env.bot.run_due_jobs()
-    assert env.messenger.texts(WORK_CHAT)[-1].startswith("@egor_s, кандидат Петров Иван Сергеевич не прислал")
+    assert env.messenger.to(WORK_CHAT)[-1] is loom  # никаких тегов ментора
+    assert len(env.messenger.to(HR_TG)) == hr_before  # HR про Loom не пишем
+    assert len(await _jobs(env, case.id, "loom_chat")) == 2  # 21 и 24.11 ещё впереди
+    assert await _jobs(env, case.id, "report_check") == []
 
 
 async def test_no_work_chat_hr_told_once(env):
     case = await _practice(env)
-    env.clock.now = datetime(2026, 11, 19, 6, 31)  # 09:31 МСК — HR: «сегодня старт»
+    env.clock.now = datetime(2026, 11, 19, 6, 1)  # 09:01 МСК — за час до старта HR: «создай чат»
     await env.bot.run_due_jobs()
-    assert env.messenger.texts(HR_TG)[-1].startswith("Сегодня у Петров Иван Сергеевич старт практики")
-    env.clock.now = datetime(2026, 11, 20, 15, 1)
-    await env.bot.run_due_jobs()  # отчёты 19 и 20 — чата нет
+    assert env.messenger.texts(HR_TG)[-1] == (
+        "Сегодня старт Петров Иван Сергеевич в 10:00: создай рабочий чат, добавь @Staffwise_bot, "
+        f"отправь инвайт и правила.\nКарточка: https://staffwise.club/all-candidates?entity={case.entity_id}")
+    env.clock.now = datetime(2026, 11, 20, 17, 1)
+    await env.bot.run_due_jobs()  # Loom 19 и 20 — чата нет
     async with env.sessions() as s:
         told = list(await s.scalars(select(Signal).where(Signal.case_id == case.id, Signal.kind == "no_work_chat")))
     assert len(told) == 1 and "не видит рабочий чат" in told[0].text
+    env.clock.now = datetime(2026, 11, 24, 15, 1)  # последний день практики, 18:01 — уведомление 5
+    await env.bot.run_due_jobs()
+    assert env.messenger.texts(HR_TG)[-1].startswith(
+        "Решение по Петров Иван Сергеевич: последний день практики 24.11. Уточни дату старта и переведи в отдел.")
 
 
 # ------------------------------------------------------------------ лиды и переход в отдел
@@ -247,30 +247,24 @@ async def test_lead_registers_and_gets_new_hire(env):
 
     case = await _practice(env)
     await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
-    await env.bot.handle_practice_start(WORK_CHAT, CANDIDATE_TG, "ivan_p")
-    env.messenger.failing.add(CANDIDATE_TG)  # бот кандидату в личку не может — поздравление в чат
+    await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "привет")
+    chat_before = len(env.messenger.to(WORK_CHAT))
     await _transfer(env)
 
     fresh = await _fresh(env, case.id)
     assert fresh.status == CaseStatus.transferred.value and fresh.lead_tg_id == LEAD_TG and fresh.lead_name == "Марк"
-    chat = env.messenger.to(WORK_CHAT)
-    congrats = next(m for m in chat if "поздравляем! Практика пройдена" in m.text)
-    [[(label, link)]] = congrats.buttons
-    assert label == "Пройти опрос" and link.startswith("https://t.me/Staffwise_bot?start=obs_p")
-    assert chat[-1].text.startswith("Иван, практика закончена, поздравляем! Ты переходишь в отдел Push team")
-    assert env.messenger.texts(LEAD_TG)[-1].startswith("К тебе в отдел Push team переходит Петров Иван Сергеевич")
+    # схема Маши: кандидату и в чат практики бот ничего не пишет — поздравляет HR
+    assert len(env.messenger.to(WORK_CHAT)) == chat_before and env.messenger.to(CANDIDATE_TG) == []
+    link = f"https://staffwise.club/all-candidates?entity={case.entity_id}"
+    assert (f"Петров Иван Сергеевич переведён(а) в отдел Push team, выход 24.11.2026. Поздравь, отправь опрос "
+            f"о практике, передай кошелёк в бухгалтерию.\nКарточка: {link}") in env.messenger.texts(HR_TG)
+    assert env.messenger.texts(LEAD_TG)[-1] == (
+        "Петров Иван Сергеевич выходит к тебе в отдел Push team 24.11.2026. Проведи онбординг: создай чат отдела, "
+        f"свяжись с сотрудником, назначь онбординг-звонок на первый день.\nКарточка: {link}")
 
-    # кандидат открыл опрос по ссылке — дальше в личке
-    env.messenger.failing.discard(CANDIDATE_TG)
-    assert await env.bot.handle_survey_link(CANDIDATE_TG, link.split("start=")[1])
-    assert env.messenger.texts(CANDIDATE_TG)[-1].startswith("1. Насколько тебе было понятно")
-    assert not await env.bot.handle_survey_link(STRANGER_TG, link.split("start=")[1])  # чужой не откроет
-
-    # лид создал чат отдела и добавил бота — поздравление со сроками
-    assert await env.bot.handle_bot_added(DEPT_CHAT, LEAD_TG)
-    welcome = env.messenger.texts(DEPT_CHAT)[-1]
-    assert "ты в отделе Push team" in welcome and "24.11.2026" in welcome and "24.02" in welcome
-    assert (await _fresh(env, case.id)).dept_chat_id == DEPT_CHAT
+    # лид создал чат отдела и добавил бота — бот там не нужен, молчит
+    assert not await env.bot.handle_bot_added(DEPT_CHAT, LEAD_TG)
+    assert env.messenger.to(DEPT_CHAT) == []
 
 
 async def test_transfer_without_lead_tells_hr(env):
@@ -309,15 +303,15 @@ async def test_leads_come_from_org_department_without_lead_command(env):
     fresh = await _fresh(env, case.id)
     assert fresh.lead_name == "Владимир, Ильнар" and fresh.lead_tg_ids == [LEAD_TG, 7004]
     for tg in (LEAD_TG, 7004):
-        assert env.messenger.texts(tg)[-1].startswith("К тебе в отдел Push team переходит Петров Иван Сергеевич")
+        assert env.messenger.texts(tg)[-1].startswith("Петров Иван Сергеевич выходит к тебе в отдел Push team")
     assert not any("бот не знает, кто лид" in t for t in env.messenger.texts(HR_TG))
     # кандидату — обоих в нужном числе (прод 23.11.2026: «Руководитель Владимир, Ильнар свяжется»)
     ctx = env.bot._ctx(fresh)
     assert "Руководители Владимир и Ильнар свяжутся с тобой." in texts_mod.CONGRATS.format(**ctx)
     assert "руководители Владимир и Ильнар познакомят" in texts_mod.FIRST_DAY_WELCOME.format(**ctx)
-    # второй лид тоже свой: его чат отдела бот узнаёт сам
-    assert await env.bot.handle_bot_added(DEPT_CHAT, 7004)
-    assert (await _fresh(env, case.id)).dept_chat_id == DEPT_CHAT
+    reminders = await _jobs(env, case.id, "staff_reminder")
+    assert any(j.payload == '{"kind": "s_hr_day_before"}' for j in reminders)  # «в нужном числе»: Лиды: …
+    assert env.bot._sheet_ctx(fresh)["lead_paren"] == " Лиды: Владимир и Ильнар."
 
 
 async def test_org_lead_unreachable_tells_hr_to_rebind(env):
@@ -332,7 +326,7 @@ async def test_org_lead_unreachable_tells_hr_to_rebind(env):
     warn = [t for t in env.messenger.texts(HR_TG) if "не получил сообщение о новом сотруднике" in t]
     assert len(warn) == 1 and "Лид Владимир не получил" in warn[0] and "Пусть Владимир откроет staffwise" in warn[0]
     assert "карточке" not in warn[0]
-    assert env.messenger.texts(7004)[-1].startswith("К тебе в отдел Push team переходит")
+    assert env.messenger.texts(7004)[-1].startswith("Петров Иван Сергеевич выходит к тебе в отдел Push team")
 
 
 async def test_org_lead_without_telegram_tells_hr(env):
@@ -376,14 +370,14 @@ async def test_blocker_command(env):
     reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван",
                                             "/blocker@Staffwise_bot нет доступа к кабинету")
     assert reply.startswith("Передал HR")
-    assert env.messenger.texts(HR_TG)[-1].endswith("от Иван:\nнет доступа к кабинету")
+    assert "от Иван:\nнет доступа к кабинету\nКарточка: https://staffwise.club/" in env.messenger.texts(HR_TG)[-1]
 
     sent = len(env.messenger.texts(HR_TG))
     assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "/blocker") == texts_mod.BLOCKER_ASK
     assert len(env.messenger.texts(HR_TG)) == sent  # пустой блокер HR не уходит
     assert await env.bot.handle_group_text(WORK_CHAT, MENTOR_TG, "egor_s", "Егор", "сейчас гляну") is None  # другой человек
     reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "не открывается Loom")
-    assert reply.startswith("Передал HR") and env.messenger.texts(HR_TG)[-1].endswith("не открывается Loom")
+    assert reply.startswith("Передал HR") and "\nне открывается Loom\n" in env.messenger.texts(HR_TG)[-1]
     assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "спасибо") is None  # уже не блокер
 
     await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "/blocker")
@@ -495,15 +489,15 @@ def test_texts_without_mentor_and_lead():
     assert texts.join_names(["Мария", "Анастасия", "Егор"]) == "Мария, Анастасия и Егор"
 
 
-async def test_candidate_unreachable_hr_told_once(env):
-    """Не нажимал «Старт», бота нет в его чате — поздравление некуда; HR узнаёт один раз."""
+async def test_candidate_unreachable_nothing_to_tell(env):
+    """Схема Маши: кандидату бот после перевода не пишет — и «бот не может написать кандидату» HR не шлёт."""
     case = await _practice(env)
     await _transfer(env)
-    env.clock.now = datetime(2026, 11, 24, 7, 1)  # первый день в отделе: приветствие 10:00
+    env.clock.now = datetime(2026, 11, 24, 7, 1)
     await env.bot.run_due_jobs()
     async with env.sessions() as s:
         told = list(await s.scalars(select(Signal).where(Signal.case_id == case.id, Signal.kind == "no_contact")))
-    assert len(told) == 1 and "Добавь бота в рабочий чат" in told[0].text
+    assert told == []
 
 
 async def test_bot_mode_no_duplicate_hr_first_day(async_engine, db_session, organization, admin_user):
@@ -626,5 +620,4 @@ async def test_no_wallet_request_in_bot_mode(async_engine, db_session, admin_use
     await _transfer(env)
     clock.now = datetime(2026, 11, 24, 7, 1)
     await bot.run_due_jobs()
-    welcome = [t for t in messenger.texts(CANDIDATE_TG) if "добро пожаловать в команду" in t]
-    assert welcome and "кошел" not in welcome[0] and "  " not in welcome[0]
+    assert messenger.to(CANDIDATE_TG) == []  # схема Маши: приветствие и материалы отправляет HR

@@ -1,6 +1,6 @@
 """Telegram-часть HR-бота практики и испытательного срока.
 
-Кнопки (scr:, pstart, loom:, survey:, sv:) — свой Router, подключается к `dp` в api/bot.py:
+Кнопки (scr:, pstart, loom:, lmc:, survey:, sv:) — свой Router, подключается к `dp` в api/bot.py:
 у существующих обработчиков таких callback_data нет, конфликтов нет.
 
 Сообщения — НЕ роутером: обработчики самого `dp` срабатывают раньше подключённых роутеров,
@@ -316,6 +316,25 @@ async def loom(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     reply = await service.handle_loom(callback.from_user.id, parts[1], parts[2])
+    if reply:
+        await _drop_buttons(callback)
+    await _reply(callback, reply)
+
+
+@router.callback_query(F.data.startswith("lmc:"))
+async def loom_in_chat(callback: CallbackQuery) -> None:
+    """Loom в рабочем чате (схема Маши, уведомление 4): «Отправил(а)» / «Ещё в работе»."""
+    service = await get_service()
+    parts = callback.data.split(":", 2)
+    if service is None or len(parts) != 3 or not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+    user = callback.from_user
+    reply, alert = await service.handle_loom_chat(callback.message.chat.id, user.id, user.username,
+                                                  parts[1], parts[2])
+    if alert:
+        await callback.answer(alert, show_alert=True)
+        return
     if reply:
         await _drop_buttons(callback)
     await _reply(callback, reply)

@@ -131,3 +131,76 @@ def onboarding_jobs(department_start: date, tz: str, skip_weekends: bool = True)
         (kind, at_local(next_workday(day) if skip_weekends else day, hour, tz), payload)
         for kind, day, hour, payload in plan
     ]
+
+
+def prev_workday(day: date) -> date:
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+# Схема Маши «пре:онборд» (25.11.2026): напоминания HR и лиду от даты выхода в отдел.
+# (вид, день от выхода, час, минута). «за 1 день» — в ближайший рабочий день ДО выхода,
+# остальное на выходных переносится на понедельник.
+def sheet_onboarding_jobs(department_start: date, tz: str, today: date, skip_weekends: bool = True) -> list[Job]:
+    d = department_start
+    m1, m2, m3, m6 = (add_months(d, n) for n in (1, 2, 3, 6))
+    plan = [
+        ("s_hr_first_day", d, 9, 30),
+        ("s_hr_first_day_survey", d, 17, 0),
+        ("s_hr_check_first_day", d + timedelta(days=1), 10, 0),
+        ("s_hr_week_survey", d + timedelta(days=5), 10, 0),
+        ("s_hr_week_meeting", d + timedelta(days=6), 9, 30),
+        ("s_hr_m1_soon", m1 - timedelta(days=3), 10, 0),
+        ("s_hr_m1", m1, 10, 0),
+        ("s_hr_m2_soon", m2 - timedelta(days=3), 10, 0),
+        ("s_hr_m2", m2, 10, 0),
+        ("s_hr_m3_two_weeks", m3 - timedelta(days=14), 10, 0),
+        ("s_hr_no_decision", m3 - timedelta(days=3), 10, 0),
+        ("s_hr_probation_close", m3, 10, 0),
+        ("s_hr_6m", m6, 10, 0),
+        ("s_lead_first_day", d, 9, 0),
+        ("s_lead_call_done", d, 15, 0),
+        ("s_lead_goals", d + timedelta(days=2), 10, 0),
+        ("s_lead_m1_soon", m1 - timedelta(days=3), 10, 0),
+        ("s_lead_m1", m1, 10, 0),
+        ("s_lead_m2_soon", m2 - timedelta(days=3), 10, 0),
+        ("s_lead_m2", m2, 10, 0),
+        ("s_lead_m3_two_weeks", m3 - timedelta(days=14), 10, 0),
+        ("s_lead_no_decision", m3 - timedelta(days=3), 10, 0),
+        ("s_lead_6m", m6, 10, 0),
+    ]
+    jobs: list[Job] = []
+    for kind, day, hour, minute in plan:
+        if skip_weekends:
+            day = next_workday(day)
+        if day < today:  # перевод задним числом: прошедшие дни не присылаем пачкой
+            continue
+        run_at = local_to_utc(datetime.combine(day, time(hour, minute)), tz)
+        jobs.append(("staff_reminder", run_at, {"kind": kind}))
+    before = d - timedelta(days=1)
+    if skip_weekends:
+        before = prev_workday(before)
+    if before >= today:  # 8 и Л4: за день до выхода, 12:00
+        run_at = at_local(before, 12, tz)
+        jobs += [("staff_reminder", run_at, {"kind": "s_hr_day_before"}),
+                 ("staff_reminder", run_at, {"kind": "s_lead_day_before"})]
+    return jobs
+
+
+def sheet_probation_jobs(probation_end: date, tz: str, today: date, skip_weekends: bool = True) -> list[Job]:
+    """Испытательный срок продлили: заново 17, 18, 19, Л10, Л11 от новой даты конца."""
+    plan = [("s_hr_m3_two_weeks", 14), ("s_lead_m3_two_weeks", 14), ("s_hr_no_decision", 3),
+            ("s_lead_no_decision", 3), ("s_hr_probation_close", 0)]
+    jobs: list[Job] = []
+    for kind, before in plan:
+        day = probation_end - timedelta(days=before)
+        if skip_weekends:
+            day = next_workday(day)
+        if day >= today:
+            jobs.append(("staff_reminder", at_local(day, 10, tz), {"kind": kind}))
+    return jobs
+
+
+SHEET_PROBATION_KINDS = {"s_hr_m3_two_weeks", "s_lead_m3_two_weeks", "s_hr_no_decision", "s_lead_no_decision",
+                         "s_hr_probation_close"}

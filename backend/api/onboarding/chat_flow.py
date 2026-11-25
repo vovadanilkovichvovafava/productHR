@@ -144,6 +144,8 @@ class ChatFlowMixin:
             text = texts.dept_welcome(self._mention(case), case.department or "", _ddmm(case.department_start_date),
                                       _ddmm(case.probation_end_date), case.lead_name or "")
             buttons = None
+        elif self.sheet:  # схема Маши: правила и инвайт шлёт HR, бот только говорит, что подключён
+            text, buttons = texts.SHEET_CHAT_CONNECTED.format(**ctx), None
         else:
             text, buttons = texts.WORK_CHAT_HELLO.format(**ctx, mention=self._mention(case)), texts.START_BUTTON
             if case.status == CaseStatus.practice_running.value:
@@ -174,8 +176,8 @@ class ChatFlowMixin:
                         await s.commit()
             if case.status in DEPARTMENT_STATUSES:
                 continue  # чат отдела: поздравление ушло при привязке
-            if case.status != CaseStatus.practice_assigned.value:
-                continue
+            if case.status != CaseStatus.practice_assigned.value or self.sheet:
+                continue  # схема Маши: кандидата приветствует HR
             try:
                 await self.messenger.send(chat_id, texts.WORK_CHAT_WELCOME.format(**self._ctx(case)),
                                           texts.START_BUTTON)
@@ -308,8 +310,54 @@ class ChatFlowMixin:
         if case.status not in PRACTICE_STATUSES:
             return
         bot = f"@{self.settings.bot_username}" if self.settings.bot_username else "бота"
+        if self.sheet:  # уведомление 3, за час до старта
+            tpl = texts.SHEET_PRACTICE_START_CHAT_READY if case.work_chat_id else texts.SHEET_PRACTICE_START
+            await self._deliver(case, "hr_practice_start", tpl.format(**self._ctx(case)))
+            return
         tpl = texts.HR_PRACTICE_START_CHAT_READY if case.work_chat_id else texts.HR_PRACTICE_START
         await self._deliver(case, "hr_practice_start", tpl.format(full=case.full_name, bot=bot))
+
+    async def _job_loom_chat(self, case: OnboardingCase, payload: dict) -> None:
+        """Схема Маши, уведомление 4: каждый день практики в 20:00 — Loom в рабочий чат. HR не уведомляется."""
+        if case.status not in PRACTICE_STATUSES:
+            return
+        day = payload["day"]
+        async with self.sessions() as s:
+            if await self._reported(s, case.id, day):
+                return  # отчёт за день уже прислали — напоминать незачем
+            no_chat_told = await s.scalar(select(Signal.id).where(
+                Signal.case_id == case.id, Signal.kind == "no_work_chat").limit(1))
+        if case.work_chat_id is None:
+            if no_chat_told is None:
+                await self._signal(case, "no_work_chat")
+            return
+        try:
+            await self.messenger.send(case.work_chat_id, texts.SHEET_LOOM.format(mention=self._mention(case)),
+                                      texts.sheet_loom_buttons(day))
+        except SendError as exc:
+            await self._signal(case, "send_failed", what="напоминание про Loom", error=str(exc))
+
+    async def handle_loom_chat(self, chat_id: int, user_id: int, username: str | None,
+                               day: str, choice: str) -> tuple[str | None, str | None]:
+        """Кнопка под Loom в рабочем чате. (ответ в чат, всплывающее предупреждение)."""
+        if choice not in texts.SHEET_LOOM_REPLY:
+            return None, None
+        async with self.sessions() as s:
+            case = await self._case_for_chat(s, chat_id)
+            if case is None:
+                return None, None
+            if not _is_candidate(case, user_id, username):
+                if case.candidate_tg_id is not None or await self._is_staff(s, user_id):
+                    return None, texts.SHEET_LOOM_NOT_CANDIDATE
+                case.candidate_tg_id = user_id  # ник в карточке с ошибкой: нажал не сотрудник — кандидат
+            elif case.candidate_tg_id is None:
+                case.candidate_tg_id = user_id
+            s.add(SurveyResponse(case_id=case.id, survey="loom", question=0, answer=f"{day}:{choice}"))
+            if choice == "sent" and not await self._reported(s, case.id, day):
+                s.add(SurveyResponse(case_id=case.id, survey=REPORT_SURVEY, question=0, answer=day))
+            await s.commit()
+        log.info("ONBOARDING loom case=%s day=%s %s", case.id, day, choice)
+        return texts.SHEET_LOOM_REPLY[choice], None
 
     @staticmethod
     async def _reported(s, case_id: int, day: str) -> bool:
@@ -403,19 +451,22 @@ class ChatFlowMixin:
     async def _after_transfer(self, case: OnboardingCase) -> None:
         """Чат практики — прощание; лиду — «создай чат отдела»; лида нет — сигнал HR."""
         ctx = self._ctx(case)
-        if case.work_chat_id:
+        if case.work_chat_id and not self.sheet:  # схема Маши: решение в чате пишет руководитель практики
             try:
                 await self.messenger.send(case.work_chat_id, texts.PRACTICE_DONE.format(**ctx))
             except SendError as exc:
                 log.warning("рабочий чат %s: %s", case.work_chat_id, exc)
         if not self.settings.handoff_to_bot:
             return
-        first_day = _ddmm(case.department_start_date)
+        await self._signal(case, "transferred")  # 6: HR поздравляет, шлёт опрос, передаёт кошелёк
+        link = self.card_link(case)
+        lead_text = texts.SHEET_LEAD_TRANSFER.format(**ctx)  # Л2
+        if link:
+            lead_text += "\n" + texts.CARD_LINK.format(link=link)
         leads = self.lead_ids(case)
         for tg_id in leads:
             try:
-                await self.messenger.send(tg_id, texts.LEAD_NEW_HIRE.format(
-                    **ctx, first_day=first_day, probation_end_full=_ddmm(case.probation_end_date)))
+                await self.messenger.send(tg_id, lead_text)
             except SendError as exc:
                 # Прод 23.11.2026: у Владимира к staffwise привязан старый Telegram, «chat not found»,
                 # а HR читал «проверь Telegram в карточке» — в карточке кандидата всё было верно.
@@ -665,6 +716,8 @@ class ChatFlowMixin:
         ).order_by(OnboardingCase.practice_start_at))).all())
 
     async def _unbound_dept_cases(self, s) -> list[OnboardingCase]:
+        if self.sheet:  # схема Маши: чат отдела ведёт лид, бот туда не нужен
+            return []
         today = sch.utc_to_local(self.clock(), self.settings.default_tz).date()
         return list((await s.scalars(select(OnboardingCase).where(
             OnboardingCase.status.in_(DEPARTMENT_STATUSES), OnboardingCase.dept_chat_id.is_(None),

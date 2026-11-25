@@ -2,6 +2,7 @@
 получает НАШ бот (OnboardingService) при ONBOARDING_HANDOFF_TO_BOT."""
 
 from dataclasses import dataclass, field
+import json
 from datetime import date, datetime
 from types import SimpleNamespace
 
@@ -107,11 +108,10 @@ async def test_practice_status_creates_case_for_own_bot(setup, db_session, organ
     # в личку кандидату бот не пишет: ни «открыл ли ссылку», ни «завтра старт»
     jobs = await _jobs(setup, case.id)
     assert "invite_check" not in jobs and "day_before" not in jobs and "loom" not in jobs
-    assert jobs.count("report_check") == 4 and "practice_deadline" in jobs and "hr_practice_start" in jobs
+    assert jobs.count("loom_chat") == 4 and "practice_deadline" in jobs and "hr_practice_start" in jobs
 
-    # HR узнаёт, что делать дальше, — не «передан HR-профилю»
-    [note] = setup.messenger.to(HR_TG)
-    assert "практика с 19.11.2026 10:00" in note and "@Staffwise_bot" in note and "HR-профил" not in note
+    # схема Маши: на статус «практика» бот HR не пишет — «создай чат» придёт за час до старта
+    assert setup.messenger.to(HR_TG) == []
     async with setup.sessions() as s:
         row = await s.scalar(select(Handoff).where(Handoff.entity_id == entity.id))
     assert row.practice_sent_at is not None and row.account_id is None
@@ -134,7 +134,7 @@ async def test_practice_date_moved_reschedules(setup, db_session, organization, 
     assert case.practice_last_day == date(2026, 11, 26)
     async with setup.sessions() as s:
         looms = sorted(json_day(j) for j in await s.scalars(
-            select(BotJob).where(BotJob.case_id == case.id, BotJob.status == "pending", BotJob.kind == "report_check")))
+            select(BotJob).where(BotJob.case_id == case.id, BotJob.status == "pending", BotJob.kind == "loom_chat")))
     assert looms == ["2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26"]
     assert "invite_check" not in await _jobs(setup, case.id, "cancelled")
     # прод 20.11.2026: в режиме бота HR-профиля нет — не «HR-профилю передано»
@@ -169,9 +169,13 @@ async def test_transfer_and_stop(setup, db_session, organization, admin_user):
     assert case.status == CaseStatus.transferred.value
     assert (case.department_start_date, case.probation_end_date, case.lead_name) == (
         date(2026, 11, 24), date(2027, 2, 24), "Марк")
-    assert "report_check" not in await _jobs(setup, case.id)  # отчёты практики сняты
-    assert "first_day_welcome" in await _jobs(setup, case.id)
-    assert any("испытательный срок до 24.02.2027" in t for t in setup.messenger.to(HR_TG))
+    pending = await _jobs(setup, case.id)
+    assert "loom_chat" not in pending and "first_day_welcome" not in pending and "survey" not in pending
+    assert pending.count("staff_reminder") == 25  # 8–21 и Л4–Л12 схемы Маши
+    hr = setup.messenger.to(HR_TG)
+    assert [t for t in hr if "переведён" in t or "передан" in t] == [  # без дубля «передано»
+        f"Петров Иван Сергеевич переведён(а) в отдел, выход 24.11.2026. Поздравь, отправь опрос о практике, "
+        f"передай кошелёк в бухгалтерию.\nКарточка: https://staffwise.club/all-candidates?entity={entity.id}"]
 
     entity.status = EntityStatus.dismissed
     await db_session.commit()
@@ -179,6 +183,8 @@ async def test_transfer_and_stop(setup, db_session, organization, admin_user):
     [case] = await _cases(setup, entity.id)
     assert case.status == CaseStatus.left.value
     assert await _jobs(setup, case.id) == []
+    assert setup.messenger.to(HR_TG)[-1].startswith("Петров Иван Сергеевич уходит")
+    assert "exit-интервью" in setup.messenger.to(HR_TG)[-1]
 
 
 async def test_rejected_during_practice_stops_reminders(setup, db_session, organization, admin_user):
@@ -190,8 +196,9 @@ async def test_rejected_during_practice_stops_reminders(setup, db_session, organ
     [case] = await _cases(setup, entity.id)
     assert case.status == CaseStatus.failed.value
     pending = await _jobs(setup, case.id)
-    assert "report_check" not in pending and "practice_deadline" not in pending
-    assert any("бот остановил напоминания" in t for t in setup.messenger.to(HR_TG))
+    assert "loom_chat" not in pending and "practice_deadline" not in pending
+    assert [t.split("\n")[0] for t in setup.messenger.to(HR_TG)] == [
+        "Петров Иван Сергеевич: не прошёл(ла) практику. Сообщи кандидату лично."]
 
 
 async def test_transfer_without_practice_case(setup, db_session, organization, admin_user):
@@ -243,31 +250,42 @@ def test_runtime_enabled_with_to_bot(monkeypatch, raw, expected):
     assert runtime.handoff_enabled() is expected
 
 
-async def test_survey_reminders_after_weekend_name_the_survey(setup, db_session, organization, admin_user):
-    """Прод 23.11.2026: переход в пятницу — напоминания об опросе о практике и о первом дне ушли
-    в понедельник в 10:00 одинаковым текстом, кандидат видел «дубль». Теперь в тексте — какой опрос."""
+async def test_sheet_onboarding_schedule_and_texts(setup, db_session, organization, admin_user):
+    """Схема Маши «пре:онборд»: переход в пятницу 20.11 — первый день сразу, «за день» в прошлом не шлём,
+    понедельник: 2-й день; сроки ИС от даты выхода; каждое сообщение со ссылкой на карточку."""
     entity = await _person(db_session, organization, admin_user)
+    await setup.handoff.tick()
+    setup.clock.now = datetime(2026, 11, 20, 6, 0)  # пятница, 09:00 МСК
+    entity.status = EntityStatus.transferred
+    entity.extra_data = {**entity.extra_data, "department_transfer_date": "2026-11-20", "manager_name": "Марк"}
+    await db_session.commit()
     await setup.handoff.tick()
     [case] = await _cases(setup, entity.id)
     async with setup.sessions() as s:
-        (await s.get(OnboardingCase, case.id)).candidate_tg_id = 555
-        await s.commit()
+        jobs = {json.loads(j.payload)["kind"]: sch.utc_to_local(j.run_at, case.timezone).strftime("%d.%m.%Y %H:%M")
+                for j in await s.scalars(select(BotJob).where(BotJob.case_id == case.id, BotJob.status == "pending"))}
+    assert "s_hr_day_before" not in jobs  # 19.11 уже прошло
+    assert jobs["s_hr_first_day"] == "20.11.2026 09:30" and jobs["s_lead_first_day"] == "20.11.2026 09:00"
+    assert jobs["s_lead_call_done"] == "20.11.2026 15:00" and jobs["s_hr_first_day_survey"] == "20.11.2026 17:00"
+    assert jobs["s_hr_check_first_day"] == "23.11.2026 10:00"  # день 2 — суббота → понедельник
+    assert jobs["s_hr_week_survey"] == "25.11.2026 10:00" and jobs["s_hr_week_meeting"] == "26.11.2026 09:30"
+    assert jobs["s_hr_m1_soon"] == "17.12.2026 10:00" and jobs["s_hr_m1"] == "21.12.2026 10:00"
+    assert jobs["s_hr_m3_two_weeks"] == "08.02.2027 10:00" and jobs["s_hr_probation_close"] == "22.02.2027 10:00"
+    assert jobs["s_hr_6m"] == "20.05.2027 10:00"
 
-    setup.clock.now = datetime(2026, 11, 20, 9, 50)  # пятница, 12:50 МСК
-    entity.status = EntityStatus.transferred
-    entity.extra_data = {**entity.extra_data, "department_transfer_date": "2026-11-20"}
-    await db_session.commit()
-    await setup.handoff.tick()
-    setup.clock.now = datetime(2026, 11, 20, 15, 1)  # пятница, 18:01 МСК — опрос первого дня
+    setup.clock.now = datetime(2026, 11, 20, 6, 31)  # 09:31 — HR: первый день
     await setup.bot.run_due_jobs()
-    setup.clock.now = datetime(2026, 11, 23, 7, 1)  # понедельник, 10:01 МСК
-    await setup.bot.run_due_jobs()
+    link = f"Карточка: https://staffwise.club/all-candidates?entity={entity.id}"
+    assert setup.messenger.to(HR_TG)[-1] == (
+        "Сегодня первый день Петров Иван Сергеевич. Спроси лида про онбординг-звонок, отправь "
+        f"приветствие и материалы. Лид: Марк.\n{link}")
 
-    reminders = [t for t in setup.messenger.to(555) if "напоминаю про короткий опрос" in t]
-    assert sorted(reminders) == [
-        "Иван, напоминаю про короткий опрос о первом дне, это пара минут.",
-        "Иван, напоминаю про короткий опрос о практике, это пара минут.",
-    ]
+    # решение по ИС внесено — 18 и Л11 не приходят
+    await setup.bot.decide_probation(case.id, "stays")
+    setup.clock.now = datetime(2027, 2, 19, 7, 1)
+    await setup.bot.run_due_jobs()
+    assert not any("Нет решения лида" in t for t in setup.messenger.to(HR_TG))
+
 
 
 async def test_practice_lead_from_mentor_tag(setup, db_session, organization, admin_user):

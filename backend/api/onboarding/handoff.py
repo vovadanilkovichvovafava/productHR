@@ -435,11 +435,15 @@ class HandoffService:
                 done = "напоминания бота перенесены" if to_bot else "HR-профилю передано"
                 text = (f"{self._name_html(entity)}: дата практики изменена с "
                         f"{moved_from.strftime('%d.%m.%Y')} на {event['practice_start']}, {done}.")
+            elif auto_date and to_bot:
+                text = (f"{self._name_html(entity)}: дата выхода на практику не стояла, поэтому поставлена "
+                        f"следующим рабочим днём на Штате: {event['practice_start']}. Если практика в другой "
+                        "день, поправьте дату, и бот перенесёт напоминания.")
             elif auto_date:
-                who = "бот перенесёт напоминания" if to_bot else "HR-профиль получит новую"
                 text += (" Дата выхода на практику не стояла, поэтому поставлена следующим рабочим днём на "
-                         f"Штате. Если практика в другой день, поправьте дату, и {who}.")
-            await self._confirm_hr(entity, text, chat_id)
+                         "Штате. Если практика в другой день, поправьте дату, и HR-профиль получит новую.")
+            if text:
+                await self._confirm_hr(entity, text, chat_id)
         return 1
 
     async def _hr_reminders(self) -> int:
@@ -518,8 +522,9 @@ class HandoffService:
             await s.commit()
         if row.notice_message_id:
             await self._drop_notice(row)  # отказ, пока ждали данные: «допишите» уже не актуально
-        if told:
-            await self._confirm_hr(entity, self._confirm_text(entity, event))
+        text = self._confirm_text(entity, event) if told else ""
+        if text:
+            await self._confirm_hr(entity, text)
         logger.info("ONBOARDING handoff stop entity=%s status=%s told=%s", entity.id, entity.status, bool(told))
         return 1 if told else 0
 
@@ -754,19 +759,9 @@ class HandoffService:
         return f"{name}: HR-профилю передан стоп, причина: {html.escape(event.get('reason') or '')}."
 
     def _bot_confirm_text(self, name: str, event: dict) -> str:
-        """Что HR узнаёт, когда событие получил наш бот (а не HR-аккаунт)."""
-        bot = f"@{self.settings.bot_username}" if self.settings.bot_username else "бота"
-        kind = event["event"]
-        if kind == "practice":
-            return (f"{name}: практика с {event['practice_start']}. В день старта создай рабочий чат "
-                    f"и добавь туда кандидата и {bot}. Бот поздравит кандидата со стартом и будет "
-                    "напоминать про вечерний Loom.")
-        if kind == "transfer":
-            parts = [f"переход в отдел {html.escape(event['department'])}" if event.get("department")
-                     else "переход в отдел", f"первый рабочий день {event['first_day']}",
-                     f"испытательный срок до {event['probation_end']}"]
-            return f"{name}: " + ", ".join(parts) + ". Опросы и напоминания онбординга бот запланировал."
-        return f"{name}: бот остановил напоминания, причина: {html.escape(event.get('reason') or '')}."
+        """Схема Маши «пре:онборд» (25.11.2026): при смене статуса HR пишет сам бот — за час до старта
+        практики (3), при переводе (6), «не прошёл» (7) и уходе (20). Отдельное «передано» — дубль."""
+        return ""
 
     async def _hr_tg_id(self, entity: Entity) -> Optional[int]:
         """Telegram HR, который завёл карточку (сигналы бота идут ему лично)."""
