@@ -277,7 +277,7 @@ async def test_sheet_onboarding_schedule_and_texts(setup, db_session, organizati
     await setup.bot.run_due_jobs()
     link = f"Карточка: https://staffwise.club/all-candidates?entity={entity.id}"
     assert setup.messenger.to(HR_TG)[-1] == (
-        f"Сегодня первый день Петров Иван Сергеевич. Спроси у лида (Марк) про звонок, отправь приветствие и "
+        f"Сегодня первый день Петров Иван Сергеевич. Спроси у Марк про звонок, отправь приветствие и "
         f"материалы\n{link}")
     # день 7 от 20.11 — четверг 26.11; встреча недели в тексте 11 и в 13 — один день
     assert env_day7(setup, case) == "26.11"

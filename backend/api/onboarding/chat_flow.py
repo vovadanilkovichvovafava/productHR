@@ -696,9 +696,10 @@ class ChatFlowMixin:
     async def demo_sheet(self, chat_id: int, user_id: int, username: str | None = None) -> str | None:
         """/demo: путь одного кандидата по схеме Маши в ускоренном виде, по сценам (Ильнар 25.11.2026:
         «имитировать естественный процесс работы, но в ускоренном виде»; «сначала писал, что за сценарий,
-        а потом действия»). В беседу — заголовок сцены и то, что бот пишет в чат (Loom); HR и лиду —
-        в личку тем же текстом, что в жизни; получают те, кто указан по ролям и есть в этой беседе.
-        Ветки «не прошёл»/уход, второй месяц и «если решения нет» не показываем."""
+        а потом действия»; «прогони полностью по тз, абсолютно все, слово в слово»). В беседу — заголовок
+        раздела листа и то, что бот пишет в чат (Loom); HR и лиду — в личку все 32 уведомления листа тем же
+        текстом, что в жизни. Беседа кандидата — получают те, кто указан по ролям и есть в ней; проверочная
+        беседа (не привязана к кандидату) — тот, кто запустил, получает и часть HR, и часть лида."""
         async with self.sessions() as s:
             if not await self._is_staff(s, user_id):
                 return None
@@ -709,22 +710,24 @@ class ChatFlowMixin:
             return texts.DEMO_NO_CASE
         if bound is not None and await self._candidate_in_chat(chat_id, bound, user_id, username):
             return texts.DEMO_CANDIDATE_HERE.format(cmd="/demo")
-        hr_all = [case.hr_tg_id] if case.hr_tg_id else []
-        # Отдела ещё нет — лиды организации из беседы, кроме HR кандидата (прод 25.11.2026: Мария —
-        # и HR, и лид своего отдела в «Управлении», и получала в демо обе части)
-        leads = self.lead_ids(case) or [tg for tg in await self._known_leads(case.org_id) if tg not in hr_all]
-        present = {"hr": [tg for tg in hr_all if await self._in_chat(chat_id, tg)],
-                   "lead": [tg for tg in leads if await self._in_chat(chat_id, tg)]}
+        if bound is None:  # проверочная беседа: кто запустил — тот и HR, и лид (Ильнар: «и лида прогони, и hr»)
+            present = {"hr": [user_id], "lead": [user_id]}
+        else:
+            hr_all = [case.hr_tg_id] if case.hr_tg_id else []
+            # Отдела ещё нет — лиды организации из беседы, кроме HR кандидата (прод 25.11.2026: Мария —
+            # и HR, и лид своего отдела в «Управлении», и получала в демо обе части)
+            leads = self.lead_ids(case) or [tg for tg in await self._known_leads(case.org_id) if tg not in hr_all]
+            present = {"hr": [tg for tg in hr_all if await self._in_chat(chat_id, tg)],
+                       "lead": [tg for tg in leads if await self._in_chat(chat_id, tg)]}
         names = {tg: await self._staff_name(tg) for tg in set(present["hr"] + present["lead"])}
-        steps = {num: (role, text, buttons) for num, when, role, text, buttons in self.sheet_plan(case)
-                 if "2 месяц" not in when}
-        ctx = self._ctx(case)
+        steps = [(role, text, buttons) for _, _, role, text, buttons in self.sheet_plan(case)]
 
         def who(role: str) -> str:
             return ", ".join(names[tg] for tg in present[role]) or "никто, в беседе нет"
         intro = texts.DEMO_INTRO.format(full=case.full_name, hr=who("hr"), lead=who("lead"))
-        scenes = [(texts.DEMO_SCENE.format(n=i, total=len(texts.DEMO_SCENES), title=title, text=text.format(**ctx)),
-                   [steps[num] for num in nums]) for i, (title, text, nums) in enumerate(texts.DEMO_SCENES, 1)]
+        total = len(texts.DEMO_SCENES)
+        scenes = [("\n\n".join(p for p in (texts.DEMO_SCENE.format(n=i, total=total, title=title), text) if p),
+                   [steps[k] for k in idx]) for i, (title, text, idx) in enumerate(texts.DEMO_SCENES, 1)]
         task = asyncio.create_task(self._run_demo(chat_id, user_id, intro, scenes, present))
         self._preview_tasks = getattr(self, "_preview_tasks", set())
         self._preview_tasks.add(task)

@@ -869,11 +869,10 @@ class OnboardingService(ChatFlowMixin):
     def _sheet_ctx(self, case: OnboardingCase) -> dict[str, str]:
         d = case.department_start_date
         names = texts.lead_names(case.lead_name)
-        who = "лидов" if len(names) > 1 else "лида"
         end = case.probation_end_date
         return {
             "dept": case.department or "отдел",
-            "u_lead": f"{who} ({texts.join_names(names)})" if names else "лида",  # «у лида (Владимир)»
+            "lid": texts.join_names(names) or "лида",  # {лид} листа как есть: «Уточни у Владимир»
             "first_day": d.strftime("%d.%m.%Y") if d else "",
             "day7": self._day7(d).strftime("%d.%m") if d else "",
             "end": end.strftime("%d.%m.%Y") if end else "",

@@ -309,7 +309,7 @@ async def test_leads_come_from_org_department_without_lead_command(env):
     assert "руководители Владимир и Ильнар познакомят" in texts_mod.FIRST_DAY_WELCOME.format(**ctx)
     reminders = await _jobs(env, case.id, "staff_reminder")
     assert any(j.payload == '{"kind": "s_hr_day_before"}' for j in reminders)  # «в нужном числе»: Лиды: …
-    assert env.bot._sheet_ctx(fresh)["u_lead"] == "лидов (Владимир и Ильнар)"  # «Уточни у лидов (…)»
+    assert env.bot._sheet_ctx(fresh)["lid"] == "Владимир и Ильнар"  # {лид} листа как есть
 
 
 async def test_org_lead_unreachable_tells_hr_to_rebind(env):
@@ -647,8 +647,8 @@ async def test_preview_sends_every_sheet_message(env):
 
 
 async def test_demo_is_a_natural_run(env):
-    """/demo: ход кандидата как в жизни, быстро — Loom в беседу, HR и лиду в личку тем же текстом, без
-    номеров и пояснений; только тем, кто в беседе; без веток «не прошёл»/уход и второго месяца."""
+    """/demo: ход кандидата как в жизни, быстро — заголовки разделов листа, Loom в беседу, HR и лиду в личку
+    все уведомления листа тем же текстом; только тем, кто в беседе."""
     import asyncio
 
     org_dept = await _org_dept_with_leads(env, ("Владимир", LEAD_TG), ("Ильнар", 7004))
@@ -667,19 +667,20 @@ async def test_demo_is_a_natural_run(env):
     texts_in_chat = [m.text for m in chat]
     assert texts_in_chat[0].startswith(f"Демо: путь кандидата {case.full_name}")
     assert "В личку получат: HR — Admin User; лид — Владимир." in texts_in_chat[0]
-    # сначала что за сцена, потом действия
-    assert texts_in_chat[1].startswith("Сценарий 1 из 10 — Старт практики\n\nКандидат выходит на практику в 10:00.")
-    assert texts_in_chat[2].startswith("Сценарий 2 из 10 — Вечер дня практики")
-    assert texts_in_chat[3] == "Время для вечернего Loom: до 5 минут, экран и голос." and chat[3].buttons
-    assert texts_in_chat[-2].startswith("Сценарий 10 из 10 — Полгода") and texts_in_chat[-1] == "Демо закончено."
-    assert len(chat) == 13  # вступление, 10 сцен, Loom, конец
+    # сначала раздел листа его словами, потом действия
+    assert texts_in_chat[1] == "Сценарий 1 из 8 — Практика (пребординг)"
+    assert texts_in_chat[2] == "Время для вечернего Loom: до 5 минут, экран и голос." and chat[2].buttons
+    assert texts_in_chat[3].startswith("Сценарий 2 из 8 — Переход в отдел\n\nРешение лид пишет в рабочем чате")
+    assert texts_in_chat[-2] == "Сценарий 8 из 8 — Статус «мы уволили» и “сам уволился”(в любой момент)"
+    assert texts_in_chat[-1] == "Демо закончено."
+    assert len(chat) == 11  # вступление, 8 разделов, Loom, конец
     hr, lead = env.messenger.texts(HR_TG), env.messenger.texts(LEAD_TG)
-    assert len(hr) == 14 and len(lead) == 9
+    assert len(hr) == 19 and len(lead) == 12  # все уведомления листа: 3, 5–21 и Л2–Л12
     assert not any(t.startswith("[") for t in hr + lead)
     link = f"https://staffwise.club/all-candidates?entity={case.entity_id}"
     assert all(t.endswith(link) for t in hr + lead)
     assert hr[0].startswith("Сегодня старт Петров Иван Сергеевич в 10:00")
-    assert not any("не прошёл" in t or "уходит" in t or "2 месяц" in t for t in hr + lead)
+    assert hr[-1].startswith("Петров Иван Сергеевич уходит: проведи exit-интервью и заполни причину")
     assert env.messenger.texts(7004) == []
 
 
@@ -692,8 +693,8 @@ async def test_demo_in_unbound_chat_uses_own_case(env):
     env.bot.preview_pause = 0
     assert await env.bot.demo_sheet(-555, HR_TG, "admin_tg") is None
     await asyncio.gather(*env.bot._preview_tasks)
-    assert len(env.messenger.texts(HR_TG)) == 14
-    assert "лид — никто, в беседе нет" in env.messenger.texts(-555)[0]
+    assert len(env.messenger.texts(HR_TG)) == 31  # проверочная беседа: запустивший — и HR, и лид
+    assert "В личку получат: HR — Admin User; лид — Admin User." in env.messenger.texts(-555)[0]
 
 
 
@@ -735,3 +736,63 @@ async def test_legacy_jobs_switch_to_sheet(env):
     assert len(env.messenger.sent) == sent  # ни старого опроса кандидату, ни «всё ли понятно» HR
     kinds = [json.loads(j.payload)["kind"] for j in await _jobs(env, case.id)]
     assert "hr_call_week" not in kinds and "s_hr_check_first_day" in kinds and "s_hr_first_day" not in kinds
+
+
+# Итоговая таблица листа Маши «пре:онборд» (Google Doc, 25.11.2026), как есть — с подстановками листа.
+SHEET_TABLE = [
+    "Сегодня старт {Имя} в 10:00: создай рабочий чат, добавь бота, отправь инвайт и правила",  # 3
+    "Время для вечернего Loom: до 5 минут, экран и голос.",  # 4
+    "Решение по {Имя}: уточни дату старта и переведи в отдел. В АТС откроется модальное окно с отделом "
+    "(Telegram лида подтягивается)",  # 5
+    "{Имя} переведён в {отдел}, выход {дата}. Поздравь, отправь опрос о практике, передай кошелёк в бухгалтерию",  # 6
+    "{Имя} выходит к тебе в {отдел} {дата}. Проведи онбординг: создай чат отдела, свяжись с сотрудником, назначь "
+    "онбординг-звонок на первый день",  # Л2
+    "{Имя}: не прошёл. Сообщи кандидату лично",  # 7
+    "Завтра {Имя} выходит в {отдел}. Уточни у {лид}: чат, связь, онбординг-звонок",  # 8
+    "Завтра в 10:00 к тебе выходит {Имя}. Не забудь связаться и начать онбординг: чат, доступы, онбординг-звонок",  # Л4
+    "Сегодня в 10:00 старт {Имя}. Онбординг-звонок: продукт, задачи, цели на ИС, KPI, как устроена работа, "
+    "наставник, доступы",  # Л5
+    "Сегодня первый день {Имя}. Спроси у {лид} про звонок, отправь приветствие и материалы",  # 9
+    "Онбординг-звонок с {Имя} состоялся? Проверь доступы и первую задачу",  # Л6
+    "Отправь {Имя} опрос первого дня",  # 10
+    "Проверь ответы опроса первого дня и запланируй встречу недели на {дата дня 7}",  # 11
+    "Цели и KPI на ИС с {Имя} обсудили? Если нет — назначь встречу до конца недели",  # Л7
+    "Отправь {Имя} опрос недели",  # 12
+    "Сегодня встреча недели с {Имя}. Посмотри ответы опроса",  # 13
+    "Через 3 дня точка 1 месяца у {Имя}: опрос, обратная связь {лид}, one-to-one",  # 14
+    "Через 3 дня 1 месяц работы {Имя}. Подготовь обратную связь по шкале и передай HR",  # Л8
+    "Сегодня one-to-one с {Имя}. Оценка лида внесена?",  # 15
+    "Нужна твоя оценка за 1 месяц {Имя}, передай HR сегодня",  # Л9
+    "Через 3 дня точка 2 месяца у {Имя}: опрос, обратная связь {лид}, one-to-one",  # 16 «как 14, для 2-го месяца»
+    "Через 3 дня 2 месяц работы {Имя}. Подготовь обратную связь по шкале и передай HR",  # Л8
+    "Сегодня one-to-one с {Имя}. Оценка лида внесена?",  # 16 «как 15»
+    "Нужна твоя оценка за 2 месяц {Имя}, передай HR сегодня",  # Л9
+    "До конца ИС {Имя} 2 недели: опрос месяца 3, оценка и решение {лид}, встреча втроём, договор и NDA",  # 17
+    "До конца ИС {Имя} 2 недели. Подготовь итоговую оценку и решение, HR назначит встречу втроём",  # Л10
+    "Нет решения лида по {Имя}, ИС заканчивается {конец ИС}",  # 18
+    "Нужно твоё решение по ИС {Имя} до {конец ИС}",  # Л11
+    "Сегодня закрытие ИС {Имя}. Внеси решение в АТС",  # 19
+    "{Имя} уходит: проведи exit-интервью и заполни причину",  # 20
+    "6 месяцев у {Имя}: запроси оценку у {лид}",  # 21
+    "6 месяцев работы {Имя}: оцени результат и передай HR",  # Л12
+]
+
+
+async def test_sheet_texts_match_doc_word_for_word(env):
+    """Ильнар 25.11.2026: «всё должно быть 1 в 1 … слово в слово сверяйся по этому тз от Маши»."""
+    org_dept = await _org_dept_with_leads(env, ("Владимир", LEAD_TG))
+    env.db.add(BoardDepartment(org_id=env.org.id, name="Push team", kind="team", org_department_id=org_dept.id))
+    await env.db.commit()
+    case = await _practice(env)
+    await _transfer(env)  # выход 24.11.2026 (вт), ИС до 24.02.2027
+    case = await _fresh(env, case.id)
+    fill = {"{Имя}": "Петров Иван Сергеевич", "{отдел}": "Push team", "{дата}": "24.11.2026",
+            "{лид}": "Владимир", "{дата дня 7}": "30.11", "{конец ИС}": "24.02.2027"}
+    link = f"\nКарточка: https://staffwise.club/all-candidates?entity={case.entity_id}"
+    expected = []
+    for i, line in enumerate(SHEET_TABLE):
+        for key, value in fill.items():
+            line = line.replace(key, value)
+        expected.append(line if i == 1 else line + link)  # 4 — кандидату в чат, без ссылки
+    got = [text for _, _, _, text, _ in env.bot.sheet_plan(case)]
+    assert got == expected
