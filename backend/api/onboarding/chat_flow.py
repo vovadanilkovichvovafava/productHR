@@ -707,7 +707,9 @@ class ChatFlowMixin:
         if bound is not None and await self._candidate_in_chat(chat_id, bound, user_id, username):
             return texts.DEMO_CANDIDATE_HERE.format(cmd="/demo")
         hr_all = [case.hr_tg_id] if case.hr_tg_id else []
-        leads = self.lead_ids(case) or await self._known_leads(case.org_id)
+        # Отдела ещё нет — лиды организации из беседы, кроме HR кандидата (прод 25.11.2026: Мария —
+        # и HR, и лид своего отдела в «Управлении», и получала в демо обе части)
+        leads = self.lead_ids(case) or [tg for tg in await self._known_leads(case.org_id) if tg not in hr_all]
         present = {"hr": [tg for tg in hr_all if await self._in_chat(chat_id, tg)],
                    "lead": [tg for tg in leads if await self._in_chat(chat_id, tg)]}
         names = {tg: await self._staff_name(tg) for tg in set(present["hr"] + present["lead"])}

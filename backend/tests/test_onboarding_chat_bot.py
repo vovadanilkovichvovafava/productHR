@@ -655,7 +655,9 @@ async def test_demo_is_a_natural_run(env):
     номеров и пояснений; только тем, кто в беседе; без веток «не прошёл»/уход и второго месяца."""
     import asyncio
 
-    await _org_dept_with_leads(env, ("Владимир", LEAD_TG), ("Ильнар", 7004))
+    org_dept = await _org_dept_with_leads(env, ("Владимир", LEAD_TG), ("Ильнар", 7004))
+    env.db.add(DepartmentMember(department_id=org_dept.id, user_id=env.user.id, role=DeptRole.lead))
+    await env.db.commit()  # HR кандидата — ещё и лид своего отдела: в демо он только HR
     case = await _practice(env, tg="admin_tg")  # тестовая карточка: кандидат — сам HR на своём Telegram
     await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
     env.messenger.members = {(WORK_CHAT, HR_TG), (WORK_CHAT, LEAD_TG)}  # Ильнара в беседе нет
