@@ -61,9 +61,6 @@ SURVEY_CODES = {"practice": "p", "first_day": "f", "week": "w", "month1": "1", "
 SURVEY_BY_CODE = {v: k for k, v in SURVEY_CODES.items()}
 SURVEY_LINK_PREFIX = "obs_"
 HR_CHANGE_SEEN_MAX = 2000
-# /demo: что из листа не показываем (другие ветки и повтор) и с каких сообщений начинается новый этап
-DEMO_SKIP = {"7", "18", "Л11", "20"}
-DEMO_STAGE_STARTS = {"6", "8", "Л5", "11", "14", "17", "21"}
 BIND_WINDOW_BEFORE, BIND_WINDOW_AFTER = timedelta(days=1), timedelta(days=4)
 DEPT_BIND_WINDOW = timedelta(days=10)
 
@@ -694,11 +691,11 @@ class ChatFlowMixin:
                 for num, who, text, buttons in plan]
 
     async def demo_sheet(self, chat_id: int, user_id: int, username: str | None = None) -> str | None:
-        """/demo: естественный ход одного кандидата по схеме Маши, в ускоренном виде (Ильнар 25.11.2026:
-        «сценарий должен имитировать естественный процесс работы, но в ускоренном виде, а не показывать
-        абсолютно все шаги в сыром виде»). Сообщения — как в жизни: Loom в беседу, HR и лиду в личку,
-        тем же текстом; получают те, кто указан по ролям и есть в этой беседе. Без номеров и пояснений;
-        альтернативные ветки (не прошёл, уход), второй месяц и «если решения нет» не показываем."""
+        """/demo: путь одного кандидата по схеме Маши в ускоренном виде, по сценам (Ильнар 25.11.2026:
+        «имитировать естественный процесс работы, но в ускоренном виде»; «сначала писал, что за сценарий,
+        а потом действия»). В беседу — заголовок сцены и то, что бот пишет в чат (Loom); HR и лиду —
+        в личку тем же текстом, что в жизни; получают те, кто указан по ролям и есть в этой беседе.
+        Ветки «не прошёл»/уход, второй месяц и «если решения нет» не показываем."""
         async with self.sessions() as s:
             if not await self._is_staff(s, user_id):
                 return None
@@ -713,34 +710,62 @@ class ChatFlowMixin:
         leads = self.lead_ids(case) or await self._known_leads(case.org_id)
         present = {"hr": [tg for tg in hr_all if await self._in_chat(chat_id, tg)],
                    "lead": [tg for tg in leads if await self._in_chat(chat_id, tg)]}
-        steps = [(num, role, text, buttons) for num, when, role, text, buttons in self.sheet_plan(case)
-                 if num not in DEMO_SKIP and "2 месяц" not in when]
-        task = asyncio.create_task(self._run_demo(chat_id, user_id, steps, present))
+        names = {tg: await self._staff_name(tg) for tg in set(present["hr"] + present["lead"])}
+        steps = {num: (role, text, buttons) for num, when, role, text, buttons in self.sheet_plan(case)
+                 if "2 месяц" not in when}
+        ctx = self._ctx(case)
+
+        def who(role: str) -> str:
+            return ", ".join(names[tg] for tg in present[role]) or "никто, в беседе нет"
+        intro = texts.DEMO_INTRO.format(full=case.full_name, hr=who("hr"), lead=who("lead"))
+        scenes = [(texts.DEMO_SCENE.format(n=i, total=len(texts.DEMO_SCENES), title=title, text=text.format(**ctx)),
+                   [steps[num] for num in nums]) for i, (title, text, nums) in enumerate(texts.DEMO_SCENES, 1)]
+        task = asyncio.create_task(self._run_demo(chat_id, user_id, intro, scenes, present))
         self._preview_tasks = getattr(self, "_preview_tasks", set())
         self._preview_tasks.add(task)
         task.add_done_callback(self._preview_tasks.discard)
         log.info("ONBOARDING demo chat=%s case=%s hr=%s leads=%s", chat_id, case.id, present["hr"], present["lead"])
         return None
 
-    async def _run_demo(self, chat_id: int, owner: int, steps, present: dict[str, list[int]]) -> None:
+    async def _run_demo(self, chat_id: int, owner: int, intro: str, scenes, present: dict[str, list[int]]) -> None:
         failed: set[int] = set()
-        for i, (num, role, text, buttons) in enumerate(steps):
-            if i and self.preview_pause:  # новый этап — пауза длиннее: «прошло время»
-                await asyncio.sleep(self.preview_pause * (2 if num in DEMO_STAGE_STARTS else 1))
-            targets = [chat_id] if role == "chat" else [tg for tg in present[role] if tg not in failed]
-            for target in targets:
-                try:
-                    await self.messenger.send(target, text, buttons if role == "chat" else None)
-                except SendError as exc:
-                    log.warning("ONBOARDING demo %s: %s", target, exc)
-                    if target == chat_id:
-                        return
-                    failed.add(target)
-                    try:  # кто не открывал бота — тихо сказать запустившему, в беседу не пишем
-                        await self.messenger.send(owner, texts.DEMO_DM_FAILED.format(
-                            name=await self._staff_name(target)))
-                    except SendError:
-                        pass
+        pause = self.preview_pause
+        try:
+            await self.messenger.send(chat_id, intro)
+        except SendError as exc:
+            log.warning("ONBOARDING demo chat=%s: %s", chat_id, exc)
+            return
+        for header, messages in scenes:
+            if pause:
+                await asyncio.sleep(pause * 2)  # прочитать, что было, — и дальше
+            try:
+                await self.messenger.send(chat_id, header)
+            except SendError as exc:
+                log.warning("ONBOARDING demo chat=%s: %s", chat_id, exc)
+                return
+            for role, text, buttons in messages:
+                if pause:
+                    await asyncio.sleep(pause)
+                targets = [chat_id] if role == "chat" else [tg for tg in present[role] if tg not in failed]
+                for target in targets:
+                    try:
+                        await self.messenger.send(target, text, buttons if role == "chat" else None)
+                    except SendError as exc:
+                        log.warning("ONBOARDING demo %s: %s", target, exc)
+                        if target == chat_id:
+                            return
+                        failed.add(target)
+                        try:  # кто не открывал бота — тихо сказать запустившему
+                            await self.messenger.send(owner, texts.DEMO_DM_FAILED.format(
+                                name=await self._staff_name(target)))
+                        except SendError:
+                            pass
+        if pause:
+            await asyncio.sleep(pause)
+        try:
+            await self.messenger.send(chat_id, texts.DEMO_DONE)
+        except SendError:
+            pass
 
     async def _candidate_in_chat(self, chat_id: int, case: OnboardingCase, user_id: int,
                                  username: str | None) -> bool:

@@ -666,8 +666,15 @@ async def test_demo_is_a_natural_run(env):
     await asyncio.gather(*env.bot._preview_tasks)
 
     chat = env.messenger.to(WORK_CHAT)[before:]
-    assert [m.text for m in chat] == ["@admin_tg, время для вечернего Loom: до 5 минут, экран и голос."]
-    assert chat[0].buttons
+    texts_in_chat = [m.text for m in chat]
+    assert texts_in_chat[0].startswith(f"Демо: путь кандидата {case.full_name}")
+    assert "В личку получат: HR — Admin User; лид — Владимир." in texts_in_chat[0]
+    # сначала что за сцена, потом действия
+    assert texts_in_chat[1].startswith("Сценарий 1 из 10 — Старт практики\n\nКандидат выходит на практику в 10:00.")
+    assert texts_in_chat[2].startswith("Сценарий 2 из 10 — Вечер дня практики")
+    assert texts_in_chat[3] == "@admin_tg, время для вечернего Loom: до 5 минут, экран и голос." and chat[3].buttons
+    assert texts_in_chat[-2].startswith("Сценарий 10 из 10 — Полгода") and texts_in_chat[-1] == "Демо закончено."
+    assert len(chat) == 13  # вступление, 10 сцен, Loom, конец
     hr, lead = env.messenger.texts(HR_TG), env.messenger.texts(LEAD_TG)
     assert len(hr) == 14 and len(lead) == 9
     assert not any(t.startswith("[") for t in hr + lead)
@@ -688,7 +695,7 @@ async def test_demo_in_unbound_chat_uses_own_case(env):
     assert await env.bot.demo_sheet(-555, HR_TG, "admin_tg") is None
     await asyncio.gather(*env.bot._preview_tasks)
     assert len(env.messenger.texts(HR_TG)) == 14
-    assert len(env.messenger.texts(-555)) == 1  # Loom
+    assert "лид — никто, в беседе нет" in env.messenger.texts(-555)[0]
 
 
 
