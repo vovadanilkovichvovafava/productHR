@@ -148,6 +148,7 @@ async def test_two_candidates_asks_whose_chat_title_decides(env):
     second = await _practice(env, 2, name="Сидорова Анна", tg="anna_s")
     assert await env.bot.handle_bot_added(WORK_CHAT, HR_TG, "рабочий чат")
     [ask] = env.messenger.to(WORK_CHAT)
+    assert ask.text == texts_mod.SHEET_WHICH_CHAT  # схема Маши: бот кандидата не приветствует
     assert ask.buttons == [[("Петров Иван Сергеевич", f"pchat:{first.id}")], [("Сидорова Анна", f"pchat:{second.id}")]]
     assert await env.bot.bind_chat(WORK_CHAT, second.id, STRANGER_TG) == "Выбрать кандидата может только сотрудник компании."
     assert (await env.bot.bind_chat(WORK_CHAT, second.id, MENTOR_TG)).startswith("Готово")
@@ -621,3 +622,25 @@ async def test_no_wallet_request_in_bot_mode(async_engine, db_session, admin_use
     clock.now = datetime(2026, 11, 24, 7, 1)
     await bot.run_due_jobs()
     assert messenger.to(CANDIDATE_TG) == []  # схема Маши: приветствие и материалы отправляет HR
+
+async def test_preview_sends_every_sheet_message(env):
+    """/preview: все уведомления схемы Маши по очереди в чат, где попросили; только сотруднику."""
+    import asyncio
+
+    case = await _practice(env)
+    env.bot.preview_pause = 0
+    assert await env.bot.preview_sheet(-777, STRANGER_TG) is None
+    reply = await env.bot.preview_sheet(-777, HR_TG)
+    assert reply.startswith("Предпросмотр по листу «пре:онборд» на примере Петров Иван Сергеевич: 32 сообщения")
+    await asyncio.gather(*env.bot._preview_tasks)
+    sent = env.messenger.to(-777)
+    assert len(sent) == 32
+    labels = [m.text.split("]")[0] + "]" for m in sent]
+    assert labels[:6] == ["[3]", "[4]", "[5]", "[6]", "[Л2]", "[7]"] and labels[-1] == "[Л12]"
+    assert sent[1].buttons[0][0][1].startswith("lmc:2026-11-19:")
+    link = f"https://staffwise.club/all-candidates?entity={case.entity_id}"
+    for m in sent:
+        assert "{" not in m.text and "  " not in m.text
+        assert m.text.endswith(link) or m.text.startswith("[4]")
+    assert all("отдел ," not in m.text and "отделе ." not in m.text for m in sent)  # отдела ещё нет
+    assert "выход 25.11.2026" in sent[3].text  # практика до 24.11 — выход на следующий рабочий день

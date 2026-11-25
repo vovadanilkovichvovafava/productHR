@@ -266,6 +266,17 @@ async def pick_chat_case(callback: CallbackQuery) -> None:
         await callback.answer(reply, show_alert=True)
 
 
+@router.message(Command("preview"), F.chat.type.in_({"group", "supergroup"}))
+async def preview_command(message: Message) -> None:
+    """Сотрудник пишет /preview в группе — бот присылает туда все уведомления схемы Маши."""
+    service = await get_service()
+    if service is None or message.from_user is None:
+        return
+    reply = await service.preview_sheet(message.chat.id, message.from_user.id)
+    if reply:
+        await message.reply(reply)
+
+
 @router.message(Command("lead", "lid"), F.chat.type == "private")
 async def lead_command(message: Message) -> None:
     """Лид отдела: выбирает свой отдел, владелец/админ HR подтверждает (мит 19.11.2026)."""

@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import date, datetime, timedelta
@@ -113,7 +114,8 @@ class ChatFlowMixin:
         dept_only = all(c.status in DEPARTMENT_STATUSES for c in options)
         buttons: Buttons = [[(c.full_name, f"pchat:{c.id}")] for c in options[:10]]
         try:
-            await self.messenger.send(chat_id, texts.WHICH_CHAT_DEPT if dept_only else texts.WHICH_CHAT, buttons)
+            ask = texts.WHICH_CHAT_DEPT if dept_only else (texts.SHEET_WHICH_CHAT if self.sheet else texts.WHICH_CHAT)
+            await self.messenger.send(chat_id, ask, buttons)
         except SendError as exc:
             log.warning("чат %s: %s", chat_id, exc)
         return True
@@ -589,6 +591,96 @@ class ChatFlowMixin:
         if case.status in DEPARTMENT_STATUSES and case.dept_chat_id:
             return case.dept_chat_id
         return case.work_chat_id or case.dept_chat_id
+
+    # ------------------------------------------------------------- предпросмотр схемы
+
+    preview_pause = 3.1  # Bot API: в одну группу не больше 20 сообщений в минуту
+
+    async def preview_sheet(self, chat_id: int, user_id: int) -> str | None:
+        """/preview в группе: все уведомления схемы Маши по очереди в этот чат, на примере последней
+        карточки бота (своей, если ты её HR). Только сотрудникам. Ответ в чат или None."""
+        async with self.sessions() as s:
+            if not await self._is_staff(s, user_id):
+                return None
+            case = await s.scalar(select(OnboardingCase).where(OnboardingCase.hr_tg_id == user_id)
+                                  .order_by(OnboardingCase.id.desc()).limit(1))
+            if case is None:
+                case = await s.scalar(select(OnboardingCase).order_by(OnboardingCase.id.desc()).limit(1))
+        if case is None:
+            return texts.PREVIEW_NO_CASE
+        items = self.sheet_preview_messages(case)
+        task = asyncio.create_task(self._send_preview(chat_id, items))
+        self._preview_tasks = getattr(self, "_preview_tasks", set())
+        self._preview_tasks.add(task)
+        task.add_done_callback(self._preview_tasks.discard)
+        log.info("ONBOARDING preview chat=%s case=%s n=%s", chat_id, case.id, len(items))
+        return texts.PREVIEW_START.format(full=case.full_name, n=texts.messages_count(len(items)))
+
+    def sheet_preview_messages(self, case: OnboardingCase) -> list[tuple[str, Buttons | None]]:
+        """Тексты схемы Маши в порядке листа: «[номер] кому, когда» + сообщение, как его получит адресат."""
+        demo = OnboardingCase(**{c.name: getattr(case, c.name) for c in OnboardingCase.__table__.columns})
+        if demo.department_start_date is None:  # практика ещё идёт — выход «на следующий рабочий день»
+            demo.department_start_date = sch.next_workday(demo.practice_last_day + timedelta(days=1))
+        if demo.probation_end_date is None:
+            demo.probation_end_date = sch.add_months(demo.department_start_date, 3)
+        ctx = self._ctx(demo)
+        link = self.card_link(demo)
+        day = sch.utc_to_local(demo.practice_start_at, demo.timezone).date().isoformat()
+
+        def staff(text: str) -> str:
+            return f"{text}\n{texts.CARD_LINK.format(link=link)}" if link else text
+
+        r = texts.SHEET_REMINDER
+        sig = texts.SHEET_SIGNAL
+        start = (texts.SHEET_PRACTICE_START_CHAT_READY if demo.work_chat_id else texts.SHEET_PRACTICE_START)
+        plan: list[tuple[str, str, str, Buttons | None]] = [
+            ("3", "HR, за час до старта практики", staff(start.format(**ctx)), None),
+            ("4", "в рабочий чат кандидату, каждый день практики в 20:00",
+             texts.SHEET_LOOM.format(mention=self._mention(demo)), texts.sheet_loom_buttons(day)),
+            ("5", "HR, последний день практики в 18:00", staff(sig["no_decision"].format(**ctx)), None),
+            ("6", "HR, сразу при переводе в отдел", staff(sig["transferred"].format(**ctx)), None),
+            ("Л2", "лиду, сразу при переводе в отдел", staff(texts.SHEET_LEAD_TRANSFER.format(**ctx)), None),
+            ("7", "HR, статус «не прошёл»", staff(sig["failed"].format(**ctx)), None),
+            ("8", "HR, за день до выхода в 12:00", staff(r["s_hr_day_before"].format(**ctx)), None),
+            ("Л4", "лиду, за день до выхода в 12:00", staff(r["s_lead_day_before"].format(**ctx)), None),
+            ("Л5", "лиду, первый день в 09:00", staff(r["s_lead_first_day"].format(**ctx)), None),
+            ("9", "HR, первый день в 09:30", staff(r["s_hr_first_day"].format(**ctx)), None),
+            ("Л6", "лиду, первый день в 15:00", staff(r["s_lead_call_done"].format(**ctx)), None),
+            ("10", "HR, первый день в 17:00", staff(r["s_hr_first_day_survey"].format(**ctx)), None),
+            ("11", "HR, день 2 в 10:00", staff(r["s_hr_check_first_day"].format(**ctx)), None),
+            ("Л7", "лиду, день 3 в 10:00", staff(r["s_lead_goals"].format(**ctx)), None),
+            ("12", "HR, день 6 в 10:00", staff(r["s_hr_week_survey"].format(**ctx)), None),
+            ("13", "HR, день 7 в 09:30", staff(r["s_hr_week_meeting"].format(**ctx)), None),
+            ("14", "HR, за 3 дня до 1 месяца", staff(r["s_hr_m1_soon"].format(**ctx)), None),
+            ("Л8", "лиду, за 3 дня до 1 месяца", staff(r["s_lead_m1_soon"].format(**ctx)), None),
+            ("15", "HR, 1 месяц", staff(r["s_hr_m1"].format(**ctx)), None),
+            ("Л9", "лиду, 1 месяц", staff(r["s_lead_m1"].format(**ctx)), None),
+            ("16", "HR, за 3 дня до 2 месяцев", staff(r["s_hr_m2_soon"].format(**ctx)), None),
+            ("Л8", "лиду, за 3 дня до 2 месяцев", staff(r["s_lead_m2_soon"].format(**ctx)), None),
+            ("16", "HR, 2 месяца", staff(r["s_hr_m2"].format(**ctx)), None),
+            ("Л9", "лиду, 2 месяца", staff(r["s_lead_m2"].format(**ctx)), None),
+            ("17", "HR, за 2 недели до конца испытательного", staff(r["s_hr_m3_two_weeks"].format(**ctx)), None),
+            ("Л10", "лиду, за 2 недели до конца испытательного", staff(r["s_lead_m3_two_weeks"].format(**ctx)), None),
+            ("18", "HR, за 3 дня до конца испытательного, если решения нет",
+             staff(r["s_hr_no_decision"].format(**ctx)), None),
+            ("Л11", "лиду, за 3 дня до конца испытательного, если решения нет",
+             staff(r["s_lead_no_decision"].format(**ctx)), None),
+            ("19", "HR, день закрытия испытательного", staff(r["s_hr_probation_close"].format(**ctx)), None),
+            ("20", "HR, статус «Мы уволили» / «Сам уволился»", staff(sig["left"].format(**ctx)), None),
+            ("21", "HR, 6 месяцев", staff(r["s_hr_6m"].format(**ctx)), None),
+            ("Л12", "лиду, 6 месяцев", staff(r["s_lead_6m"].format(**ctx)), None),
+        ]
+        return [(f"[{num}] {who}\n\n{text}", buttons) for num, who, text, buttons in plan]
+
+    async def _send_preview(self, chat_id: int, items: list[tuple[str, Buttons | None]]) -> None:
+        for i, (text, buttons) in enumerate(items):
+            if i and self.preview_pause:
+                await asyncio.sleep(self.preview_pause)
+            try:
+                await self.messenger.send(chat_id, text, buttons)
+            except SendError as exc:
+                log.warning("ONBOARDING preview chat=%s stopped at %s: %s", chat_id, i, exc)
+                return
 
     # ------------------------------------------------------------- смена HR
 
