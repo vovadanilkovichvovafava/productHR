@@ -143,12 +143,12 @@ class ChatFlowMixin:
             await s.commit()
         log.info("ONBOARDING chat bound case=%s chat=%s %s", case_id, chat_id, "dept" if dept else "practice")
         ctx = self._ctx(case)
+        if self.sheet and not dept:
+            return  # схема Маши: в листе бот в чат при подключении ничего не пишет — правила и инвайт шлёт HR
         if dept:
             text = texts.dept_welcome(self._mention(case), case.department or "", _ddmm(case.department_start_date),
                                       _ddmm(case.probation_end_date), case.lead_name or "")
             buttons = None
-        elif self.sheet:  # схема Маши: правила и инвайт шлёт HR, бот только говорит, что подключён
-            text, buttons = texts.SHEET_CHAT_CONNECTED.format(**ctx), None
         else:
             text, buttons = texts.WORK_CHAT_HELLO.format(**ctx, mention=self._mention(case)), texts.START_BUTTON
             if case.status == CaseStatus.practice_running.value:
@@ -247,7 +247,7 @@ class ChatFlowMixin:
         low = text.lower()
         if any(tag in low for tag in texts.BLOCKER_TAGS):
             return await self._blocker(case, chat_id, author, text)
-        if candidate and case.status in PRACTICE_STATUSES and REPORT_RE.search(text):
+        if candidate and case.status in PRACTICE_STATUSES and REPORT_RE.search(text) and not self.sheet:
             day = self._local_now(case).date().isoformat()
             async with self.sessions() as s:
                 if not await self._reported(s, case.id, day):
@@ -274,6 +274,13 @@ class ChatFlowMixin:
     async def _job_report_check(self, case: OnboardingCase, payload: dict) -> None:
         if case.status not in PRACTICE_STATUSES:
             return
+        if self.sheet:  # задача старой схемы (18:00 + тег ментора) — в листе её нет: вместо неё Loom в 20:00
+            run_at = sch.at_local(date.fromisoformat(payload["day"]), sch.LOOM_HOUR, case.timezone)
+            if run_at > self.clock():
+                async with self.sessions() as s:
+                    self._add_jobs(s, case.id, [("loom_chat", run_at, {"day": payload["day"]})])
+                    await s.commit()
+            return
         day = payload["day"]
         async with self.sessions() as s:
             if await self._reported(s, case.id, day):
@@ -295,7 +302,7 @@ class ChatFlowMixin:
             await s.commit()
 
     async def _job_report_escalate(self, case: OnboardingCase, payload: dict) -> None:
-        if case.status not in PRACTICE_STATUSES or case.work_chat_id is None:
+        if case.status not in PRACTICE_STATUSES or case.work_chat_id is None or self.sheet:
             return
         day = payload["day"]
         async with self.sessions() as s:
@@ -314,8 +321,7 @@ class ChatFlowMixin:
             return
         bot = f"@{self.settings.bot_username}" if self.settings.bot_username else "бота"
         if self.sheet:  # уведомление 3, за час до старта
-            tpl = texts.SHEET_PRACTICE_START_CHAT_READY if case.work_chat_id else texts.SHEET_PRACTICE_START
-            await self._deliver(case, "hr_practice_start", tpl.format(**self._ctx(case)))
+            await self._deliver(case, "hr_practice_start", texts.SHEET_PRACTICE_START.format(**self._ctx(case)))
             return
         tpl = texts.HR_PRACTICE_START_CHAT_READY if case.work_chat_id else texts.HR_PRACTICE_START
         await self._deliver(case, "hr_practice_start", tpl.format(full=case.full_name, bot=bot))
@@ -325,9 +331,7 @@ class ChatFlowMixin:
         if case.status not in PRACTICE_STATUSES:
             return
         day = payload["day"]
-        async with self.sessions() as s:
-            if await self._reported(s, case.id, day):
-                return  # отчёт за день уже прислали — напоминать незачем
+        async with self.sessions() as s:  # по листу — каждый день практики, без исключений
             no_chat_told = await s.scalar(select(Signal.id).where(
                 Signal.case_id == case.id, Signal.kind == "no_work_chat").limit(1))
         if case.work_chat_id is None:
@@ -335,8 +339,7 @@ class ChatFlowMixin:
                 await self._signal(case, "no_work_chat")
             return
         try:
-            await self.messenger.send(case.work_chat_id, texts.SHEET_LOOM.format(mention=self._mention(case)),
-                                      texts.sheet_loom_buttons(day))
+            await self.messenger.send(case.work_chat_id, texts.SHEET_LOOM, texts.sheet_loom_buttons(day))
         except SendError as exc:
             await self._signal(case, "send_failed", what="напоминание про Loom", error=str(exc))
 
@@ -649,11 +652,11 @@ class ChatFlowMixin:
 
         r = texts.SHEET_REMINDER
         sig = texts.SHEET_SIGNAL
-        start = (texts.SHEET_PRACTICE_START_CHAT_READY if demo.work_chat_id else texts.SHEET_PRACTICE_START)
+        start = texts.SHEET_PRACTICE_START
         plan: list[tuple[str, str, str, Buttons | None]] = [
             ("3", "HR, за час до старта практики", staff(start.format(**ctx)), None),
             ("4", "в рабочий чат кандидату, каждый день практики в 20:00",
-             texts.SHEET_LOOM.format(mention=self._mention(demo)), texts.sheet_loom_buttons(day)),
+             texts.SHEET_LOOM, texts.sheet_loom_buttons(day)),
             ("5", "HR, последний день практики в 18:00", staff(sig["no_decision"].format(**ctx)), None),
             ("6", "HR, сразу при переводе в отдел", staff(sig["transferred"].format(**ctx)), None),
             ("Л2", "лиду, сразу при переводе в отдел", staff(texts.SHEET_LEAD_TRANSFER.format(**ctx)), None),

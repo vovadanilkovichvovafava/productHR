@@ -174,8 +174,8 @@ async def test_transfer_and_stop(setup, db_session, organization, admin_user):
     assert pending.count("staff_reminder") == 25  # 8–21 и Л4–Л12 схемы Маши
     hr = setup.messenger.to(HR_TG)
     assert [t for t in hr if "переведён" in t or "передан" in t] == [  # без дубля «передано»
-        f"Петров Иван Сергеевич переведён(а) в отдел, выход 24.11.2026. Поздравь, отправь опрос о практике, "
-        f"передай кошелёк в бухгалтерию.\nКарточка: https://staffwise.club/all-candidates?entity={entity.id}"]
+        f"Петров Иван Сергеевич переведён в отдел, выход 24.11.2026. Поздравь, отправь опрос о практике, "
+        f"передай кошелёк в бухгалтерию\nКарточка: https://staffwise.club/all-candidates?entity={entity.id}"]
 
     entity.status = EntityStatus.dismissed
     await db_session.commit()
@@ -198,7 +198,7 @@ async def test_rejected_during_practice_stops_reminders(setup, db_session, organ
     pending = await _jobs(setup, case.id)
     assert "loom_chat" not in pending and "practice_deadline" not in pending
     assert [t.split("\n")[0] for t in setup.messenger.to(HR_TG)] == [
-        "Петров Иван Сергеевич: не прошёл(ла) практику. Сообщи кандидату лично."]
+        "Петров Иван Сергеевич: не прошёл. Сообщи кандидату лично"]
 
 
 async def test_transfer_without_practice_case(setup, db_session, organization, admin_user):
@@ -277,8 +277,8 @@ async def test_sheet_onboarding_schedule_and_texts(setup, db_session, organizati
     await setup.bot.run_due_jobs()
     link = f"Карточка: https://staffwise.club/all-candidates?entity={entity.id}"
     assert setup.messenger.to(HR_TG)[-1] == (
-        "Сегодня первый день Петров Иван Сергеевич. Спроси лида про онбординг-звонок, отправь "
-        f"приветствие и материалы. Лид: Марк.\n{link}")
+        f"Сегодня первый день Петров Иван Сергеевич. Спроси у лида (Марк) про звонок, отправь приветствие и "
+        f"материалы\n{link}")
     # день 7 от 20.11 — четверг 26.11; встреча недели в тексте 11 и в 13 — один день
     assert env_day7(setup, case) == "26.11"
 

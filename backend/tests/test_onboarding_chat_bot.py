@@ -137,14 +137,11 @@ async def test_hr_adds_bot_chat_is_bound_quietly(env):
     assert not await env.bot.handle_bot_added(WORK_CHAT, STRANGER_TG)  # не сотрудник — бот молчит
     assert await env.bot.handle_bot_added(WORK_CHAT, HR_TG, "Практика Петров")
 
-    [hello] = env.messenger.to(WORK_CHAT)
-    assert hello.text == ("Чат подключён к практике Петров Иван Сергеевич. "
-                          "Каждый день практики в 20:00 напомню про вечерний Loom.")
-    assert hello.buttons is None
+    assert env.messenger.to(WORK_CHAT) == []  # по листу бот при подключении в чат ничего не пишет
     assert (await _fresh(env, case.id)).work_chat_id == WORK_CHAT
     assert not await env.bot.handle_bot_added(WORK_CHAT, HR_TG)  # повторно — уже привязан
     await env.bot.handle_members_joined(WORK_CHAT, [(CANDIDATE_TG, "ivan_p")])
-    assert len(env.messenger.to(WORK_CHAT)) == 1  # кандидата приветствует HR, не бот
+    assert env.messenger.to(WORK_CHAT) == []  # кандидата приветствует HR, не бот
 
 
 async def test_two_candidates_asks_whose_chat_title_decides(env):
@@ -181,23 +178,18 @@ async def test_loom_reminder_at_20_with_buttons(env):
     case = await _practice(env)
     await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
 
-    # день 1 (19.11): отчёт прислан — вечером тишина
-    reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "Сделал парсер #вечерний_отчёт")
-    assert reply == "Отчёт принят 👍"
-    assert await env.bot.handle_group_text(WORK_CHAT, MENTOR_TG, "egor_s", "Егор", "#отчёт") is None  # не кандидат
-    env.clock.now = datetime(2026, 11, 19, 7, 0)
-    await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "loom.com/share/abc")
+    # отчёт с хэштегом — в листе его нет: бот молчит, Loom в 20:00 придёт всё равно
+    assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "Сделал #вечерний_отчёт") is None
     env.clock.now = datetime(2026, 11, 19, 17, 1)  # 20:01 МСК
-    before = len(env.messenger.to(WORK_CHAT))
     await env.bot.run_due_jobs()
-    assert len(env.messenger.to(WORK_CHAT)) == before
+    assert env.messenger.texts(WORK_CHAT)[-1] == "Время для вечернего Loom: до 5 минут, экран и голос."
 
     # день 2 (20.11): отчёта нет — 20:00 Loom с кнопками
     hr_before = len(env.messenger.to(HR_TG))
     env.clock.now = datetime(2026, 11, 20, 17, 1)
     await env.bot.run_due_jobs()
     loom = env.messenger.to(WORK_CHAT)[-1]
-    assert loom.text == "@ivan_p, время для вечернего Loom: до 5 минут, экран и голос."
+    assert loom.text == "Время для вечернего Loom: до 5 минут, экран и голос."
     assert loom.buttons == [[("Отправил(а)", "lmc:2026-11-20:sent"), ("Ещё в работе", "lmc:2026-11-20:later")]]
     assert await env.bot.handle_loom_chat(WORK_CHAT, MENTOR_TG, "egor_s", "2026-11-20", "sent") == (
         None, "Эти кнопки для кандидата.")
@@ -215,8 +207,8 @@ async def test_no_work_chat_hr_told_once(env):
     env.clock.now = datetime(2026, 11, 19, 6, 1)  # 09:01 МСК — за час до старта HR: «создай чат»
     await env.bot.run_due_jobs()
     assert env.messenger.texts(HR_TG)[-1] == (
-        "Сегодня старт Петров Иван Сергеевич в 10:00: создай рабочий чат, добавь @Staffwise_bot, "
-        f"отправь инвайт и правила.\nКарточка: https://staffwise.club/all-candidates?entity={case.entity_id}")
+        "Сегодня старт Петров Иван Сергеевич в 10:00: создай рабочий чат, добавь бота, "
+        f"отправь инвайт и правила\nКарточка: https://staffwise.club/all-candidates?entity={case.entity_id}")
     env.clock.now = datetime(2026, 11, 20, 17, 1)
     await env.bot.run_due_jobs()  # Loom 19 и 20 — чата нет
     async with env.sessions() as s:
@@ -225,7 +217,8 @@ async def test_no_work_chat_hr_told_once(env):
     env.clock.now = datetime(2026, 11, 24, 15, 1)  # последний день практики, 18:01 — уведомление 5
     await env.bot.run_due_jobs()
     assert env.messenger.texts(HR_TG)[-1].startswith(
-        "Решение по Петров Иван Сергеевич: последний день практики 24.11. Уточни дату старта и переведи в отдел.")
+        "Решение по Петров Иван Сергеевич: уточни дату старта и переведи в отдел. В АТС откроется модальное "
+        "окно с отделом (Telegram лида подтягивается)")
 
 
 # ------------------------------------------------------------------ лиды и переход в отдел
@@ -261,11 +254,11 @@ async def test_lead_registers_and_gets_new_hire(env):
     # схема Маши: кандидату и в чат практики бот ничего не пишет — поздравляет HR
     assert len(env.messenger.to(WORK_CHAT)) == chat_before and env.messenger.to(CANDIDATE_TG) == []
     link = f"https://staffwise.club/all-candidates?entity={case.entity_id}"
-    assert (f"Петров Иван Сергеевич переведён(а) в отдел Push team, выход 24.11.2026. Поздравь, отправь опрос "
-            f"о практике, передай кошелёк в бухгалтерию.\nКарточка: {link}") in env.messenger.texts(HR_TG)
+    assert (f"Петров Иван Сергеевич переведён в Push team, выход 24.11.2026. Поздравь, отправь опрос "
+            f"о практике, передай кошелёк в бухгалтерию\nКарточка: {link}") in env.messenger.texts(HR_TG)
     assert env.messenger.texts(LEAD_TG)[-1] == (
-        "Петров Иван Сергеевич выходит к тебе в отдел Push team 24.11.2026. Проведи онбординг: создай чат отдела, "
-        f"свяжись с сотрудником, назначь онбординг-звонок на первый день.\nКарточка: {link}")
+        "Петров Иван Сергеевич выходит к тебе в Push team 24.11.2026. Проведи онбординг: создай чат отдела, "
+        f"свяжись с сотрудником, назначь онбординг-звонок на первый день\nКарточка: {link}")
 
     # лид создал чат отдела и добавил бота — бот там не нужен, молчит
     assert not await env.bot.handle_bot_added(DEPT_CHAT, LEAD_TG)
@@ -308,7 +301,7 @@ async def test_leads_come_from_org_department_without_lead_command(env):
     fresh = await _fresh(env, case.id)
     assert fresh.lead_name == "Владимир, Ильнар" and fresh.lead_tg_ids == [LEAD_TG, 7004]
     for tg in (LEAD_TG, 7004):
-        assert env.messenger.texts(tg)[-1].startswith("Петров Иван Сергеевич выходит к тебе в отдел Push team")
+        assert env.messenger.texts(tg)[-1].startswith("Петров Иван Сергеевич выходит к тебе в Push team")
     assert not any("бот не знает, кто лид" in t for t in env.messenger.texts(HR_TG))
     # кандидату — обоих в нужном числе (прод 23.11.2026: «Руководитель Владимир, Ильнар свяжется»)
     ctx = env.bot._ctx(fresh)
@@ -316,7 +309,7 @@ async def test_leads_come_from_org_department_without_lead_command(env):
     assert "руководители Владимир и Ильнар познакомят" in texts_mod.FIRST_DAY_WELCOME.format(**ctx)
     reminders = await _jobs(env, case.id, "staff_reminder")
     assert any(j.payload == '{"kind": "s_hr_day_before"}' for j in reminders)  # «в нужном числе»: Лиды: …
-    assert env.bot._sheet_ctx(fresh)["lead_paren"] == " Лиды: Владимир и Ильнар."
+    assert env.bot._sheet_ctx(fresh)["u_lead"] == "лидов (Владимир и Ильнар)"  # «Уточни у лидов (…)»
 
 
 async def test_org_lead_unreachable_tells_hr_to_rebind(env):
@@ -331,7 +324,7 @@ async def test_org_lead_unreachable_tells_hr_to_rebind(env):
     warn = [t for t in env.messenger.texts(HR_TG) if "не получил сообщение о новом сотруднике" in t]
     assert len(warn) == 1 and "Лид Владимир не получил" in warn[0] and "Пусть Владимир откроет staffwise" in warn[0]
     assert "карточке" not in warn[0]
-    assert env.messenger.texts(7004)[-1].startswith("Петров Иван Сергеевич выходит к тебе в отдел Push team")
+    assert env.messenger.texts(7004)[-1].startswith("Петров Иван Сергеевич выходит к тебе в Push team")
 
 
 async def test_org_lead_without_telegram_tells_hr(env):
@@ -455,7 +448,10 @@ async def test_telegram_glue_group_text_lead_and_url_buttons(env, monkeypatch):
             reply=AsyncMock(),
         )
         await tg.on_group_message(message)
-        message.reply.assert_awaited_once_with("Отчёт принят 👍")
+        message.reply.assert_not_awaited()  # по листу на отчёт бот не отвечает
+        message.text = "/blocker нет доступа"
+        await tg.on_group_message(message)
+        assert message.reply.await_args.args[0].startswith("Передал HR")
 
         # /lead без отделов — подсказка
         answer = AsyncMock()
@@ -674,7 +670,7 @@ async def test_demo_is_a_natural_run(env):
     # сначала что за сцена, потом действия
     assert texts_in_chat[1].startswith("Сценарий 1 из 10 — Старт практики\n\nКандидат выходит на практику в 10:00.")
     assert texts_in_chat[2].startswith("Сценарий 2 из 10 — Вечер дня практики")
-    assert texts_in_chat[3] == "@admin_tg, время для вечернего Loom: до 5 минут, экран и голос." and chat[3].buttons
+    assert texts_in_chat[3] == "Время для вечернего Loom: до 5 минут, экран и голос." and chat[3].buttons
     assert texts_in_chat[-2].startswith("Сценарий 10 из 10 — Полгода") and texts_in_chat[-1] == "Демо закончено."
     assert len(chat) == 13  # вступление, 10 сцен, Loom, конец
     hr, lead = env.messenger.texts(HR_TG), env.messenger.texts(LEAD_TG)
@@ -713,3 +709,29 @@ async def test_demo_and_preview_refused_where_candidate_sits(env):
     assert await env.bot.preview_sheet(WORK_CHAT, HR_TG, "admin_tg") == texts_mod.DEMO_CANDIDATE_HERE.format(cmd="/preview")
     env.messenger.members = {(WORK_CHAT, HR_TG)}  # кандидат вышел из беседы
     assert await env.bot.demo_sheet(WORK_CHAT, HR_TG, "admin_tg") is None  # запустилось
+
+
+async def test_legacy_jobs_switch_to_sheet(env):
+    """Прод 25.11.2026: у кандидата, переведённого утром по старой схеме, остались её задачи — Маше ушло
+    старое «всё ли понятно». В режиме листа старая задача ничего не шлёт: снимает старые, ставит задачи листа."""
+    import json
+
+    case = await _practice(env)
+    await _transfer(env)  # выход 24.11
+    async with env.sessions() as s:
+        for job in await s.scalars(select(BotJob).where(BotJob.case_id == case.id, BotJob.status == "pending")):
+            job.status = "cancelled"
+        s.add_all([
+            BotJob(case_id=case.id, kind="survey", run_at=datetime(2026, 11, 24, 15, 0), payload='{"kind": "first_day"}'),
+            BotJob(case_id=case.id, kind="staff_reminder", run_at=datetime(2026, 11, 24, 9, 0),
+                   payload='{"kind": "hr_first_day"}'),
+            BotJob(case_id=case.id, kind="staff_reminder", run_at=datetime(2026, 11, 30, 7, 0),
+                   payload='{"kind": "hr_call_week"}'),
+        ])
+        await s.commit()
+    sent = len(env.messenger.sent)
+    env.clock.now = datetime(2026, 11, 24, 15, 1)  # 18:01 МСК в первый день
+    await env.bot.run_due_jobs()
+    assert len(env.messenger.sent) == sent  # ни старого опроса кандидату, ни «всё ли понятно» HR
+    kinds = [json.loads(j.payload)["kind"] for j in await _jobs(env, case.id)]
+    assert "hr_call_week" not in kinds and "s_hr_check_first_day" in kinds and "s_hr_first_day" not in kinds

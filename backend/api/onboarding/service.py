@@ -50,6 +50,8 @@ PREBOARDING_JOBS = {
     "loom_morning",
     "practice_deadline",
 }
+# Задачи онбординга старой схемы (ТЗ 03.11): в режиме листа снимаются и заменяются задачами листа
+LEGACY_ONBOARDING_JOBS = {"first_day_welcome", "survey", "survey_reminder", "staff_reminder"}
 DONE_MARK = -1  # SurveyResponse.question для отметки «опрос пройден»
 # Префикс ссылки кандидата: /start с ним — наш, без него — привязка аккаунта сотрудника (api/bot.py)
 TOKEN_PREFIX = "ob_"
@@ -601,8 +603,28 @@ class OnboardingService(ChatFlowMixin):
         if case.status in PRACTICE_STATUSES:
             await self._signal(case, "no_decision")
 
+    async def _to_sheet(self, case: OnboardingCase) -> None:
+        """Задача старой схемы (опросы кандидату, напоминания ТЗ) сработала в режиме листа — не шлём её, а один
+        раз снимаем все старые задачи карточки и ставим задачи листа с этого момента. Прод 25.11.2026: у
+        Тестбот Владимир после перевода утром остались старые задачи, Маше ушло старое «всё ли понятно»."""
+        now = self.clock()
+        async with self.sessions() as s:
+            pending = list(await s.scalars(select(BotJob).where(BotJob.case_id == case.id, BotJob.status == "pending")))
+            sheet = [j for j in pending if j.payload and '"s_' in j.payload]
+            for job in pending:
+                if job.kind in LEGACY_ONBOARDING_JOBS and job not in sheet:
+                    job.status = "cancelled"
+            if not sheet and case.status in DEPARTMENT_STATUSES and case.department_start_date:
+                jobs = sch.sheet_onboarding_jobs(case.department_start_date, case.timezone,
+                                                 self._local_now(case).date(), self.settings.skip_weekends)
+                self._add_jobs(s, case.id, [j for j in jobs if j[1] > now])
+            await s.commit()
+        log.info("ONBOARDING case=%s legacy jobs → sheet", case.id)
+
     async def _job_survey(self, case: OnboardingCase, payload: dict) -> None:
         kind = payload["kind"]
+        if self.sheet:
+            return await self._to_sheet(case)
         if case.status not in DEPARTMENT_STATUSES:
             return
         await self._send_candidate(
@@ -615,6 +637,8 @@ class OnboardingService(ChatFlowMixin):
 
     async def _job_survey_reminder(self, case: OnboardingCase, payload: dict) -> None:
         kind = payload["kind"]
+        if self.sheet:
+            return await self._to_sheet(case)
         if case.status not in DEPARTMENT_STATUSES:
             return
         async with self.sessions() as s:
@@ -626,6 +650,8 @@ class OnboardingService(ChatFlowMixin):
 
     async def _job_first_day_welcome(self, case: OnboardingCase, payload: dict) -> None:
         """Чек-лист первого дня, п. 1: приветствие и организационная информация около 10:00."""
+        if self.sheet:
+            return await self._to_sheet(case)
         if case.status not in DEPARTMENT_STATUSES:
             return
         async with self.sessions() as s:
@@ -648,6 +674,8 @@ class OnboardingService(ChatFlowMixin):
             return
         if kind in ("probation_close", "s_hr_probation_close") and case.probation_decision == "stays":
             return
+        if self.sheet and kind not in texts.SHEET_REMINDER:
+            return await self._to_sheet(case)
         if kind in texts.SHEET_REMINDER:  # схема Маши: s_hr_* — HR, s_lead_* — каждому лиду
             if kind in texts.SHEET_IF_NO_DECISION and case.probation_decision:
                 return
@@ -841,15 +869,15 @@ class OnboardingService(ChatFlowMixin):
     def _sheet_ctx(self, case: OnboardingCase) -> dict[str, str]:
         d = case.department_start_date
         names = texts.lead_names(case.lead_name)
-        lead_label = "Лиды" if len(names) > 1 else "Лид"
-        dept = case.department or ""
+        who = "лидов" if len(names) > 1 else "лида"
+        end = case.probation_end_date
         return {
-            "in_dept": f" в отделе {dept}" if dept else "",
-            "to_dept": f" в отдел {dept}" if dept else " в отдел",
+            "dept": case.department or "отдел",
+            "u_lead": f"{who} ({texts.join_names(names)})" if names else "лида",  # «у лида (Владимир)»
             "first_day": d.strftime("%d.%m.%Y") if d else "",
             "day7": self._day7(d).strftime("%d.%m") if d else "",
+            "end": end.strftime("%d.%m.%Y") if end else "",
             "start_time": self.settings.practice_start_time,
-            "lead_paren": f" {lead_label}: {texts.join_names(names)}." if names else "",
             "bot": f"@{self.settings.bot_username}" if self.settings.bot_username else "бота",
         }
 
