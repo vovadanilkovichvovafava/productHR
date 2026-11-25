@@ -581,7 +581,7 @@ class ChatFlowMixin:
         link = f"{self.settings.app_url}/all-candidates?entity={entity.id}"
         sent = 0
         if new and new.telegram_id and rec.get("by") != new.id:
-            prev_txt = f" (было у {prev.name})" if prev and prev.name else ""
+            prev_txt = f" (прежний HR: {prev.name})" if prev and prev.name else ""
             sent += await self._safe_send(new.telegram_id, texts.HR_CHANGE_NEW.format(
                 name=entity.name, prev=prev_txt, link=link))
         if prev and prev.telegram_id and rec.get("by") != prev.id:

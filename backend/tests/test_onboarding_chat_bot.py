@@ -409,7 +409,7 @@ async def test_hr_change_pings_new_and_previous(env, db_session):
     await db_session.commit()
     assert await env.bot.ping_hr_changes() == 1  # новому HR; прежний сам и передал — ему не пишем
     msg = env.messenger.texts(7300)[-1]
-    assert msg.startswith("Тебе передали кандидата Захаров Илья (было у Admin User)")
+    assert msg.startswith("Тебе передали кандидата Захаров Илья (прежний HR: Admin User)")
     assert msg.endswith(f"https://staffwise.club/all-candidates?entity={entity.id}")
     assert await env.bot.ping_hr_changes() == 0  # повторно не шлём
 
