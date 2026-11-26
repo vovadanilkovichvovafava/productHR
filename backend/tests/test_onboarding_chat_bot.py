@@ -18,6 +18,9 @@ from api.models.database import (
     Entity,
     EntityStatus,
     EntityType,
+    Organization,
+    OrgMember,
+    OrgRole,
     User,
     UserRole,
 )
@@ -79,6 +82,19 @@ async def env(async_engine, db_session, admin_user, organization, org_owner):
     bot = OnboardingService(sessions, messenger, settings, None, clock)
     return SimpleNamespace(bot=bot, messenger=messenger, clock=clock, sessions=sessions, db=db_session,
                            org=organization, user=admin_user, entities={})
+
+
+async def _member(env, tg, role=OrgRole.member, name="Сотрудник", org_id=None, **user):
+    """Учётка staffwise с Telegram и участием в организации (role — роль в организации)."""
+    found = await env.db.scalar(select(User).where(User.telegram_id == tg))
+    if found is None:
+        found = User(email=f"u{tg}@test.com", password_hash=hash_password("x"), name=name, role=UserRole.admin,
+                     telegram_id=tg, **{"is_active": True, **user})
+        env.db.add(found)
+        await env.db.flush()
+    env.db.add(OrgMember(org_id=org_id or env.org.id, user_id=found.id, role=role, created_at=datetime.utcnow()))
+    await env.db.commit()
+    return found
 
 
 def _legacy(env):
@@ -178,7 +194,9 @@ async def test_two_candidates_asks_whose_chat_title_decides(env):
     assert ask.text == texts_mod.WHICH_CHAT
     assert ask.buttons == [[("Петров Иван Сергеевич", f"pchat:{first.id}")], [("Сидорова Анна", f"pchat:{second.id}")]]
     assert await env.bot.bind_chat(WORK_CHAT, second.id, STRANGER_TG) == "Выбрать кандидата может только сотрудник компании."
-    assert (await env.bot.bind_chat(WORK_CHAT, second.id, MENTOR_TG)).startswith("Готово")
+    # аудит 26.11.2026: сотрудник без HR-раздела чат к кандидату не привязывает
+    assert await env.bot.bind_chat(WORK_CHAT, second.id, MENTOR_TG) == "Выбрать кандидата может только сотрудник компании."
+    assert (await env.bot.bind_chat(WORK_CHAT, second.id, HR_TG)).startswith("Готово")
     assert (await _fresh(env, second.id)).work_chat_id == WORK_CHAT
 
     # по названию чата — без вопроса
@@ -259,8 +277,10 @@ async def _department(env, name="Push team"):
 
 async def test_lead_registers_and_gets_new_hire(env):
     dept = await _department(env)
-    assert [d.name for d in await env.bot.lead_departments()] == ["Push team"]
+    await _member(env, LEAD_TG, name="Марк")  # лид — сотрудник без HR-раздела
+    assert [d.name for d in await env.bot.lead_departments(LEAD_TG)] == ["Push team"]
     assert await env.bot.request_lead(LEAD_TG, "mark_lead", "Марк", dept.id) == "Запрос ушёл HR. Как подтвердят, напишу."
+    assert await env.bot.request_lead(LEAD_TG, "mark_lead", "Марк", dept.id) == texts_mod.LEAD_PENDING  # без повторов
     [request] = env.messenger.to(HR_TG)
     assert "Марк (@mark_lead) называет себя лидом отдела Push team" in request.text
     lead_id = int(request.buttons[0][0][1].split(":")[1])
@@ -366,6 +386,7 @@ async def test_lead_without_approvers(env, db_session):
     env.user.telegram_id = None
     await db_session.commit()
     dept = await _department(env)
+    await _member(env, LEAD_TG, name="Марк")
     assert "Подтвердить некому" in await env.bot.request_lead(LEAD_TG, None, "Марк", dept.id)
     async with env.sessions() as s:
         assert (await s.scalars(select(DepartmentLead))).all() == []
@@ -512,7 +533,7 @@ async def test_telegram_glue_group_text_lead_and_url_buttons(env, monkeypatch):
 
         # /lead без отделов — подсказка
         answer = AsyncMock()
-        await tg.lead_command(SimpleNamespace(answer=answer))
+        await tg.lead_command(SimpleNamespace(answer=answer, from_user=SimpleNamespace(id=HR_TG)))
         answer.assert_awaited_once_with("Отделов пока нет. Попроси HR завести их на Штате.")
         assert tg.is_onboarding_token("obs_pabc") and tg.is_onboarding_token("ob_abc")
     finally:
@@ -602,6 +623,7 @@ async def test_title_picks_most_matching_name(env):
 async def test_full_name_in_title_beats_adders_own_cases(env):
     """Прод 24.11.2026: лид R&D добавил бота в «Практика Тестбот Владимир» — кандидат не его (HR другой),
     а у самого лида в отделе «Тестбот Практика». Бот привязал чат к отделу и поздравил не того."""
+    await _member(env, MENTOR_TG, role=OrgRole.hr)  # лид R&D с HR-разделом (на проде — суперадмин)
     own = await _practice(env, 1, name="Тестбот Практика", tg="a1")
     await _transfer(env, 1)
     async with env.sessions() as s:
@@ -853,3 +875,58 @@ async def test_sheet_texts_match_doc_word_for_word(env):
         expected.append(line if i == 1 else line + link)  # 4 — кандидату в чат, без ссылки
     got = [text for _, _, _, text, _ in env.bot.sheet_plan(case)]
     assert got == expected
+
+
+# ------------------------------------------------------------------ аудит безопасности 26.11.2026
+
+
+async def test_audit_preview_demo_only_for_hr_of_the_org(env):
+    """«Сотрудником» бот считал любого с привязанным Telegram: сотрудник без HR-раздела, человек из другой
+    организации или с закрытым входом через /preview и /demo получал ФИО, даты и ссылки карточек."""
+    await _practice(env)
+    await _member(env, MENTOR_TG)  # обычный сотрудник (member)
+    other_org = Organization(name="Other", slug="other", created_at=datetime.utcnow())
+    env.db.add(other_org)
+    await env.db.commit()
+    await _member(env, 7500, role=OrgRole.owner, org_id=other_org.id)  # HR чужой организации
+    await _member(env, 7501, role=OrgRole.hr, is_active=False)  # отключённая учётка
+    for tg in (MENTOR_TG, 7500, 7501, STRANGER_TG):
+        assert await env.bot.preview_sheet(-3001, tg) in (None, texts_mod.PREVIEW_NO_CASE)
+        assert await env.bot.demo_sheet(-3001, tg) in (None, texts_mod.DEMO_NO_CASE)
+    assert env.messenger.sent == []
+    assert env.messenger.to(7500) == [] and env.messenger.to(MENTOR_TG) == []
+    assert (await env.bot.preview_sheet(-3001, HR_TG)).startswith("Предпросмотр")  # своя HR — можно
+
+
+async def test_audit_member_cannot_hijack_candidate_chat(env):
+    """Сотрудник без HR-раздела назвал свою группу именем кандидата и добавил бота — чат не привязывается."""
+    case = await _practice(env)
+    await _member(env, MENTOR_TG)
+    assert not await env.bot.handle_bot_added(-3002, MENTOR_TG, "Практика Петров Иван Сергеевич")
+    assert (await _fresh(env, case.id)).work_chat_id is None
+    assert await env.bot.handle_bot_added(WORK_CHAT, HR_TG, "Практика Петров Иван Сергеевич")
+    assert (await _fresh(env, case.id)).work_chat_id == WORK_CHAT
+
+
+async def test_audit_lead_command_only_for_staff(env):
+    """/lead мог нажать посторонний: видел отделы всех организаций и засыпал админов запросами."""
+    dept = await _department(env)
+    assert await env.bot.lead_departments(STRANGER_TG) is None
+    assert await env.bot.request_lead(STRANGER_TG, "x", "Владимир", dept.id) == texts_mod.LEAD_NOT_STAFF
+    other_org = Organization(name="Other", slug="other", created_at=datetime.utcnow())
+    env.db.add(other_org)
+    await env.db.commit()
+    await _member(env, 7500, org_id=other_org.id)
+    assert await env.bot.lead_departments(7500) == []  # отделы чужой организации не видны
+    assert await env.bot.request_lead(7500, "x", "Икс", dept.id) == texts_mod.LEAD_NO_DEPARTMENTS
+    assert env.messenger.sent == []
+    async with env.sessions() as s:
+        assert (await s.scalars(select(DepartmentLead))).all() == []
+
+
+def test_audit_wallet_masked_in_audit_log():
+    """Кошелёк и ответы опросов из /api/onboarding/inbound лежали в журнале действий открытым текстом."""
+    from api.services.audit import _clean
+
+    cleaned = _clean({"id": 5, "wallet": "TQ3xyz", "answers": [{"answer": "всё ок"}]})
+    assert cleaned["id"] == 5 and cleaned["wallet"] == "***" and cleaned["answers"] == "***"

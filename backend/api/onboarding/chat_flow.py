@@ -41,6 +41,7 @@ from . import schedule as sch
 from . import texts
 from .messenger import Buttons, SendError
 from .models import (
+    ACTIVE_STATUSES,
     DEPARTMENT_STATUSES,
     PRACTICE_STATUSES,
     CaseStatus,
@@ -81,14 +82,18 @@ class ChatFlowMixin:
                 return False  # бота добавили повторно — чат уже привязан
             practice = await self._unbound_practice_cases(s)
             dept = await self._unbound_dept_cases(s)
-            staff = await self._is_staff(s, adder_tg_id)
+            orgs = await self._access_orgs(s, adder_tg_id)
+        staff = orgs is None or bool(orgs)
+        # Чужие карточки (не HR кандидата и не лид) — только своей организации и только тем, у кого HR-раздел
+        any_p = [c for c in practice if orgs is None or c.org_id in orgs]
+        any_d = [c for c in dept if orgs is None or c.org_id in orgs]
         # Кто добавил: HR кандидата / лид отдела — его люди; иначе — все (только если добавил сотрудник:
         # бот сидит и в других чатах компании, писать туда «для кого чат» незачем).
         if staff and title:
             # Прод 24.11.2026: лид R&D создал «Практика Тестбот Владимир» для кандидата, у которого он не HR, —
             # бот выбирал только из «своих» карточек и привязал чат к чужому отделу. Полное имя в названии
             # главнее того, кто добавил.
-            named = _named_in_title(practice + dept, title)
+            named = _named_in_title(any_p + any_d, title)
             if len(named) == 1:
                 await self._bind(chat_id, named[0].id)
                 return True
@@ -98,7 +103,7 @@ class ChatFlowMixin:
         if not options:
             if not staff:
                 return False
-            options = practice + dept
+            options = any_p + any_d
         if not options:
             return False
         if len(options) > 1 and title:
@@ -129,10 +134,11 @@ class ChatFlowMixin:
     async def bind_chat(self, chat_id: int, case_id: int, by_tg_id: int) -> str:
         """Кнопка «для кого этот чат». Возвращает текст ответа на нажатие."""
         async with self.sessions() as s:
-            if not await self._is_staff(s, by_tg_id):
+            orgs = await self._access_orgs(s, by_tg_id)
+            if orgs is not None and not orgs:
                 return texts.CHAT_BIND_NOT_STAFF
             case = await s.get(OnboardingCase, case_id)
-        if case is None:
+        if case is None or (orgs is not None and case.org_id not in orgs) or case.status not in ACTIVE_STATUSES:
             return texts.LEAD_ALREADY
         await self._bind(chat_id, case_id)
         return texts.CHAT_BOUND.format(full=case.full_name)
@@ -503,22 +509,36 @@ class ChatFlowMixin:
             # лиды в оргструктуре есть, но без Telegram — иначе бот вообще не знает лида
             await self._signal(case, "lead_no_tg" if case.lead_tg_ids == [] and case.lead_name else "no_lead")
 
-    async def lead_departments(self) -> list[BoardDepartment]:
+    async def lead_departments(self, tg_id: int | None) -> list[BoardDepartment] | None:
+        """Отделы для /lead — только организаций, где человек с этим Telegram сотрудник (любая роль: лид
+        бывает и без HR-раздела). None — не сотрудник (Telegram не привязан к staffwise или вход закрыт).
+        Аудит 26.11.2026: /lead мог нажать посторонний и засыпать админов запросами «подтвердить лида»."""
         async with self.sessions() as s:
-            rows = (await s.scalars(
-                select(BoardDepartment).where(
-                    func.coalesce(BoardDepartment.kind, "team") != "sandbox",
-                    BoardDepartment.hidden_at.is_(None),
-                ).order_by(BoardDepartment.name)
-            )).all()
+            orgs = await self._access_orgs(s, tg_id, hr_only=False)
+            if orgs is not None and not orgs:
+                return None
+            q = select(BoardDepartment).where(
+                func.coalesce(BoardDepartment.kind, "team") != "sandbox",
+                BoardDepartment.hidden_at.is_(None),
+            )
+            if orgs is not None:
+                q = q.where(BoardDepartment.org_id.in_(orgs))
+            rows = (await s.scalars(q.order_by(BoardDepartment.name))).all()
         return list(rows)
 
     async def request_lead(self, tg_id: int, username: str | None, full_name: str, department_id: int) -> str:
         """Лид выбрал отдел → запрос владельцам/админам HR с кнопками. Возвращает ответ лиду."""
         async with self.sessions() as s:
+            orgs = await self._access_orgs(s, tg_id, hr_only=False)
+            if orgs is not None and not orgs:
+                return texts.LEAD_NOT_STAFF
             dept = await s.get(BoardDepartment, department_id)
-            if dept is None:
+            if dept is None or (orgs is not None and dept.org_id not in orgs):
                 return texts.LEAD_NO_DEPARTMENTS
+            pending = await s.scalar(select(DepartmentLead.id).where(
+                DepartmentLead.tg_id == tg_id, DepartmentLead.status == "pending").limit(1))
+            if pending is not None:
+                return texts.LEAD_PENDING  # один открытый запрос на человека — админов не засыпать
             approvers = await self._approvers(s, dept.org_id)
             if not approvers:
                 return texts.LEAD_NO_APPROVERS
@@ -548,7 +568,8 @@ class ChatFlowMixin:
             lead.decided_by_tg, lead.decided_at = approver_tg_id, self.clock()
             if ok:
                 others = (await s.scalars(select(DepartmentLead).where(
-                    DepartmentLead.id != lead.id, DepartmentLead.status == "confirmed"))).all()
+                    DepartmentLead.id != lead.id, DepartmentLead.status == "confirmed",
+                    DepartmentLead.org_id == lead.org_id))).all()
                 for other in others:
                     if other.department.strip().lower() == lead.department.strip().lower():
                         other.status = "replaced"
@@ -623,10 +644,13 @@ class ChatFlowMixin:
         """/preview в группе: все уведомления схемы Маши по очереди в этот чат, на примере последней
         карточки бота (своей, если ты её HR). Только сотрудникам. Ответ в чат или None."""
         async with self.sessions() as s:
-            if not await self._is_staff(s, user_id):
-                return None
+            orgs = await self._access_orgs(s, user_id)
+            if orgs is not None and not orgs:
+                return None  # не HR (или вход закрыт) — молчим, как на постороннего
             bound = await self._case_for_chat(s, chat_id)
-            case = await self._example_case(s, user_id)
+            case = await self._example_case(s, user_id, orgs)
+        if bound is not None and orgs is not None and bound.org_id not in orgs:
+            return None
         if bound is not None and await self._candidate_in_chat(chat_id, bound, user_id, username):
             return texts.DEMO_CANDIDATE_HERE.format(cmd="/preview")
         if case is None:
@@ -640,12 +664,16 @@ class ChatFlowMixin:
         return texts.PREVIEW_START.format(full=case.full_name, n=texts.messages_count(len(items)))
 
     @staticmethod
-    async def _example_case(s, user_id: int) -> OnboardingCase | None:
+    async def _example_case(s, user_id: int, orgs: set[int] | None) -> OnboardingCase | None:
         """Карточка для примера. Прод 25.11.2026: пример взялся с удалённой тестовой карточки — без
-        ссылки на карточку. Берём живую: с карточкой в АТС и в работе; своя (ты HR) — раньше чужой."""
-        live = select(OnboardingCase).where(OnboardingCase.entity_id.is_not(None),
-                                            OnboardingCase.status.in_(PRACTICE_STATUSES + DEPARTMENT_STATUSES))
-        for q in (live.where(OnboardingCase.hr_tg_id == user_id), live, select(OnboardingCase)):
+        ссылки на карточку. Берём живую: с карточкой в АТС и в работе; своя (ты HR) — раньше чужой.
+        Только организаций, где у запустившего HR-раздел (orgs; None — суперадмин)."""
+        base = select(OnboardingCase)
+        if orgs is not None:
+            base = base.where(OnboardingCase.org_id.in_(orgs))
+        live = base.where(OnboardingCase.entity_id.is_not(None),
+                          OnboardingCase.status.in_(PRACTICE_STATUSES + DEPARTMENT_STATUSES))
+        for q in (live.where(OnboardingCase.hr_tg_id == user_id), live, base):
             case = await s.scalar(q.order_by(OnboardingCase.id.desc()).limit(1))
             if case is not None:
                 return case
@@ -720,11 +748,14 @@ class ChatFlowMixin:
         текстом, что в жизни. Беседа кандидата — получают те, кто указан по ролям и есть в ней; проверочная
         беседа (не привязана к кандидату) — тот, кто запустил, получает и часть HR, и часть лида."""
         async with self.sessions() as s:
-            if not await self._is_staff(s, user_id):
-                return None
+            orgs = await self._access_orgs(s, user_id)
+            if orgs is not None and not orgs:
+                return None  # не HR (или вход закрыт) — молчим
             bound = await self._case_for_chat(s, chat_id)
+            if bound is not None and orgs is not None and bound.org_id not in orgs:
+                return None
             # беседа не привязана (проверочный чат) — пример, как у /preview
-            case = bound or await self._example_case(s, user_id)
+            case = bound or await self._example_case(s, user_id, orgs)
         if case is None:
             return texts.DEMO_NO_CASE
         if bound is not None and await self._candidate_in_chat(chat_id, bound, user_id, username):
@@ -912,9 +943,37 @@ class ChatFlowMixin:
 
     @staticmethod
     async def _is_staff(s, tg_id: int | None) -> bool:
+        """Есть учётка staffwise с этим Telegram — сотрудник, а не кандидат. Только чтобы отличить кандидата
+        (кнопки Loom/«Старт»); права на команды и данные — `_access_orgs`."""
         if tg_id is None:
             return False
         return await s.scalar(select(User.id).where(User.telegram_id == tg_id).limit(1)) is not None
+
+    @staticmethod
+    async def _access_orgs(s, tg_id: int | None, hr_only: bool = True) -> set[int] | None:
+        """Организации, где человек с этим Telegram — действующий сотрудник, как его видит сайт: учётка
+        активна, вход не закрыт доменом почты (`login_blocked_reason`), а при hr_only — есть HR-раздел
+        (owner/admin/hr/«Наблюдатель», как `has_hr_segment`). None — суперадмин (все). Пусто — прав нет.
+        Аудит 26.11.2026: «сотрудником» бот считал любого с привязанным Telegram — сотрудник без HR-раздела
+        через /preview и /demo получал ФИО, даты и ссылки карточек кандидатов любой организации."""
+        if tg_id is None:
+            return set()
+        from api.models.database import UserRole
+        from api.services.email_domain import login_blocked_reason
+
+        orgs: set[int] = set()
+        users = (await s.scalars(select(User).where(User.telegram_id == tg_id))).all()
+        for user in users:
+            if user.is_active is False or await login_blocked_reason(s, user):
+                continue
+            if user.role == UserRole.superadmin:
+                return None
+            rows = await s.execute(select(OrgMember.org_id, OrgMember.role, OrgMember.is_readonly)
+                                   .where(OrgMember.user_id == user.id))
+            for org_id, role, readonly in rows:
+                if not hr_only or role in (OrgRole.owner, OrgRole.admin, OrgRole.hr) or readonly:
+                    orgs.add(org_id)
+        return orgs
 
     async def _mentor_tag(self, case: OnboardingCase) -> str | None:
         """«@ник» ментора (руководителя практики) по имени из карточки, иначе само имя."""

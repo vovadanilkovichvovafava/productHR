@@ -43,7 +43,9 @@ SECRET_KEY_RE = re.compile(r"pass(word)?|token|secret|api[_-]?key|authorization|
 # (до 27.10.2026 payment_details и адрес лежали в audit_events как есть, а
 # паспорт маскировался лишь случайно — «pass» в «passport»).
 PII_KEY_RE = re.compile(
-    r"payment|passport|address|emergency|birth|data_base64|signature_data|(^|_)(inn|snils)($|_)",
+    # wallet, answer(s) — входящие от HR-профиля (/api/onboarding/inbound): кошелёк выплат и ответы опросов
+    # (аудит 26.11.2026: лежали в журнале открытым текстом, хотя в базе кошелёк шифруется)
+    r"payment|passport|address|emergency|birth|data_base64|signature_data|wallet|answer|(^|_)(inn|snils)($|_)",
     re.I,
 )
 

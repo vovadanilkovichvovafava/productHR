@@ -302,7 +302,10 @@ async def lead_command(message: Message) -> None:
     service = await get_service()
     if service is None:
         return
-    departments = await service.lead_departments()
+    departments = await service.lead_departments(message.from_user.id if message.from_user else None)
+    if departments is None:
+        await message.answer(texts.LEAD_NOT_STAFF)
+        return
     if not departments:
         await message.answer(texts.LEAD_NO_DEPARTMENTS)
         return
