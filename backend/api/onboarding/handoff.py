@@ -428,17 +428,16 @@ class HandoffService:
             # HR видит, что передача прошла (Ильнар 06.11.2026: «бот тихо принимает»). Было
             # «допишите …» — оно удаляется, «передан» приходит в тот же чат.
             chat_id = await self._drop_notice(row) if row.notice_message_id else None
-            text = self._confirm_text(entity, event)
-            # Прод 20.11.2026: в режиме бота HR-профиля нет — «HR-профилю передано» вводило в заблуждение.
             to_bot = self.settings.handoff_to_bot
+            if to_bot:
+                # Лист Маши: HR получает только уведомления листа (3, 6, 7, 20…) — ни «передано», ни
+                # «дата поставлена / изменена» (Ильнар 26.11.2026: «убери лишнее»). Дата ставится и
+                # переносится как раньше, напоминания идут от неё.
+                return 1
+            text = self._confirm_text(entity, event)
             if moved_from:
-                done = "напоминания бота перенесены" if to_bot else "HR-профилю передано"
                 text = (f"{self._name_html(entity)}: дата практики изменена с "
-                        f"{moved_from.strftime('%d.%m.%Y')} на {event['practice_start']}, {done}.")
-            elif auto_date and to_bot:
-                text = (f"{self._name_html(entity)}: дата выхода на практику не стояла, поэтому поставлена "
-                        f"следующим рабочим днём на Штате: {event['practice_start']}. Если практика в другой "
-                        "день, поправьте дату, и бот перенесёт напоминания.")
+                        f"{moved_from.strftime('%d.%m.%Y')} на {event['practice_start']}, HR-профилю передано.")
             elif auto_date:
                 text += (" Дата выхода на практику не стояла, поэтому поставлена следующим рабочим днём на "
                          "Штате. Если практика в другой день, поправьте дату, и HR-профиль получит новую.")

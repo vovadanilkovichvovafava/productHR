@@ -1,6 +1,7 @@
 """Бот в рабочих чатах (мит 19.11.2026): чат практики, вечерний отчёт, ментор, переход в отдел,
 лиды, чат отдела, блокер, смена HR. Логика — api/onboarding/chat_flow.py."""
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -80,6 +81,11 @@ async def env(async_engine, db_session, admin_user, organization, org_owner):
                            org=organization, user=admin_user, entities={})
 
 
+def _legacy(env):
+    """Старый режим (ТЗ 03.11, ссылка HR): блокер, смена HR, «Для кого этот чат?» живут только в нём."""
+    env.bot.settings = dataclasses.replace(env.bot.settings, handoff_to_bot=False)
+
+
 async def _entity_id(env, n, name):
     """Карточка в АТС под номером n теста (у onboarding_cases — внешний ключ на entities)."""
     if n not in env.entities:
@@ -144,12 +150,32 @@ async def test_hr_adds_bot_chat_is_bound_quietly(env):
     assert env.messenger.to(WORK_CHAT) == []  # кандидата приветствует HR, не бот
 
 
+async def test_two_candidates_sheet_silent_binds_by_candidate_message(env):
+    """Лист Маши (Ильнар 26.11.2026: «убери лишнее»): «Для кого этот чат?» бот не спрашивает. Чат
+    привязывается молча — по названию или когда в нём пишет кандидат."""
+    first = await _practice(env, 1)
+    second = await _practice(env, 2, name="Сидорова Анна", tg="anna_s")
+    assert await env.bot.handle_bot_added(WORK_CHAT, HR_TG, "рабочий чат") is False
+    assert env.messenger.to(WORK_CHAT) == []
+    assert await env.bot.handle_group_text(WORK_CHAT, MENTOR_TG, "egor_s", "Егор", "привет") is None
+    assert (await _fresh(env, first.id)).work_chat_id is None and (await _fresh(env, second.id)).work_chat_id is None
+    assert await env.bot.handle_group_text(WORK_CHAT, 7700, "anna_s", "Анна", "Привет всем") is None
+    fresh = await _fresh(env, second.id)
+    assert fresh.work_chat_id == WORK_CHAT and fresh.candidate_tg_id == 7700
+    assert env.messenger.to(WORK_CHAT) == []
+
+    # по названию чата — без вопроса
+    assert await env.bot.handle_bot_added(-2002, HR_TG, "Практика — Петров")
+    assert (await _fresh(env, first.id)).work_chat_id == -2002
+
+
 async def test_two_candidates_asks_whose_chat_title_decides(env):
+    _legacy(env)
     first = await _practice(env, 1)
     second = await _practice(env, 2, name="Сидорова Анна", tg="anna_s")
     assert await env.bot.handle_bot_added(WORK_CHAT, HR_TG, "рабочий чат")
-    [ask] = env.messenger.to(WORK_CHAT)
-    assert ask.text == texts_mod.SHEET_WHICH_CHAT  # схема Маши: бот кандидата не приветствует
+    ask = env.messenger.to(WORK_CHAT)[-1]
+    assert ask.text == texts_mod.WHICH_CHAT
     assert ask.buttons == [[("Петров Иван Сергеевич", f"pchat:{first.id}")], [("Сидорова Анна", f"pchat:{second.id}")]]
     assert await env.bot.bind_chat(WORK_CHAT, second.id, STRANGER_TG) == "Выбрать кандидата может только сотрудник компании."
     assert (await env.bot.bind_chat(WORK_CHAT, second.id, MENTOR_TG)).startswith("Готово")
@@ -191,9 +217,9 @@ async def test_loom_reminder_at_20_with_buttons(env):
     loom = env.messenger.to(WORK_CHAT)[-1]
     assert loom.text == "Время для вечернего Loom: до 5 минут, экран и голос."
     assert loom.buttons == [[("Отправил(а)", "lmc:2026-11-20:sent"), ("Ещё в работе", "lmc:2026-11-20:later")]]
-    assert await env.bot.handle_loom_chat(WORK_CHAT, MENTOR_TG, "egor_s", "2026-11-20", "sent") == (
-        None, "Эти кнопки для кандидата.")
-    assert await env.bot.handle_loom_chat(WORK_CHAT, CANDIDATE_TG, "ivan_p", "2026-11-20", "sent") == ("Спасибо!", None)
+    assert await env.bot.handle_loom_chat(WORK_CHAT, MENTOR_TG, "egor_s", "2026-11-20", "sent") is False
+    assert await env.bot.handle_loom_chat(WORK_CHAT, CANDIDATE_TG, "ivan_p", "2026-11-20", "sent") is True
+    assert env.messenger.to(WORK_CHAT)[-1] is loom  # в листе только кнопки: ни «Спасибо!», ни «ждём»
     env.clock.now = datetime(2026, 11, 20, 18, 30)
     await env.bot.run_due_jobs()
     assert env.messenger.to(WORK_CHAT)[-1] is loom  # никаких тегов ментора
@@ -348,7 +374,18 @@ async def test_lead_without_approvers(env, db_session):
 # ------------------------------------------------------------------ блокер и смена HR
 
 
+async def test_sheet_no_blocker(env):
+    """Лист Маши: блокера в нём нет — #блокер и /blocker бот не пересылает и в чат не отвечает."""
+    await _practice(env)
+    await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
+    hr_before = len(env.messenger.to(HR_TG))
+    for text in ("#блокер не приходит инвайт", "/blocker нет доступа", "/blocker"):
+        assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", text) is None
+    assert len(env.messenger.to(HR_TG)) == hr_before and env.messenger.to(WORK_CHAT) == []
+
+
 async def test_blocker_goes_to_hr_and_mentor(env):
+    _legacy(env)
     await _practice(env)
     await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
     reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван",
@@ -362,20 +399,21 @@ async def test_blocker_goes_to_hr_and_mentor(env):
 
 async def test_blocker_command(env):
     """Мит 24.11.2026: блокер — командой /blocker. С текстом — сразу HR; без текста — бот спрашивает,
-    следующее сообщение того же человека уходит HR."""
+    следующее сообщение того же человека уходит HR. Старый режим: в листе Маши блокера нет."""
+    _legacy(env)
     await _practice(env)
     await env.bot.handle_bot_added(WORK_CHAT, HR_TG)
     reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван",
                                             "/blocker@Staffwise_bot нет доступа к кабинету")
     assert reply.startswith("Передал HR")
-    assert "от Иван:\nнет доступа к кабинету\nКарточка: https://staffwise.club/" in env.messenger.texts(HR_TG)[-1]
+    assert env.messenger.texts(HR_TG)[-1].endswith("от Иван:\nнет доступа к кабинету")
 
     sent = len(env.messenger.texts(HR_TG))
     assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "/blocker") == texts_mod.BLOCKER_ASK
     assert len(env.messenger.texts(HR_TG)) == sent  # пустой блокер HR не уходит
     assert await env.bot.handle_group_text(WORK_CHAT, MENTOR_TG, "egor_s", "Егор", "сейчас гляну") is None  # другой человек
     reply = await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "не открывается Loom")
-    assert reply.startswith("Передал HR") and "\nне открывается Loom\n" in env.messenger.texts(HR_TG)[-1]
+    assert reply.startswith("Передал HR") and env.messenger.texts(HR_TG)[-1].endswith("\nне открывается Loom")
     assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "спасибо") is None  # уже не блокер
 
     await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "/blocker")
@@ -383,7 +421,25 @@ async def test_blocker_command(env):
     assert await env.bot.handle_group_text(WORK_CHAT, CANDIDATE_TG, "ivan_p", "Иван", "всё, разобрался") is None
 
 
+async def test_sheet_no_hr_change_ping(env, db_session):
+    """Лист Маши: уведомления о смене HR в нём нет."""
+    entity = Entity(org_id=env.org.id, created_by=env.user.id, name="Захаров Илья", type=EntityType.candidate,
+                    status=EntityStatus.probation, extra_data={}, created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow())
+    db_session.add(entity)
+    await db_session.commit()
+    assert await env.bot.ping_hr_changes() == 0
+    env.clock.now = datetime(2026, 11, 18, 9, 5)
+    entity.extra_data = {"hr_changes": [{"id": "abc", "at": "2026-11-18T09:03:00", "by": env.user.id,
+                                         "prev": env.user.id, "new": env.user.id}]}
+    entity.updated_at = datetime(2026, 11, 18, 9, 3)
+    await db_session.commit()
+    assert await env.bot.ping_hr_changes() == 0
+    assert env.messenger.sent == []
+
+
 async def test_hr_change_pings_new_and_previous(env, db_session):
+    _legacy(env)
     new_hr = User(email="vlada@test.com", password_hash=hash_password("x"), name="Влада", role=UserRole.admin,
                   is_active=True, telegram_id=7300)
     db_session.add(new_hr)
@@ -407,7 +463,8 @@ async def test_hr_change_pings_new_and_previous(env, db_session):
 
 
 async def test_hr_change_moves_bot_signals_to_new_hr(env, db_session):
-    """Прод 24.11.2026: после «Сменить HR» блокер и сигналы перехода уходили прежнему HR."""
+    """Прод 24.11.2026: после «Сменить HR» блокер и сигналы перехода уходили прежнему HR. Старый режим."""
+    _legacy(env)
     new_hr = User(email="masha@test.com", password_hash=hash_password("x"), name="Мария", role=UserRole.admin,
                   is_active=True, telegram_id=7400)
     db_session.add(new_hr)
@@ -451,7 +508,7 @@ async def test_telegram_glue_group_text_lead_and_url_buttons(env, monkeypatch):
         message.reply.assert_not_awaited()  # по листу на отчёт бот не отвечает
         message.text = "/blocker нет доступа"
         await tg.on_group_message(message)
-        assert message.reply.await_args.args[0].startswith("Передал HR")
+        message.reply.assert_not_awaited()  # в листе Маши блокера нет
 
         # /lead без отделов — подсказка
         answer = AsyncMock()

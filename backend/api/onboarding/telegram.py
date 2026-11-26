@@ -360,14 +360,9 @@ async def loom_in_chat(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     user = callback.from_user
-    reply, alert = await service.handle_loom_chat(callback.message.chat.id, user.id, user.username,
-                                                  parts[1], parts[2])
-    if alert:
-        await callback.answer(alert, show_alert=True)
-        return
-    if reply:
+    if await service.handle_loom_chat(callback.message.chat.id, user.id, user.username, parts[1], parts[2]):
         await _drop_buttons(callback)
-    await _reply(callback, reply)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("survey:"))

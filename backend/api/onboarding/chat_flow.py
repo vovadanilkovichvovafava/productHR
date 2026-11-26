@@ -112,10 +112,15 @@ class ChatFlowMixin:
         if len(options) == 1:
             await self._bind(chat_id, options[0].id)
             return True
+        if self.sheet:
+            # Лист Маши: в чат бот пишет только Loom (Ильнар 26.11.2026: «убери лишнее»). Не угадали чат —
+            # молчим: его привяжет вступление кандидата (ник из карточки) или его сообщение в чате.
+            log.info("ONBOARDING chat %s ambiguous, %s candidates — not asking (sheet)", chat_id, len(options))
+            return False
         dept_only = all(c.status in DEPARTMENT_STATUSES for c in options)
         buttons: Buttons = [[(c.full_name, f"pchat:{c.id}")] for c in options[:10]]
         try:
-            ask = texts.WHICH_CHAT_DEPT if dept_only else (texts.SHEET_WHICH_CHAT if self.sheet else texts.WHICH_CHAT)
+            ask = texts.WHICH_CHAT_DEPT if dept_only else texts.WHICH_CHAT
             await self.messenger.send(chat_id, ask, buttons)
         except SendError as exc:
             log.warning("чат %s: %s", chat_id, exc)
@@ -228,11 +233,24 @@ class ChatFlowMixin:
         async with self.sessions() as s:
             case = await self._case_for_chat(s, chat_id)
             if case is None:
+                if self.sheet:
+                    # Лист Маши: «Для кого этот чат?» бот не спрашивает. Чат, который не угадали при
+                    # добавлении бота, привязывается молча, когда в нём пишет кандидат практики без чата.
+                    found = await self._practice_case(s, user_id, username)
+                    if found is not None and found.work_chat_id is None:
+                        found.work_chat_id = chat_id
+                        if found.candidate_tg_id is None:
+                            found.candidate_tg_id = user_id
+                        await s.commit()
+                        log.info("ONBOARDING chat bound case=%s chat=%s practice (candidate message)",
+                                 found.id, chat_id)
                 return None
             candidate = _is_candidate(case, user_id, username)
             if candidate and case.candidate_tg_id is None:
                 case.candidate_tg_id = user_id
                 await s.commit()
+        if self.sheet:
+            return None  # лист Маши: блокера в нём нет, в чат бот пишет только Loom (Ильнар 26.11.2026)
         # Мит 24.11.2026: блокер — командой /blocker (её видно в меню команд), #блокер тоже работает.
         command = BLOCKER_CMD_RE.match(text.strip())
         if command:
@@ -344,17 +362,18 @@ class ChatFlowMixin:
             await self._signal(case, "send_failed", what="напоминание про Loom", error=str(exc))
 
     async def handle_loom_chat(self, chat_id: int, user_id: int, username: str | None,
-                               day: str, choice: str) -> tuple[str | None, str | None]:
-        """Кнопка под Loom в рабочем чате. (ответ в чат, всплывающее предупреждение)."""
-        if choice not in texts.SHEET_LOOM_REPLY:
-            return None, None
+                               day: str, choice: str) -> bool:
+        """Кнопка под Loom в рабочем чате. True — ответ кандидата записан (кнопки можно убрать).
+        Ответов в чат и всплывашек нет: в листе Маши у Loom только кнопки (Ильнар 26.11.2026)."""
+        if choice not in texts.SHEET_LOOM_CHOICES:
+            return False
         async with self.sessions() as s:
             case = await self._case_for_chat(s, chat_id)
             if case is None:
-                return None, None
+                return False
             if not _is_candidate(case, user_id, username):
                 if case.candidate_tg_id is not None or await self._is_staff(s, user_id):
-                    return None, texts.SHEET_LOOM_NOT_CANDIDATE
+                    return False
                 case.candidate_tg_id = user_id  # ник в карточке с ошибкой: нажал не сотрудник — кандидат
             elif case.candidate_tg_id is None:
                 case.candidate_tg_id = user_id
@@ -363,7 +382,7 @@ class ChatFlowMixin:
                 s.add(SurveyResponse(case_id=case.id, survey=REPORT_SURVEY, question=0, answer=day))
             await s.commit()
         log.info("ONBOARDING loom case=%s day=%s %s", case.id, day, choice)
-        return texts.SHEET_LOOM_REPLY[choice], None
+        return True
 
     @staticmethod
     async def _reported(s, case_id: int, day: str) -> bool:
@@ -824,7 +843,10 @@ class ChatFlowMixin:
 
     async def ping_hr_changes(self) -> int:
         """Смена HR у кандидата (services/candidate_hr.py пишет её в extra_data.hr_changes) —
-        новому и прежнему HR в Telegram со ссылкой на карточку. Смотрит только свежие записи."""
+        новому и прежнему HR в Telegram со ссылкой на карточку. Смотрит только свежие записи.
+        В режиме листа Маши не шлётся: такого уведомления в листе нет (Ильнар 26.11.2026)."""
+        if self.sheet:
+            return 0
         now = self.clock()
         watermark = getattr(self, "_hr_watermark", None)
         if watermark is None:

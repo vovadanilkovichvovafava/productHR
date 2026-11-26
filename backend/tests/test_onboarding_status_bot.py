@@ -137,19 +137,18 @@ async def test_practice_date_moved_reschedules(setup, db_session, organization, 
             select(BotJob).where(BotJob.case_id == case.id, BotJob.status == "pending", BotJob.kind == "loom_chat")))
     assert looms == ["2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26"]
     assert "invite_check" not in await _jobs(setup, case.id, "cancelled")
-    # прод 20.11.2026: в режиме бота HR-профиля нет — не «HR-профилю передано»
-    moved = setup.messenger.to(HR_TG)[-1]
-    assert "дата практики изменена" in moved and "напоминания бота перенесены" in moved
-    assert "HR-профил" not in moved
+    # лист Маши (Ильнар 26.11.2026: «убери лишнее»): напоминания перенесены молча, «дата изменена» не шлём
+    assert not any("дата практики изменена" in t for t in setup.messenger.to(HR_TG))
 
 
-async def test_practice_without_date_text_in_bot_mode(setup, db_session, organization, admin_user):
-    """Прод 20.11.2026: «поправьте дату: HR-профиль получит новую» — в режиме бота профиля нет."""
-    await _person(db_session, organization, admin_user, "Без Даты", practice=None)
+async def test_practice_without_date_silent_in_bot_mode(setup, db_session, organization, admin_user):
+    """Лист Маши: дату практики бот ставит сам (следующий рабочий день), но «дата поставлена» HR не пишет —
+    такого уведомления в листе нет (Ильнар 26.11.2026: «убери лишнее»)."""
+    entity = await _person(db_session, organization, admin_user, "Без Даты", practice=None)
     await setup.handoff.tick()
-    [note] = setup.messenger.to(HR_TG)
-    assert "поставлена следующим рабочим днём" in note and "бот перенесёт напоминания" in note
-    assert "HR-профил" not in note
+    [case] = await _cases(setup, entity.id)
+    assert case is not None
+    assert setup.messenger.to(HR_TG) == []
 
 
 def json_day(job):
