@@ -220,7 +220,10 @@ class OnboardingService(ChatFlowMixin):
         if kind == "stop":
             if case is None:
                 return None
-            if case.status in PRACTICE_STATUSES:
+            # Лист Маши: «Мы уволили» / «Сам уволился» в любой момент, и на практике тоже, — уведомление 20
+            # (exit-интервью); «не прошёл» (7) — остальные стопы практики (Отказ, резерв, отозван).
+            departed = self.sheet and event.get("status") in ("dismissed", "quit")
+            if case.status in PRACTICE_STATUSES and not departed:
                 case = await self.set_status(case.id, CaseStatus.failed)
             else:
                 case = await self.set_status(case.id, CaseStatus.left, reason=event.get("reason"))

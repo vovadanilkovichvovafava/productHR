@@ -201,6 +201,21 @@ async def test_rejected_during_practice_stops_reminders(setup, db_session, organ
         "Петров Иван Сергеевич: не прошёл. Сообщи кандидату лично"]
 
 
+@pytest.mark.parametrize("status", [EntityStatus.dismissed, EntityStatus.quit])
+async def test_departed_during_practice_is_exit_not_failed(setup, db_session, organization, admin_user, status):
+    """Лист Маши: «Мы уволили» и «Сам уволился» — «в любой момент» уведомление 20, не 7 «не прошёл»."""
+    entity = await _person(db_session, organization, admin_user)
+    await setup.handoff.tick()
+    entity.status = status
+    await db_session.commit()
+    await setup.handoff.tick()
+    [case] = await _cases(setup, entity.id)
+    assert case.status == CaseStatus.left.value
+    assert await _jobs(setup, case.id) == []
+    assert [t.split("\n")[0] for t in setup.messenger.to(HR_TG)] == [
+        "Петров Иван Сергеевич уходит: проведи exit-интервью и заполни причину"]
+
+
 async def test_transfer_without_practice_case(setup, db_session, organization, admin_user):
     """Практику вели до включения бота — переход в отдел всё равно заводит онбординг."""
     entity = await _person(db_session, organization, admin_user, status=EntityStatus.transferred, practice=None)
