@@ -317,6 +317,10 @@ class HandoffService:
                 sent += await self._send_event(row, entity, "transfer")
             elif status in STOP_REASONS:
                 sent += await self._stop(row, entity)
+            elif (status == TRANSFER and row.transfer_sent_at and self.settings.handoff_to_bot
+                  and self._first_day_moved(row, entity)):
+                # HR поправил дату выхода в отдел уже после перевода — бот пересчитывает онбординг
+                sent += await self._send_event(row, entity, "transfer")
             elif (status == TRANSFER and row.transfer_sent_at and self.settings.handoff_stages
                   and row.next_at is not None and row.stage_index < len(STAGES)):
                 sent += await self._send_event(row, entity, "stage")
@@ -337,6 +341,13 @@ class HandoffService:
         current = _parse_date(_pick(entity.extra_data or {}, PRACTICE_START_KEYS))
         return bool(current and row.practice_date and current != row.practice_date
                     and current >= self._local_today())
+
+    def _first_day_moved(self, row: Handoff, entity: Entity) -> bool:
+        """Дата выхода в отдел в карточке («Штат») не та, с которой перевод ушёл боту. Прод 26.11.2026:
+        Зайцевой поставили «Перешёл в отдел» с выходом 16.11, через 8 минут Мария исправила на 12.11 —
+        бот так и считал напоминания онбординга от 16.11 (месяц 1 и дальше на 4 дня позже)."""
+        current = _parse_date(_pick(entity.extra_data or {}, DEPT_START_KEYS))
+        return bool(current and row.first_day and current != row.first_day)
 
     async def _fill_practice_date(self, entity: Entity) -> tuple[date, bool]:
         """(дата, поставлена ли ботом): следующий рабочий день — в карточку, его видит «Штат»."""

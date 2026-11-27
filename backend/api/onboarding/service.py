@@ -205,6 +205,8 @@ class OnboardingService(ChatFlowMixin):
         if kind == "transfer":
             first_day = date.fromisoformat(event["first_day_iso"])
             if case is not None and case.status in DEPARTMENT_STATUSES:
+                if case.department_start_date != first_day:  # HR поправил дату выхода после перевода
+                    return await self.reschedule_department(case.id, first_day)
                 return case  # уже в отделе — повтор события
             if case is None:  # практику вели не мы (до включения бота) — заводим карточку задним числом
                 start = datetime.combine(first_day, datetime.strptime(self.settings.practice_start_time, "%H:%M").time())
@@ -244,6 +246,31 @@ class OnboardingService(ChatFlowMixin):
             self._add_jobs(s, case.id, self._preboarding(self.clock(), start_utc, case.timezone, True))
             await s.commit()
         log.info("ONBOARDING case=%s practice moved to %s", case_id, practice_start.date())
+        return case
+
+    async def reschedule_department(self, case_id: int, first_day: date) -> OnboardingCase:
+        """HR поправил дату выхода в отдел после перевода: сроки онбординга — от новой даты, молча (в листе
+        Маши сообщения «дата изменена» нет). Ещё не ушедшие напоминания листа снимаются и ставятся заново
+        с этого момента; прошедшие дни не присылаются. Продлённый испытательный срок (решение «extended»)
+        не трогаем: его конец и напоминания 17–19, Л10, Л11 поставлены от новой даты конца вручную."""
+        async with self.sessions() as s:
+            case = await s.get(OnboardingCase, case_id)
+            if case is None or case.status not in DEPARTMENT_STATUSES or case.department_start_date == first_day:
+                return case
+            old = case.department_start_date
+            extended = case.probation_decision == "extended"
+            case.department_start_date = first_day
+            if not extended:
+                case.probation_end_date = sch.add_months(first_day, 3)
+            if self.sheet:
+                kinds = set(texts.SHEET_REMINDER) - (sch.SHEET_PROBATION_KINDS if extended else set())
+                await self._cancel_onboarding_kinds(s, case.id, kinds)
+                now = self.clock()
+                jobs = sch.sheet_onboarding_jobs(first_day, case.timezone, self._local_now(case).date(),
+                                                 self.settings.skip_weekends)
+                self._add_jobs(s, case.id, [j for j in jobs if j[1] > now and j[2].get("kind") in kinds])
+            await s.commit()
+        log.info("ONBOARDING case=%s first day moved %s → %s", case_id, old, first_day)
         return case
 
     def invite_link(self, case: OnboardingCase) -> str:

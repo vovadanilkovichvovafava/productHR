@@ -327,3 +327,67 @@ def test_day7_weekend_goes_to_monday():
     bot = OnboardingService(None, None, Settings(handoff_to_bot=True), None, lambda: datetime(2026, 11, 23))
     assert bot._day7(date(2026, 11, 23)).isoformat() == "2026-11-30"  # 29.11 — воскресенье
     assert bot._day7(date(2026, 11, 20)).isoformat() == "2026-11-26"
+
+
+async def _reminders(setup, case_id):
+    """{вид напоминания листа: местная дата} — ещё не ушедшие напоминания онбординга."""
+    import json
+
+    async with setup.sessions() as s:
+        jobs = await s.scalars(select(BotJob).where(BotJob.case_id == case_id, BotJob.status == "pending",
+                                                    BotJob.kind == "staff_reminder"))
+        return {json.loads(j.payload)["kind"]: sch.utc_to_local(j.run_at, "Europe/Moscow").date() for j in jobs}
+
+
+async def test_first_day_moved_after_transfer_reschedules_silently(setup, db_session, organization, admin_user):
+    """Прод 26.11.2026 (Зайцева): перевели в отдел с выходом 16.11, через 8 минут HR поправила дату на «Штате» —
+    бот считал онбординг от старой даты. Теперь новая дата подхватывается, напоминания — от неё, без сообщений."""
+    entity = await _person(db_session, organization, admin_user)
+    await setup.handoff.tick()
+    entity.status = EntityStatus.transferred
+    entity.extra_data = {**entity.extra_data, "department_transfer_date": "2026-11-24", "manager_name": "Марк"}
+    await db_session.commit()
+    assert await setup.handoff.tick() == 1
+    [case] = await _cases(setup, entity.id)
+    before = await _reminders(setup, case.id)
+    assert before["s_hr_m1"] == date(2026, 12, 24) and before["s_hr_first_day"] == date(2026, 11, 24)
+    sent_before = len(setup.messenger.sent)
+
+    entity.extra_data = {**entity.extra_data, "department_transfer_date": "2026-11-20"}
+    await db_session.commit()
+    assert await setup.handoff.tick() == 1
+    [case] = await _cases(setup, entity.id)
+    assert (case.department_start_date, case.probation_end_date) == (date(2026, 11, 20), date(2027, 2, 20))
+    after = await _reminders(setup, case.id)
+    assert after["s_hr_m1"] == date(2026, 12, 21)  # 20.12 — воскресенье → понедельник
+    assert after["s_hr_6m"] == date(2027, 5, 20) and after["s_lead_m3_two_weeks"] == date(2027, 2, 8)
+    assert "s_hr_first_day" in after  # 20.11 ещё впереди (сейчас 18.11)
+    assert len(setup.messenger.sent) == sent_before  # «дата изменена» в листе нет — молча
+    assert await setup.handoff.tick() == 0  # повторно не пересчитывает
+
+    # поправили на прошедшую дату: прошедшие дни не присылаются, будущие — от неё
+    entity.extra_data = {**entity.extra_data, "department_transfer_date": "2026-11-12"}
+    await db_session.commit()
+    assert await setup.handoff.tick() == 1
+    after = await _reminders(setup, case.id)
+    # день 7 (18.11, 09:30) уже прошёл — сейчас 12:00; первый день и неделя не догоняют пачкой
+    assert not {"s_hr_first_day", "s_hr_week_meeting", "s_lead_goals"} & set(after)
+    assert after["s_hr_m1"] == date(2026, 12, 14)
+    assert len(setup.messenger.sent) == sent_before
+
+
+async def test_first_day_moved_keeps_extended_probation(setup, db_session, organization, admin_user):
+    """Испытательный продлили вручную — перенос даты выхода не сбрасывает новую дату конца."""
+    entity = await _person(db_session, organization, admin_user, status=EntityStatus.transferred, practice=None)
+    entity.extra_data = {**entity.extra_data, "department_transfer_date": "2026-11-24"}
+    await db_session.commit()
+    await setup.handoff.tick()
+    [case] = await _cases(setup, entity.id)
+    await setup.bot.decide_probation(case.id, "extended", new_end=date(2027, 4, 1))
+    entity.extra_data = {**entity.extra_data, "department_transfer_date": "2026-11-26"}
+    await db_session.commit()
+    await setup.handoff.tick()
+    [case] = await _cases(setup, entity.id)
+    assert (case.department_start_date, case.probation_end_date) == (date(2026, 11, 26), date(2027, 4, 1))
+    after = await _reminders(setup, case.id)
+    assert after["s_hr_probation_close"] == date(2027, 4, 1) and after["s_hr_m1"] == date(2026, 12, 28)
