@@ -2904,7 +2904,7 @@ async def cmd_start(message: types.Message):
         access = await _get_user_access(session, message.from_user.id)
 
     # Не сотрудник (кандидат, HR-аккаунт не из списка): меню и «Энцеладус» ему ни к чему —
-    # ВРЕМЕННЫЙ ответ HR-бота Staffwise (04.11.2026, переделать — texts.STAFFWISE_START_TEMP)
+    # ответ HR-бота Staffwise (texts.STAFFWISE_START)
     if not access:
         await onboarding_tg.on_stranger(message, "start")  # ответ + ID/ник в лог STAFFWISE_CONTACT
         return
@@ -3819,7 +3819,7 @@ async def cmd_ai_digest(message: types.Message):
         access = await _get_user_access(session, message.from_user.id)
         if not access:
             # Не сотрудник (кандидат, HR-аккаунт автоспамера): любое сообщение подключает HR-аккаунт
-            # из списка, остальным — временный ответ Staffwise и ID/ник в лог (STAFFWISE_CONTACT)
+            # из списка, остальным — ответ Staffwise и ID/ник в лог (STAFFWISE_CONTACT)
             await onboarding_tg.on_stranger(message, "text")
             return
         if not access.get('org_id'):

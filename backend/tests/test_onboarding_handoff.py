@@ -567,7 +567,7 @@ async def test_accounts_by_telegram_id(async_engine, messenger, clock, db_sessio
 
 
 async def test_start_from_stranger_gets_staffwise_reply(monkeypatch, caplog):
-    """Не сотрудник на /start — временный ответ Staffwise, а не меню «Энцеладуса»; ID и ник — в лог."""
+    """Не сотрудник на /start — ответ Staffwise, а не меню «Энцеладуса»; ID и ник — в лог."""
     import api.bot as bot_module
     from api.onboarding import texts
 
@@ -578,7 +578,7 @@ async def test_start_from_stranger_gets_staffwise_reply(monkeypatch, caplog):
     )
     with caplog.at_level("INFO", logger="hr-analyzer.onboarding"):
         await bot_module.cmd_start(message)
-    assert message.answer.await_args.args[0] == texts.STAFFWISE_START_TEMP
+    assert message.answer.await_args.args[0] == texts.STAFFWISE_START
     assert "STAFFWISE_CONTACT via=start user_id=4242 @someone" in caplog.text
 
 
@@ -603,7 +603,7 @@ def _text_message(user_id, username, text="привет"):
 
 
 async def test_any_text_from_stranger_logs_id_and_replies(monkeypatch, caplog):
-    """Не сотрудник пишет любой текст — временный ответ и ID в лог, без AI-сводки и без «привяжите аккаунт»."""
+    """Не сотрудник пишет любой текст — ответ Staffwise и ID в лог, без AI-сводки и без «привяжите аккаунт»."""
     import api.bot as bot_module
     from api.onboarding import texts
 
@@ -612,7 +612,7 @@ async def test_any_text_from_stranger_logs_id_and_replies(monkeypatch, caplog):
     message = _text_message(5151, "hr_acc_x")
     with caplog.at_level("INFO", logger="hr-analyzer.onboarding"):
         await bot_module.cmd_ai_digest(message)
-    assert message.answer.await_args.args[0] == texts.STAFFWISE_START_TEMP
+    assert message.answer.await_args.args[0] == texts.STAFFWISE_START
     assert "STAFFWISE_CONTACT via=text user_id=5151 @hr_acc_x" in caplog.text
 
 
@@ -660,7 +660,7 @@ async def test_sticker_from_stranger_counts(monkeypatch, caplog):
     with caplog.at_level("INFO", logger="hr-analyzer.onboarding"):
         await onboarding_tg.private_non_text(message)
     assert "STAFFWISE_CONTACT via=media user_id=7171 @hr_sticker" in caplog.text
-    assert message.answer.await_args.args[0] == texts.STAFFWISE_START_TEMP
+    assert message.answer.await_args.args[0] == texts.STAFFWISE_START
 
 
 async def test_sticker_from_employee_only_logged(monkeypatch, caplog):

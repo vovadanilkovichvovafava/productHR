@@ -103,12 +103,12 @@ async def on_stranger(message: Message, via: str) -> None:
     """Боту написал НЕ сотрудник (Telegram не привязан к productHR): /start или любое сообщение.
 
     HR-аккаунт из ONBOARDING_HANDOFF_ACCOUNTS — подключаем (любым сообщением, не только /start).
-    Остальным — временный ответ Staffwise, а ID и ник — в лог STAFFWISE_CONTACT: по нему HR-аккаунт
+    Остальным — ответ Staffwise (texts.STAFFWISE_START), а ID и ник — в лог STAFFWISE_CONTACT: по нему HR-аккаунт
     вписывают в список (04.11.2026, просьба Ильнара).
     """
     if await on_plain_start(message):
         return
-    await message.answer(texts.STAFFWISE_START_TEMP)
+    await message.answer(texts.STAFFWISE_START)
 
 
 def log_contact(message: Message, via: str) -> None:
