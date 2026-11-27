@@ -5,6 +5,7 @@ import { STATUS_TO_STAGE_MAP, type EntityStatus } from "@/types";
 import {
   trimTrailingEmptyHtml,
   buildListRowStages,
+  exitStageOptions,
   nextStageStatus,
   cardMatchesMentor,
   countPracticeMentors,
@@ -905,5 +906,52 @@ describe('trimTrailingEmptyHtml — пустой хвост редактора',
   it('пустой текст остаётся пустым', () => {
     expect(trimTrailingEmptyHtml('<div><br></div>')).toBe('');
     expect(trimTrailingEmptyHtml('')).toBe('');
+  });
+});
+
+// Мария, 27.11.2026: во вкладке «Мы уволили» у человека чип «Отказ · Трафик».
+describe('buildListRowStages — «Отказ» от увольнения', () => {
+  it('подписан «Мы уволили», настоящий отказ остаётся «Отказом»', () => {
+    const stages = buildListRowStages(
+      [
+        { vacancy_title: 'Трафик', stage: 'rejected', departed: 'dismissed' },
+        { vacancy_title: 'SEO', stage: 'rejected', departed: null },
+        { vacancy_title: 'UAM', stage: 'rejected', departed: 'quit' },
+      ],
+      'dismissed',
+      [],
+      { rejected: 'Отказ' },
+    );
+    expect(stages.map((s) => s.label)).toEqual(['Мы уволили', 'Отказ', 'Сам уволился']);
+    expect(stages.every((s) => s.stage === 'rejected')).toBe(true); // цвет — серый, как у отказа
+  });
+});
+
+// Мария, 27.11.2026: была практика или отдел — только «Мы уволили» / «Сам
+// уволился»; не было — только «Отказ».
+describe('exitStageOptions — «Отказ» или увольнение', () => {
+  const base = [
+    { status: 'screening', label: 'Выполняют ТЗ' },
+    { status: 'probation', label: 'Практика' },
+    { status: 'rejected', label: 'Отказ' },
+    { status: 'dismissed', label: 'Мы уволили' },
+    { status: 'quit', label: 'Сам уволился' },
+    { status: 'reserve', label: 'Резерв' },
+  ];
+  const keys = (o: Array<{ status: string }>) => o.map((x) => x.status);
+
+  it('работал — без «Отказа», с увольнением', () => {
+    expect(keys(exitStageOptions(base, true, 'screening'))).toEqual(['screening', 'probation', 'dismissed', 'quit', 'reserve']);
+  });
+  it('не работал — без увольнения', () => {
+    expect(keys(exitStageOptions(base, false, 'screening'))).toEqual(['screening', 'probation', 'rejected', 'reserve']);
+  });
+  it('этапы воронки: увольнение встаёт на место «Отказа»', () => {
+    const funnel = [{ status: 'probation', label: 'Практика' }, { status: 'transferred', label: 'Перешёл в отдел' }, { status: 'rejected', label: 'Отказ' }];
+    expect(exitStageOptions(funnel, true, 'transferred').map((o) => o.label)).toEqual(['Практика', 'Перешёл в отдел', 'Мы уволили', 'Сам уволился']);
+  });
+  it('карточка ещё грузится: по текущему этапу, иначе список как есть', () => {
+    expect(keys(exitStageOptions(base, undefined, 'probation'))).not.toContain('rejected');
+    expect(exitStageOptions(base, undefined, 'screening')).toBe(base);
   });
 });

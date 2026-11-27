@@ -53,6 +53,18 @@ DEPARTED_LABELS: dict[str, str] = {
     EntityStatus.quit.value: "Сам уволился",
 }
 
+
+def departure_of_comment(comment: str | None) -> str | None:
+    """Заявку закрыло увольнение: «Отказ» с комментарием «Мы уволили — …» /
+    «Сам уволился — …» (так пишет close_applications_for_departure).
+    Возвращает статус (dismissed/quit), иначе None. По нему список и карточка
+    подписывают такую заявку «Мы уволили», а не «Отказ» (Мария, 27.11.2026)."""
+    text = (comment or "").strip()
+    for status, label in DEPARTED_LABELS.items():
+        if text == label or text.startswith(f"{label} — "):
+            return status
+    return None
+
 # Статусы кандидата в порядке вкладок «Все кандидаты».
 BOARD_STATUSES: list[str] = []
 for _status, _label, _color, _in_funnel, _shown in _STAGES:

@@ -310,6 +310,8 @@ export interface EntityFile {
 }
 
 export interface EntityWithRelations extends Entity {
+  /** Был на практике или в отделе: вместо «Отказа» — «Мы уволили» / «Сам уволился» (27.11.2026). */
+  worked_here?: boolean;
   chats: Array<{
     id: number;
     title: string;

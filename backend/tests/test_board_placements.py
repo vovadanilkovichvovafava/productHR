@@ -534,11 +534,15 @@ async def test_board_shows_only_own_people(
         await db_session.commit()
         assert await _rows(client, admin_user, e.id) == [], f"лишняя строка: {status.value}"
 
-    # Отказ и «отозван» у того, кто УЖЕ был в отделе и на практике, — это
-    # уход: строка остаётся и попадает в «Уволен / Уволился». Практику
-    # подтверждает запись ленты (как пишет перевод вне воронок и с доски).
+    # С 27.11.2026 доска считает по статусам базы (Мария): «Отказ» и
+    # «Отозван» даже у того, кто был на практике, на доске не показываются —
+    # такому человеку ставят «Мы уволили» / «Сам уволился» (services/exit_status).
     e.extra_data = {"notes": [{"id": "p", "text": "", "stage": "probation", "from_status": "hired"}]}
     for status in (EntityStatus.rejected, EntityStatus.withdrawn):
+        e.status = status
+        await db_session.commit()
+        assert await _rows(client, admin_user, e.id) == [], f"лишняя строка: {status.value}"
+    for status in (EntityStatus.dismissed, EntityStatus.quit):
         e.status = status
         await db_session.commit()
         rows = await _rows(client, admin_user, e.id)
@@ -1104,5 +1108,7 @@ async def test_offer_then_reject_leaves_the_board(
     declined = await hired_with_team("Отказался От Оффера")
     assert await _rows(client, admin_user, declined.id) == []
 
+    # С 27.11.2026 и после практики «Отказ» на доске не показывается: доска —
+    # по статусам базы, такому человеку ставят «Мы уволили» / «Сам уволился».
     failed = await hired_with_team("Не Прошёл Практику", reached="probation")
-    assert len(await _rows(client, admin_user, failed.id)) == 1
+    assert await _rows(client, admin_user, failed.id) == []

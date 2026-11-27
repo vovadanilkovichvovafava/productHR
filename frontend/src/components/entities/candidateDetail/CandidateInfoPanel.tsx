@@ -15,7 +15,7 @@ import {
 import clsx from "clsx";
 import toast from "react-hot-toast";
 
-import { buildStageContainers, buildStagePickerOptions, readRemovedFunnels, readSystemHrTags } from "@/components/entities/candidateDetail/model";
+import { buildStageContainers, buildStagePickerOptions, exitStageOptions, readRemovedFunnels, readSystemHrTags } from "@/components/entities/candidateDetail/model";
 import { htmlToPlainText } from "@/components/entities/candidateDetail/timelineParts";
 
 import type { KanbanCard, KanbanColumn } from "@/services/api/candidates";
@@ -223,7 +223,12 @@ export const InfoTab = memo(function InfoTab({
   // Гром Виктор, 24.09.2026). Пикер её вообще не предлагает: после «Перешёл в
   // отдел» следующего этапа больше нет, и окно помечает текущий с плашкой
   // «Кандидат сейчас находится на этом этапе подбора».
-  const stagePickerOptions = useMemo(() => buildStagePickerOptions(columns), [columns]);
+  // «Отказ» или «Мы уволили» / «Сам уволился» — по истории человека (Мария,
+  // 27.11.2026): exitStageOptions.
+  const stagePickerOptions = useMemo(
+    () => exitStageOptions(buildStagePickerOptions(columns), card.worked_here, status),
+    [columns, card.worked_here, status],
+  );
 
   // ── Стек карточек по вакансиям: после слияния дубля у выжившего несколько
   // заявок. Тянем сквозную ленту активности (по заявке) и рендерим ОТДЕЛЬНУЮ

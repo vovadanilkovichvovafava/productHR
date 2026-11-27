@@ -126,10 +126,17 @@ async def test_dismissed_after_transfer_does_not_become_plain_rejection(
     e = await _person(db_session, organization, admin_user, EntityStatus.transferred)
     app = await _app(db_session, organization, department, admin_user, e, ApplicationStage.transferred)
 
-    # «Отказ» сотруднику — увольнение (правило DISMISS_AFTER_TRANSFER).
+    # С 27.11.2026 «Отказ» сотруднику не ставится вовсе (правило Марии,
+    # services/exit_status): только «Мы уволили» / «Сам уволился».
     r = await client.put(
         f"/api/vacancies/applications/{app.id}",
         json={"stage": "rejected", "expected_entity_id": e.id},
+        headers=_h(admin_user),
+    )
+    assert r.status_code == 400, r.text
+    r = await client.patch(
+        f"/api/candidates/{e.id}/status",
+        json={"status": "dismissed", "comment": "не справился"},
         headers=_h(admin_user),
     )
     assert r.status_code == 200, r.text

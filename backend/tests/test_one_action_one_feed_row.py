@@ -33,6 +33,10 @@ def _h(u):
 
 
 def _start_for(target: EntityStatus) -> EntityStatus:
+    # Уволить можно только того, кто был на практике или в отделе (правило
+    # Марии 27.11.2026, services/exit_status) — увольняем с практики.
+    if target in (EntityStatus.dismissed, EntityStatus.quit):
+        return EntityStatus.probation
     return EntityStatus.screening if target == EntityStatus.new else EntityStatus.new
 
 

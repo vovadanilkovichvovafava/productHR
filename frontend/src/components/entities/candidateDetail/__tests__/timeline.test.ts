@@ -4,7 +4,7 @@
  * «СТАТУС — комментарий», без стрелок «из → в»; закреп — первым.
  */
 import { describe, it, expect } from "vitest";
-import { buildTimelineRows, pinTimelineRow } from "../timeline";
+import { buildTimelineRows, departedStageTitle, pinTimelineRow } from "../timeline";
 import type { ActivityEvent } from "@/services/api/entities";
 
 const label = (s: string) =>
@@ -109,5 +109,29 @@ describe("увольнение — одна строка «Мы уволили �
   it("обычный отказ и упоминание в середине текста не трогаем", () => {
     expect(buildTimelineRows({ ...base, events: [ev("не вышел, мы уволили бы")] })[0]).toMatchObject({ title: "rejected", body: "не вышел, мы уволили бы" });
     expect(buildTimelineRows({ ...base, events: [ev("Мы уволили — x", "probation")] })[0]).toMatchObject({ title: "Практика" });
+  });
+});
+
+// Шапка блока воронки: «Отказ», который поставило увольнение (Мария, 27.11.2026).
+describe("departedStageTitle", () => {
+  const ev = (id: number, to: string, comment: string | null, at: string) =>
+    ({ id, from_stage: "probation", to_stage: to, comment, created_at: at, changed_by_name: null });
+
+  it("последний перевод в «Отказ» — увольнение: «Мы уволили»", () => {
+    expect(departedStageTitle("rejected", [
+      ev(1, "probation", null, "2026-11-12T06:54:42"),
+      ev(2, "rejected", "Мы уволили — скорость", "2026-11-18T14:00:57"),
+    ])).toBe("Мы уволили");
+  });
+
+  it("обычный отказ и не-отказ — без подмены", () => {
+    expect(departedStageTitle("rejected", [ev(1, "rejected", "не подошёл", "2026-11-18T14:00:57")])).toBeNull();
+    expect(departedStageTitle("probation", [ev(1, "probation", "Мы уволили — x", "2026-11-18T14:00:57")])).toBeNull();
+    // Уволили, потом вернули и отказали по-настоящему — смотрим последний.
+    expect(departedStageTitle("rejected", [
+      ev(1, "rejected", "Сам уволился", "2026-11-01T10:00:00"),
+      ev(2, "rejected", "не подошёл", "2026-11-20T10:00:00"),
+    ])).toBeNull();
+    expect(departedStageTitle("rejected", undefined)).toBeNull();
   });
 });

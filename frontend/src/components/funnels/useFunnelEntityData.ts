@@ -131,6 +131,7 @@ export function useFunnelEntityData(
           total_experience: ed.total_experience != null ? String(ed.total_experience) : undefined,
           source: ed.source,
           source_url: ed.source_url,
+          worked_here: entity.worked_here,
           extra_data: entity.extra_data || undefined,
         });
       })

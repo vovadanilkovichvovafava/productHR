@@ -856,6 +856,15 @@ async def update_application(
     update_data.pop("expected_entity_id", None)
     # Этап меняет ТОЛЬКО move_application — общий для всех путей смены этапа.
     new_stage = update_data.pop("stage", None)
+    # «Отказ» тому, кто был на практике или в отделе, нельзя — у него «Мы
+    # уволили» / «Сам уволился» (правило Марии 27.11.2026, services/exit_status).
+    if new_stage is not None and new_stage != old_stage:
+        from ...services.exit_status import exit_status_problem
+        _ent = await db.get(Entity, application.entity_id)
+        if _ent is not None:
+            _problem = await exit_status_problem(db, _ent, new_stage)
+            if _problem:
+                raise HTTPException(status_code=400, detail=_problem)
     update_data.pop("stage_order", None)
     for field, value in update_data.items():
         setattr(application, field, value)

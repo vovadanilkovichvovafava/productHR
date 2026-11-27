@@ -72,54 +72,6 @@ BOARD_STATUSES: List[EntityStatus] = [
     EntityStatus.quit,
 ]
 
-# Ушёл сам или не прошёл: отказ и «отозван» ПОСЛЕ того, как человек уже был в
-# отделе, — это уход, а не работа воронки. Такие строки остаются на доске и
-# показываются в группе «Уволен / Уволился» (владелец, 06.10.2026: «поменял
-# статус на отозван — он просто исчез из статусов, это неверно»). У кандидата
-# без отдела те же статусы на доску по-прежнему не попадают.
-DEPARTED_STATUSES: List[EntityStatus] = [
-    EntityStatus.rejected,
-    EntityStatus.withdrawn,
-]
-
-# Был ли человек «у нас»: доходил до практики или до отдела. Только таким
-# отказ показывается на доске как уход (Мария, 10.11.2026: «кандидат,
-# перешедший из „Оффер“ в „Отказ“, не попадает в „Уволен“, а исчезает с
-# дашборда… „Уволен“ ставится только тем, кто реально был в штате»). Раньше
-# хватало назначения в отдел — а его HR часто ставит уже на «Оффер принят»,
-# и отказавшийся от оффера всплывал в «Уволен».
-_STAFF_STAGES = ("probation", "transferred")
-_STAFF_NOTE_STAGES = ("probation", "transferred", "dismissed", "quit")
-
-
-async def _reached_staff(db: AsyncSession, entities) -> set:
-    """id тех, кто хоть раз был на практике / в отделе: история заявок, лента
-    карточки (переводы вне воронок и с доски) или дата выхода на практику."""
-    from ..models.database import StageTransition
-
-    ids = [e.id for e in entities]
-    if not ids:
-        return set()
-    out = set((await db.execute(
-        select(StageTransition.entity_id).where(
-            StageTransition.entity_id.in_(ids),
-            cast(StageTransition.to_stage, String).in_(_STAFF_STAGES),
-        )
-    )).scalars().all())
-    for e in entities:
-        if e.id in out:
-            continue
-        ex = e.extra_data if isinstance(e.extra_data, dict) else {}
-        if ex.get(_K_PRACTICE):
-            out.add(e.id)
-            continue
-        for n in ex.get("notes") or []:
-            if isinstance(n, dict) and n.get("stage") in _STAFF_NOTE_STAGES:
-                out.add(e.id)
-                break
-    return out
-
-
 # Подписи статусов для записи в ленте карточки — те же слова, что видит HR.
 STATUS_LABELS_RU = {
     EntityStatus.hired.value: "Оффер принят",
@@ -2748,40 +2700,23 @@ async def list_rows(
     if not org:
         raise HTTPException(403, "No organization access")
 
-    # Кто на доске: статусы жизненного цикла (BOARD_STATUSES) плюс те, кто уже
-    # стоял в отделе и ушёл — отказ/«отозван» у человека с назначением
-    # (DEPARTED_STATUSES). Кандидат без отдела с теми же статусами сюда не
-    # попадает: это работа воронки.
+    # Кто на доске: статусы жизненного цикла (BOARD_STATUSES) — те же, что во
+    # вкладках «Все кандидаты». С 27.11.2026 доска не подмешивает в «Мы
+    # уволили» «Отказ» и «Отозван» тех, кто был в отделе (Мария: «дашборд
+    # должен считать кандидатов по тем же статусам, что и база, без своих
+    # отдельных»): такому человеку «Отказ» больше не ставится — только «Мы
+    # уволили» / «Сам уволился» (services/exit_status.py), а прежних 29
+    # перевёл разовый шаг по их лентам (services/departed_rejected_sync.py).
     #
     # Статус сравниваем как ТЕКСТ, а не как enum: если значения dismissed/quit
     # ещё не доехали в pg-enum (ALTER TYPE в start.sh не отработал), обычный
     # IN по enum-у уронил бы весь запрос. С cast доска грузится всегда.
-    placed_ids = set((await db.execute(
-        select(BoardPlacement.entity_id).where(BoardPlacement.org_id == org.id)
-    )).scalars().all())
     on_board = cast(Entity.status, String).in_([s.value for s in BOARD_STATUSES])
-    if placed_ids:
-        on_board = or_(on_board, and_(
-            Entity.id.in_(placed_ids),
-            cast(Entity.status, String).in_([s.value for s in DEPARTED_STATUSES]),
-        ))
     entities = (await db.execute(
         select(Entity)
         .where(Entity.org_id == org.id, on_board, Entity.is_archived.is_not(True))
         .order_by(Entity.name)
     )).scalars().all()
-
-    # Отказ без практики и отдела (например, отказался от оффера) — не уход,
-    # а работа воронки: на доске его нет (10.11.2026).
-    departed_values = {s.value for s in DEPARTED_STATUSES}
-    _status = lambda e: e.status.value if hasattr(e.status, "value") else str(e.status)
-    maybe_departed = [e for e in entities if _status(e) in departed_values]
-    if maybe_departed:
-        stayed = await _reached_staff(db, maybe_departed)
-        entities = [
-            e for e in entities
-            if _status(e) not in departed_values or e.id in stayed
-        ]
 
     if not entities:
         return []
@@ -2912,7 +2847,7 @@ async def update_row(
             raise HTTPException(400, f"Неизвестный статус: {raw}")
         # Только статусы доски: иначе строка с «отказом» молча пропала бы
         # отсюда, и HR не понял бы, куда делся человек.
-        if new_status not in BOARD_STATUSES and new_status not in DEPARTED_STATUSES:
+        if new_status not in BOARD_STATUSES:
             raise HTTPException(400, f"Статус «{raw}» не относится к доске «Статусы»")
         # Перевод в «Уволен»/«Уволился» — это ВТОРАЯ дверь увольнения (первая —
         # DELETE /employees). Раньше доска меняла только статус карточки, а

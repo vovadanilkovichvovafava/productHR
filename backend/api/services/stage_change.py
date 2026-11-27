@@ -359,14 +359,16 @@ async def close_applications_for_departure(
     закрываются ВСЕ его живые заявки (Мария, 20.10.2026: «борд и АТС — единая
     система»). Одно место и для доски «Штат», и для карточки «Все кандидаты».
     Статус кандидата ставит вызывающий. Возвращает переводы (StageMove)."""
-    from ..models.database import Vacancy, VacancyStatus
+    from ..models.database import Vacancy
 
+    # И в ЗАКРЫТЫХ вакансиях тоже (Мария, 27.11.2026): вакансию закрывают,
+    # когда человека наняли, и его заявка «Перешёл в отдел» оставалась там
+    # навсегда — уволенный в списке, а в карточке «Перешёл в отдел».
     open_apps = (await db.execute(
         select(VacancyApplication)
         .join(Vacancy, VacancyApplication.vacancy_id == Vacancy.id)
         .where(
             VacancyApplication.entity_id == entity.id,
-            Vacancy.status != VacancyStatus.closed,
             Vacancy.deleted_at.is_(None),
         )
         # Единый порядок row-locks со всеми FOR UPDATE по заявкам (deadlock 27.08).

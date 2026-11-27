@@ -70,6 +70,24 @@ export interface TimelineSource {
  * доска «Штат»). В ленте это ОДНА строка «Мы уволили — причина», а не
  * «Отказ — Мы уволили — причина» (Мария, 18.11.2026: «получила 2 статуса»).
  */
+/**
+ * Подпись этапа в шапке блока воронки: «Отказ», который поставило увольнение
+ * (последний перевод в текущий этап — «Мы уволили — …»), называется «Мы
+ * уволили» / «Сам уволился». Иначе null — обычная подпись этапа.
+ */
+export function departedStageTitle(
+  currentStage: string,
+  events: ReadonlyArray<{ id?: number; to_stage: string; comment: string | null; created_at: string }> | undefined,
+): string | null {
+  if (currentStage !== "rejected" || !events?.length) return null;
+  let last: (typeof events)[number] | null = null;
+  for (const ev of events) {
+    if (ev.to_stage !== currentStage) continue;
+    if (!last || ev.created_at > last.created_at || (ev.created_at === last.created_at && (ev.id ?? 0) > (last.id ?? 0))) last = ev;
+  }
+  return last ? departedTitle(last.to_stage, last.comment)?.title ?? null : null;
+}
+
 export function departedTitle(
   toStage: string | null | undefined,
   comment: string | null | undefined,

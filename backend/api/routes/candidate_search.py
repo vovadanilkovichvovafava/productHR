@@ -662,6 +662,13 @@ async def change_candidate_status(
         .with_for_update(of=VacancyApplication)
     )).scalars().all()
 
+    # «Отказ» или увольнение — по истории человека (Мария, 27.11.2026).
+    if new_status != old_status:
+        from api.services.exit_status import exit_status_problem
+        problem = await exit_status_problem(db, entity, new_status)
+        if problem:
+            raise HTTPException(400, problem)
+
     move = None
     note = None
     departure_moves: list = []
@@ -889,6 +896,9 @@ class CandidateFunnelInfo(BaseModel):
     """Одна воронка кандидата для списка: название вакансии + его этап в ней."""
     vacancy_title: str
     stage: str
+    # Заявку закрыло увольнение (dismissed/quit): этап — «Отказ», но подпись
+    # «Мы уволили» / «Сам уволился» (Мария, 27.11.2026).
+    departed: Optional[str] = None
 
 
 class KanbanCard(BaseModel):
@@ -1142,6 +1152,25 @@ async def get_candidates_kanban(
                     rejection_map[row.entity_id] = row.rejection_reason
                 if row.status != VacancyStatus.closed:
                     _by_entity.setdefault(row.entity_id, []).append(row)
+            # Какие «Отказы» поставило увольнение — по последнему переводу заявки
+            # в «Отказ» (его комментарий «Мы уволили — …»).
+            from api.services.hr_stages import departure_of_comment
+            _rejected_ids = [
+                r.id for rows in _by_entity.values() for r in rows
+                if r.stage == ApplicationStage.rejected
+            ]
+            departed_by_app: dict = {}
+            if _rejected_ids:
+                _tr = await db.execute(
+                    select(StageTransition.application_id, StageTransition.comment)
+                    .where(
+                        StageTransition.application_id.in_(_rejected_ids),
+                        StageTransition.to_stage == ApplicationStage.rejected.value,
+                    )
+                    .order_by(StageTransition.created_at, StageTransition.id)
+                )
+                for app_id, comment in _tr.all():
+                    departed_by_app[app_id] = departure_of_comment(comment)
             # Подпись воронки в списке: та же «актуальная» заявка, по которой
             # считается общий статус кандидата (самая свежая среди живых; отказ
             # и резерв — только если живых воронок нет).
@@ -1166,6 +1195,7 @@ async def get_candidates_kanban(
                     CandidateFunnelInfo(
                         vacancy_title=r.title,
                         stage=r.stage.value if hasattr(r.stage, "value") else str(r.stage),
+                        departed=departed_by_app.get(r.id),
                     )
                     for r in ordered
                 ]

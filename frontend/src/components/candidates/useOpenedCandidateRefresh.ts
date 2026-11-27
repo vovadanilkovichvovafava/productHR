@@ -106,6 +106,7 @@ export function useOpenedCandidateRefresh(
           company: e.company ?? prev.company,
           tags: e.tags ?? prev.tags,
           photo_url: e.photo_url ?? prev.photo_url,
+          worked_here: e.worked_here ?? prev.worked_here,
           extra_data: mergedExtra,
         } as KanbanCard;
       });

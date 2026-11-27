@@ -719,6 +719,26 @@ async def init_database():
     except Exception as e:
         logger.warning(f"Departed apps sync failed (non-critical): {e}")
 
+    # «Отказ» после практики/отдела → «Мы уволили» / «Сам уволился» по ленте
+    # каждого (27.11.2026, services/departed_rejected_sync.py). Одноразово.
+    try:
+        from ..services.departed_rejected_sync import relabel_departed_rejected_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await relabel_departed_rejected_once(session)
+    except Exception as e:
+        logger.warning(f"Departed rejected sync failed (non-critical): {e}")
+
+    # Заявки уволенных в ЗАКРЫТЫХ вакансиях: до 27.11.2026 увольнение их не
+    # закрывало (services/departed_closed_vacancy_sync.py). Одноразово.
+    try:
+        from ..services.departed_closed_vacancy_sync import close_departed_closed_vacancy_apps_once
+        from ..database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await close_departed_closed_vacancy_apps_once(session)
+    except Exception as e:
+        logger.warning(f"Departed closed-vacancy sync failed (non-critical): {e}")
+
     # Случайное «закрыл — открыл» вакансии сделало всех её кандидатов
     # «предыдущей серией» (12.11.2026, services/vacancy_series.py). Одноразово.
     try:

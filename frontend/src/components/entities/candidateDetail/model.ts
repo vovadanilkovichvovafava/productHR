@@ -8,7 +8,7 @@
 // no I/O) and unit-tested in ./__tests__/model.test.ts — the safety net that
 // guards the upcoming component extraction (zero-regression requirement).
 // ================================================================
-import { BOARD_OTHER_LABEL, STAGE_LABEL_BY_STAGE } from "@/constants/hrStages";
+import { BOARD_OTHER_LABEL, DEPARTED_LABELS, STAGE_LABEL_BY_STAGE } from "@/constants/hrStages";
 import type { KanbanCard, KanbanColumn } from "@/services/api/candidates";
 import type { ActivityEvent, EntityFile } from "@/services/api/entities";
 import {
@@ -135,6 +135,42 @@ export function buildStagePickerOptions(
     .map((c) => ({ status: c.status, label: c.label, isRealStage: true as const }));
 }
 
+/** Статусы/этапы, которые сами говорят «был на практике или в отделе». */
+const WORKED_STATUSES = new Set(["probation", "transferred", "dismissed", "quit"]);
+
+/**
+ * Чем закончить работу с кандидатом (Мария, 27.11.2026): был на практике или в
+ * отделе — только «Мы уволили» / «Сам уволился», «Отказа» нет; не был — только
+ * «Отказ». Сервер проверяет то же (services/exit_status.py). ``workedHere`` —
+ * из карточки (GET /entities/{id}); пока её нет — по текущему статусу/этапу,
+ * а неизвестно — список не трогаем (решит сервер).
+ */
+export function exitStageOptions<T extends { status: string; label: string }>(
+  options: T[],
+  workedHere: boolean | undefined,
+  currentStatus?: string,
+): Array<T | { status: string; label: string; isRealStage: true }> {
+  const worked = workedHere || (currentStatus ? WORKED_STATUSES.has(currentStatus) : false);
+  if (workedHere === undefined && !worked) return options;
+  if (!worked) return options.filter((o) => !(o.status in DEPARTED_LABELS));
+  const out: Array<T | { status: string; label: string; isRealStage: true }> = [];
+  let placed = false;
+  const departed = () =>
+    Object.entries(DEPARTED_LABELS)
+      .filter(([status]) => !options.some((o) => o.status === status))
+      .map(([status, label]) => ({ status, label, isRealStage: true as const }));
+  for (const o of options) {
+    if (o.status === "rejected" || o.status === "withdrawn") {
+      if (!placed) { out.push(...departed()); placed = true; }
+      continue;
+    }
+    out.push(o);
+    if (o.status in DEPARTED_LABELS) placed = true;
+  }
+  if (!placed) out.push(...departed());
+  return out;
+}
+
 /**
  * Какой этап пикер помечает при ОТКРЫТИИ — следующий за текущим (Huntflow:
  * «переместить» почти всегда значит «на шаг вперёд», рекрутёру остаётся
@@ -193,7 +229,7 @@ export type ListRowStage = {
  * была без чипа вообще, и по списку нельзя было понять, где человек.
  */
 export function buildListRowStages(
-  funnels: Array<{ vacancy_title: string; stage: string }> | undefined,
+  funnels: Array<{ vacancy_title: string; stage: string; departed?: string | null }> | undefined,
   entityStatus: string | undefined,
   columns: KanbanColumn[],
   stageLabels: Record<string, string>,
@@ -202,7 +238,9 @@ export function buildListRowStages(
   if (list.length > 0) {
     return list.map((f) => ({
       stage: f.stage,
-      label: stageLabels[f.stage] || f.stage,
+      // «Отказ», поставленный увольнением, подписан «Мы уволили» / «Сам
+      // уволился» — как вкладка и лента (Мария, 27.11.2026).
+      label: (f.departed && DEPARTED_LABELS[f.departed]) || stageLabels[f.stage] || f.stage,
       vacancyTitle: f.vacancy_title,
     }));
   }

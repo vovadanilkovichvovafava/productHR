@@ -84,7 +84,8 @@ describe("выбор секций и колонок для выгрузки (11.
 
   it("секции: только отмеченные, в порядке доски; пусто — все", async () => {
     const { rowsOfSections } = await import("../StatusesPage");
-    const rows = [row(1, "probation"), row(2, "quit"), row(3, "transferred"), row(4, "rejected")];
+    // С 27.11.2026 секции доски — статусы базы: «Отказ» в «Мы уволили» не входит.
+    const rows = [row(1, "probation"), row(2, "quit"), row(3, "transferred"), row(4, "dismissed")];
     expect(rowsOfSections(rows, ["probation", "dismissed"]).map((r) => r.entity_id)).toEqual([4, 1]);
     expect(rowsOfSections(rows, []).map((r) => r.entity_id)).toEqual([3, 4, 2, 1]);
   });

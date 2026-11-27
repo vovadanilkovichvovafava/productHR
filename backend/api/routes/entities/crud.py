@@ -54,6 +54,18 @@ def _ensure_departure_via_stage_picker(old_status, new_status) -> None:
         raise HTTPException(400, DEPARTURE_REASON_REQUIRED)
 
 
+async def _ensure_exit_status(db, entity, old_status, new_status) -> None:
+    """«Отказ» тому, кто был на практике или в отделе, нельзя (Мария,
+    27.11.2026, services/exit_status)."""
+    if new_status is None or new_status == old_status:
+        return
+    from ...services.exit_status import exit_status_problem
+
+    problem = await exit_status_problem(db, entity, new_status)
+    if problem:
+        raise HTTPException(400, problem)
+
+
 @router.get("/")
 async def list_entities(
     type: Optional[EntityType] = None,
@@ -622,8 +634,12 @@ async def get_entity(
         scope_ids=await notes_scope_for_entity(entity.id, _scope_ids, db),
         hidden_vacancy_ids=await _hidden_vacancies(db, current_user, entity.org_id),
     )
+    from ...services.exit_status import has_worked
     return {
         **card,
+        # Был на практике или в отделе: окно смены этапа предлагает ему «Мы
+        # уволили» / «Сам уволился» вместо «Отказа» (Мария, 27.11.2026).
+        "worked_here": await has_worked(db, entity),
         # Transfer tracking
         "is_transferred": entity.is_transferred or False,
         "transferred_to_id": entity.transferred_to_id,
@@ -778,6 +794,7 @@ async def update_entity(
     _identity_before = identity_fingerprint(entity) if _is_candidate else None
     _status_before = entity.status
     _ensure_departure_via_stage_picker(_status_before, update_data.get('status'))
+    await _ensure_exit_status(db, entity, _status_before, update_data.get('status'))
 
     # extra_data: MERGE, не заменять — иначе частичный апдейт (напр. форма правки
     # шлёт только salary/city/...) затрёт notes, merged_from, timeline_reactions,
@@ -924,6 +941,7 @@ async def update_entity_status(
 
     old_status = entity.status
     _ensure_departure_via_stage_picker(old_status, data.status)
+    await _ensure_exit_status(db, entity, old_status, data.status)
     from ...services.stage_change import apply_entity_status, log_moves
 
     # Статус, единственная открытая заявка, выход из архива, песочница на

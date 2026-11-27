@@ -137,6 +137,8 @@ export const getCandidateTags = async (): Promise<string[]> => {
 export interface KanbanCard {
   id: number;
   name: string;
+  /** Из GET /entities/{id}: был на практике или в отделе (правило «Отказ» / «Мы уволили»). */
+  worked_here?: boolean;
   email?: string;
   phone?: string;
   telegram_username?: string;
@@ -172,7 +174,8 @@ export interface KanbanCard {
   funnel_count?: number;
   // Этапы по всем живым воронкам кандидата (живые впереди) — строка списка
   // показывает «Выполняет ТЗ · Трафик, Отказ · UAM».
-  funnels?: Array<{ vacancy_title: string; stage: string }>;
+  /** departed — заявку закрыло увольнение: этап «Отказ», подпись «Мы уволили» / «Сам уволился». */
+  funnels?: Array<{ vacancy_title: string; stage: string; departed?: string | null }>;
   rejection_reason?: string;
   /** Карточка из теневой базы — приходит в выдачу ТОЛЬКО при поиске, метится «Архив». */
   is_archived?: boolean;

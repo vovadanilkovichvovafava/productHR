@@ -46,7 +46,7 @@ import {
 } from "@/components/entities/candidateDetail/model";
 import { HfLoadingSpinner } from "@/components/ui/HfLoadingSpinner";
 import { backdropClose } from '@/utils/backdropClose';
-import { buildTimelineRows, pinTimelineRow } from "@/components/entities/candidateDetail/timeline";
+import { buildTimelineRows, departedStageTitle, pinTimelineRow } from "@/components/entities/candidateDetail/timeline";
 import { useCommentDraft } from "@/components/entities/candidateDetail/useCommentDraft";
 import { TimelineDot } from "@/components/entities/candidateDetail/timelineParts";
 import { useTimelineRowActions } from "@/components/entities/candidateDetail/useTimelineRowActions";
@@ -267,7 +267,8 @@ function CandidateVacancyCard({
   const timelineExpandTimerRef = useRef<number | null>(null);
 
   const statusLabel = getStageLabel(currentStage);
-  const stageTitle = statusLabel;
+  // «Отказ» от увольнения — «Мы уволили» / «Сам уволился», как во вкладке и ленте.
+  const stageTitle = departedStageTitle(currentStage, events) ?? statusLabel;
 
   // Цвет карточки СТРОГО по СВОЕМУ статусу контейнера: серая если этап
   // отклонён (rejected/fired/archived), иначе зелёная. Слияние НЕ

@@ -42,7 +42,7 @@ import { useFunnelVacancyAccess } from '@/components/funnels/useFunnelVacancyAcc
 import { useFunnelEntityData } from '@/components/funnels/useFunnelEntityData';
 import { useFunnelCandidates } from '@/components/funnels/useFunnelCandidates';
 import { useFunnelSelection } from '@/components/funnels/useFunnelSelection';
-import { FUNNEL_STAGE_ORDER, STAGE_LABEL_BY_STAGE } from '@/constants/hrStages';
+import { DEPARTED_LABELS, DEPARTED_STATUSES, FUNNEL_STAGE_ORDER, STAGE_LABEL_BY_STAGE } from '@/constants/hrStages';
 import TakeCandidateButton from '@/components/entities/TakeCandidateButton';
 import TagPicker from '@/components/entities/TagPicker';
 import { isPersonallyActive } from '@/utils/vacancy';
@@ -59,7 +59,7 @@ import { PriorRejectionPanel, usePriorRejectionGate, useVisiblePriorRejections }
 import CandidateVacancyCard from '@/components/entities/CandidateVacancyCard';
 
 import ResumeTab from '@/components/entities/candidateDetail/ResumeTab';
-import { buildStageContainers, readSystemHrTags, type StageContainer } from '@/components/entities/candidateDetail/model';
+import { buildStageContainers, exitStageOptions, readSystemHrTags, type StageContainer } from '@/components/entities/candidateDetail/model';
 import { EditCandidateModal } from '@/components/candidates/EditCandidateModal';
 import { HuntflowInfoRow } from '@/components/hr/HuntflowControls';
 
@@ -366,13 +366,20 @@ export default function RecruiterFunnelsPage() {
   }, [selectedCandidate, candidates, refreshActivity, blockIfArchived]);
 
   // Этапы для пикера — тот же список и лейблы, что были в StageDropdown.
+  // «Отказ» или «Мы уволили» / «Сам уволился» — по истории человека (Мария,
+  // 27.11.2026, exitStageOptions): у работавшего вместо «Отказа» увольнение,
+  // оно закрывает все его воронки, как в карточке «Все кандидаты».
   const stagePickerOptions = useMemo(
     () =>
-      STAGE_ORDER.map((stage) => ({
-        status: stage as ApplicationStage,
-        label: vacancyStageDropdownLabels[stage] || STAGE_LABELS[stage] || stage,
-      })),
-    [vacancyStageDropdownLabels],
+      exitStageOptions(
+        STAGE_ORDER.map((stage) => ({
+          status: stage as string,
+          label: vacancyStageDropdownLabels[stage] || STAGE_LABELS[stage] || stage,
+        })),
+        dupCard?.worked_here,
+        selectedCandidate?.stage as string | undefined,
+      ),
+    [vacancyStageDropdownLabels, dupCard?.worked_here, selectedCandidate?.stage],
   );
 
   // Действия карточки — общие с «Все кандидаты» (useCardActions). Здесь только
@@ -404,8 +411,13 @@ export default function RecruiterFunnelsPage() {
   // перестановка в списке воронки.
   const cardChangeStage = useCallback(
     async (appId: number, stage: string, comment?: string) => {
-      const newStage = stage as ApplicationStage;
-      const { ok } = await cardActions.changeApplicationStage(appId, newStage, comment);
+      // «Мы уволили» / «Сам уволился» — статус человека, а не этап заявки:
+      // закрывает «Отказом» все его воронки (как в карточке «Все кандидаты»).
+      const departed = DEPARTED_STATUSES.has(stage);
+      const newStage = (departed ? 'rejected' : stage) as ApplicationStage;
+      const { ok } = departed
+        ? await cardActions.changeStatusOutOfFunnel(stage, DEPARTED_LABELS[stage], comment)
+        : await cardActions.changeApplicationStage(appId, newStage, comment);
       if (ok) {
         // Двигаем кандидата на месте + СРАЗУ снимаем «предыдущую серию»: смена
         // этапа обновляет last_stage_change_at, отклик уходит из серой зоны.

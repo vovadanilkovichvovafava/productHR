@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 import { HuntflowOptionsIcon } from "@/components/hr/HuntflowControls";
 import type { KanbanColumn } from "@/services/api/candidates";
-import { boardColumnOf } from "@/constants/hrStages";
+import { DEPARTED_STATUSES, boardColumnOf } from "@/constants/hrStages";
 
 // Полоса этапов «Все кандидаты»: «Все», вкладки этапов со счётчиками (пустые
 // не показываются — 16.11.2026), стрелки прокрутки и кнопка настроек списка
@@ -38,9 +38,14 @@ export function limitBoardColumnsToStatuses(
  * подряд идущие пустые сворачивались в кнопку «N этапов без кандидатов» —
  * её читали как ещё один этап. Открытая вкладка остаётся на месте, даже если
  * в ней никого не осталось: иначе человек терял бы, где стоит.
+ * «Мы уволили» и «Сам уволился» видны всегда (Мария, 27.11.2026: «в базе нет
+ * статуса „Сам уволился“, его нужно добавить» — он был, но пустой и спрятан),
+ * как секции на доске «Штат».
  */
 export function visibleStageColumns(columns: KanbanColumn[], activeTab: string): KanbanColumn[] {
-  return columns.filter((c) => (c.count ?? c.cards.length) > 0 || c.status === activeTab);
+  return columns.filter(
+    (c) => (c.count ?? c.cards.length) > 0 || c.status === activeTab || DEPARTED_STATUSES.has(c.status),
+  );
 }
 
 export function CandidateStageTabs({
